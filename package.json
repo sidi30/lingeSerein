@@ -2,7 +2,7 @@
   "name": "linge-serein",
   "version": "0.0.1",
   "private": true,
-  "description": "Linge Serein — Service B2B de location de linge hôtelier",
+  "description": "Linge Sereinff — Service B2B de location de linge hôtelier",
   "workspaces": [
     "apps/*",
     "packages/*"
