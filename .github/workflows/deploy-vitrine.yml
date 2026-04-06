@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "apps/vitrine/**"
+      - "package-lock.json"
       - ".github/workflows/deploy-vitrine.yml"
   workflow_dispatch:
 
