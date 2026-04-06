@@ -4,6 +4,11 @@ const baseConfig = require("@lingengo/eslint-config");
 module.exports = [
   ...baseConfig,
   {
+    rules: {
+      "@typescript-eslint/no-non-null-assertion": "warn",
+    },
+  },
+  {
     ignores: [
       "dist/",
       ".next/",

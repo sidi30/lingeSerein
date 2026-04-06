@@ -160,7 +160,7 @@ async function main() {
     },
   });
 
-  const confortTapis = await prisma.product.upsert({
+  const _confortTapis = await prisma.product.upsert({
     where: {
       operatorId_category_range: {
         operatorId: operator.id,
@@ -182,7 +182,7 @@ async function main() {
     },
   });
 
-  const hotelTapis = await prisma.product.upsert({
+  const _hotelTapis = await prisma.product.upsert({
     where: {
       operatorId_category_range: {
         operatorId: operator.id,
@@ -204,7 +204,7 @@ async function main() {
     },
   });
 
-  const prestigeTapis = await prisma.product.upsert({
+  const _prestigeTapis = await prisma.product.upsert({
     where: {
       operatorId_category_range: {
         operatorId: operator.id,
@@ -414,7 +414,9 @@ async function main() {
 
   // ---- Subscription Products ----
   await prisma.subscriptionProduct.upsert({
-    where: { subscriptionId_productId: { subscriptionId: sub1.id, productId: prestigeServiettes.id } },
+    where: {
+      subscriptionId_productId: { subscriptionId: sub1.id, productId: prestigeServiettes.id },
+    },
     update: {},
     create: { subscriptionId: sub1.id, productId: prestigeServiettes.id, quantity: 60 },
   });
@@ -426,7 +428,9 @@ async function main() {
   });
 
   await prisma.subscriptionProduct.upsert({
-    where: { subscriptionId_productId: { subscriptionId: sub3.id, productId: confortServiettes.id } },
+    where: {
+      subscriptionId_productId: { subscriptionId: sub3.id, productId: confortServiettes.id },
+    },
     update: {},
     create: { subscriptionId: sub3.id, productId: confortServiettes.id, quantity: 20 },
   });
@@ -435,9 +439,27 @@ async function main() {
 
   // ---- Client Stock ----
   const clientStockData = [
-    { userId: client1.id, productRange: "PRESTIGE" as const, cleanSets: 40, dirtySets: 15, totalInCirculation: 60 },
-    { userId: client2.id, productRange: "HOTEL" as const, cleanSets: 25, dirtySets: 10, totalInCirculation: 40 },
-    { userId: client3.id, productRange: "CONFORT" as const, cleanSets: 5, dirtySets: 12, totalInCirculation: 20 },
+    {
+      userId: client1.id,
+      productRange: "PRESTIGE" as const,
+      cleanSets: 40,
+      dirtySets: 15,
+      totalInCirculation: 60,
+    },
+    {
+      userId: client2.id,
+      productRange: "HOTEL" as const,
+      cleanSets: 25,
+      dirtySets: 10,
+      totalInCirculation: 40,
+    },
+    {
+      userId: client3.id,
+      productRange: "CONFORT" as const,
+      cleanSets: 5,
+      dirtySets: 12,
+      totalInCirculation: 20,
+    },
   ];
 
   for (const cs of clientStockData) {
@@ -452,14 +474,37 @@ async function main() {
 
   // ---- Operator Stock ----
   const opStockData = [
-    { operatorId: operator.id, productRange: "CONFORT" as const, cleanAvailable: 200, dirtyPending: 50, inCirculation: 120, retired: 10 },
-    { operatorId: operator.id, productRange: "HOTEL" as const, cleanAvailable: 150, dirtyPending: 30, inCirculation: 80, retired: 5 },
-    { operatorId: operator.id, productRange: "PRESTIGE" as const, cleanAvailable: 100, dirtyPending: 20, inCirculation: 60, retired: 2 },
+    {
+      operatorId: operator.id,
+      productRange: "CONFORT" as const,
+      cleanAvailable: 200,
+      dirtyPending: 50,
+      inCirculation: 120,
+      retired: 10,
+    },
+    {
+      operatorId: operator.id,
+      productRange: "HOTEL" as const,
+      cleanAvailable: 150,
+      dirtyPending: 30,
+      inCirculation: 80,
+      retired: 5,
+    },
+    {
+      operatorId: operator.id,
+      productRange: "PRESTIGE" as const,
+      cleanAvailable: 100,
+      dirtyPending: 20,
+      inCirculation: 60,
+      retired: 2,
+    },
   ];
 
   for (const os of opStockData) {
     await prisma.operatorStock.upsert({
-      where: { operatorId_productRange: { operatorId: os.operatorId, productRange: os.productRange } },
+      where: {
+        operatorId_productRange: { operatorId: os.operatorId, productRange: os.productRange },
+      },
       update: {},
       create: os,
     });
@@ -484,7 +529,12 @@ async function main() {
       timeSlot: "08:00-10:00",
       items: {
         create: [
-          { productId: prestigeServiettes.id, quantity: 10, unitCents: 1400, totalCents: 1400 * 10 },
+          {
+            productId: prestigeServiettes.id,
+            quantity: 10,
+            unitCents: 1400,
+            totalCents: 1400 * 10,
+          },
         ],
       },
     },
@@ -734,8 +784,20 @@ async function main() {
         driverId: driverUser.id,
         date: yesterday,
         status: "COMPLETED",
-        startedAt: new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 8, 0),
-        completedAt: new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 11, 30),
+        startedAt: new Date(
+          yesterday.getFullYear(),
+          yesterday.getMonth(),
+          yesterday.getDate(),
+          8,
+          0,
+        ),
+        completedAt: new Date(
+          yesterday.getFullYear(),
+          yesterday.getMonth(),
+          yesterday.getDate(),
+          11,
+          30,
+        ),
         notes: "Tournée matinale terminée",
         stops: {
           create: [
@@ -748,7 +810,13 @@ async function main() {
               setsDelivered: 10,
               dirtyPickedUp: 10,
               qrCodeScanned: true,
-              completedAt: new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 8, 40),
+              completedAt: new Date(
+                yesterday.getFullYear(),
+                yesterday.getMonth(),
+                yesterday.getDate(),
+                8,
+                40,
+              ),
             },
             {
               clientId: client2.id,
@@ -759,7 +827,13 @@ async function main() {
               setsDelivered: 6,
               dirtyPickedUp: 5,
               qrCodeScanned: true,
-              completedAt: new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 9, 15),
+              completedAt: new Date(
+                yesterday.getFullYear(),
+                yesterday.getMonth(),
+                yesterday.getDate(),
+                9,
+                15,
+              ),
             },
           ],
         },
@@ -775,12 +849,48 @@ async function main() {
   if (existingMovements === 0) {
     await prisma.stockMovement.createMany({
       data: [
-        { userId: client1.id, productRange: "PRESTIGE", type: "DELIVERY", quantity: 10, reason: "Livraison #LNG-2026-000001" },
-        { userId: client1.id, productRange: "PRESTIGE", type: "PICKUP_DIRTY", quantity: -8, reason: "Récupération linge sale" },
-        { userId: client2.id, productRange: "HOTEL", type: "DELIVERY", quantity: 6, reason: "Livraison régulière" },
-        { userId: client2.id, productRange: "HOTEL", type: "PICKUP_DIRTY", quantity: -5, reason: "Récupération linge sale" },
-        { userId: client3.id, productRange: "CONFORT", type: "WASH_COMPLETE", quantity: 8, reason: "Lot lavé — retour en stock" },
-        { userId: client3.id, productRange: "CONFORT", type: "ADJUSTMENT", quantity: -3, reason: "Ajustement inventaire" },
+        {
+          userId: client1.id,
+          productRange: "PRESTIGE",
+          type: "DELIVERY",
+          quantity: 10,
+          reason: "Livraison #LNG-2026-000001",
+        },
+        {
+          userId: client1.id,
+          productRange: "PRESTIGE",
+          type: "PICKUP_DIRTY",
+          quantity: -8,
+          reason: "Récupération linge sale",
+        },
+        {
+          userId: client2.id,
+          productRange: "HOTEL",
+          type: "DELIVERY",
+          quantity: 6,
+          reason: "Livraison régulière",
+        },
+        {
+          userId: client2.id,
+          productRange: "HOTEL",
+          type: "PICKUP_DIRTY",
+          quantity: -5,
+          reason: "Récupération linge sale",
+        },
+        {
+          userId: client3.id,
+          productRange: "CONFORT",
+          type: "WASH_COMPLETE",
+          quantity: 8,
+          reason: "Lot lavé — retour en stock",
+        },
+        {
+          userId: client3.id,
+          productRange: "CONFORT",
+          type: "ADJUSTMENT",
+          quantity: -3,
+          reason: "Ajustement inventaire",
+        },
       ],
     });
     console.log("  Stock Movements: 6 entries");
