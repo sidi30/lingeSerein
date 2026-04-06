@@ -1,0 +1,29 @@
+services:
+  mailer:
+    build: .
+    container_name: lingeserein-mailer
+    restart: unless-stopped
+    environment:
+      - GMAIL_USER=lingeserein@gmail.com
+      - GMAIL_APP_PASSWORD=@OrangeLoss
+      - ALLOWED_ORIGIN=https://lingeserein.fr
+      - PORT=3010
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.mailer.rule=Host(`api.lingeserein.fr`)"
+      - "traefik.http.routers.mailer.entrypoints=https"
+      - "traefik.http.routers.mailer.tls=true"
+      - "traefik.http.routers.mailer.tls.certresolver=letsencrypt-dns"
+      - "traefik.http.routers.mailer-http.rule=Host(`api.lingeserein.fr`)"
+      - "traefik.http.routers.mailer-http.entrypoints=http"
+      - "traefik.http.routers.mailer-http.middlewares=mailer-redirect"
+      - "traefik.http.middlewares.mailer-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.mailer-redirect.redirectscheme.permanent=true"
+      - "traefik.http.services.mailer.loadbalancer.server.port=3010"
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:
+    external: true
