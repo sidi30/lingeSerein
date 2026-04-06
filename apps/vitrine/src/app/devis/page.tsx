@@ -1,416 +1,573 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Minus, Plus, Check, Truck, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, Percent, TrendingUp, Calendar, Truck } from "lucide-react";
 
-/* ─── Données tarifs ─── */
+/* ─── Catalogue produits ─── */
 
-const gammes = [
-  {
-    id: "confort",
-    name: "Confort",
-    grammage: "500 g/m²",
-    desc: "Coton doux, idéal pour les locations saisonnières",
-    items: ["Drap de bain 70×140", "Serviette 50×90", "Tapis de bain 50×70"],
-    prices: [600, 550, 500, 450], // cents par palier
-  },
-  {
-    id: "hotel",
-    name: "Hôtel",
-    grammage: "550 g/m² coton peigné",
-    desc: "Qualité hôtelière, toucher soyeux",
-    items: ["Drap de bain 70×140", "Serviette 50×90", "Tapis de bain 50×70", "Gant de toilette"],
-    prices: [900, 850, 800, 700],
-  },
-  {
-    id: "prestige",
-    name: "Prestige",
-    grammage: "600 g/m² coton égyptien",
-    desc: "Le meilleur pour vos établissements haut de gamme",
-    items: ["Drap de bain 100×150", "Serviette peignée", "Tapis épais", "Gant de toilette"],
-    prices: [1400, 1300, 1200, 1100],
-  },
-];
-
-const frequences = [
-  { id: "ponctuel", label: "Ponctuel", desc: "Commande unique", factor: 1 },
-  { id: "2x", label: "2× / mois", desc: "Bi-mensuel", factor: 0.95 },
-  { id: "4x", label: "4× / mois", desc: "Hebdomadaire", factor: 0.9 },
-  { id: "8x", label: "8× / mois", desc: "2 fois par semaine", factor: 0.85 },
-];
-
-function getPricePerSet(gamme: (typeof gammes)[0], qty: number): number {
-  if (qty >= 20) return gamme.prices[3]!;
-  if (qty >= 10) return gamme.prices[2]!;
-  if (qty >= 4) return gamme.prices[1]!;
-  return gamme.prices[0]!;
+interface Product {
+  id: string;
+  name: string;
+  shortName: string;
+  costCents: number; // ton prix d'achat
+  prices: Record<string, number>; // prix de vente par gamme (cents)
 }
 
-function formatEur(cents: number): string {
-  return (cents / 100).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+const products: Product[] = [
+  {
+    id: "drap",
+    name: "Drap de bain",
+    shortName: "Draps",
+    costCents: 120,
+    prices: { confort: 250, hotel: 380, prestige: 550 },
+  },
+  {
+    id: "serviette",
+    name: "Serviette",
+    shortName: "Serviettes",
+    costCents: 80,
+    prices: { confort: 180, hotel: 270, prestige: 420 },
+  },
+  {
+    id: "tapis",
+    name: "Tapis de bain",
+    shortName: "Tapis",
+    costCents: 90,
+    prices: { confort: 170, hotel: 250, prestige: 430 },
+  },
+  {
+    id: "gant",
+    name: "Gant de toilette",
+    shortName: "Gants",
+    costCents: 30,
+    prices: { confort: 0, hotel: 100, prestige: 150 },
+  },
+];
+
+const gammes = [
+  { id: "confort", name: "Confort", label: "500 g/m²" },
+  { id: "hotel", name: "Hôtel", label: "550 g/m² peigné" },
+  { id: "prestige", name: "Prestige", label: "600 g/m² égyptien" },
+];
+
+function fmt(cents: number): string {
+  return (
+    (cents / 100).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) +
+    " €"
+  );
+}
+
+function fmtShort(cents: number): string {
+  return (
+    (cents / 100).toLocaleString("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) +
+    " €"
+  );
+}
+
+/* ─── Slider component ─── */
+
+function Slider({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  suffix = "",
+  color = "forest",
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+  suffix?: string;
+  color?: string;
+}) {
+  const pct = ((value - min) / (max - min)) * 100;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        <span className={`font-serif text-lg font-bold text-${color}`}>
+          {value}
+          {suffix}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="slider w-full"
+        style={{ "--pct": `${pct}%` } as React.CSSProperties}
+      />
+      <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+        <span>
+          {min}
+          {suffix}
+        </span>
+        <span>
+          {max}
+          {suffix}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 /* ─── Page ─── */
 
 export default function DevisPage() {
-  const [selectedGamme, setSelectedGamme] = useState("hotel");
-  const [qty, setQty] = useState(8);
-  const [selectedFreq, setSelectedFreq] = useState("ponctuel");
+  // Gamme
+  const [gammeId, setGammeId] = useState("hotel");
 
-  const gamme = gammes.find((g) => g.id === selectedGamme)!;
-  const freq = frequences.find((f) => f.id === selectedFreq)!;
+  // Quantités par produit
+  const [qtys, setQtys] = useState<Record<string, number>>({
+    drap: 8,
+    serviette: 8,
+    tapis: 8,
+    gant: 4,
+  });
 
-  const estimate = useMemo(() => {
-    const pricePerSet = getPricePerSet(gamme, qty);
-    const subtotal = pricePerSet * qty;
-    const livraison = qty >= 4 ? 0 : 500; // 5€ si < 4 sets
-    const freqDiscount = freq.factor < 1 ? Math.round(subtotal * (1 - freq.factor)) : 0;
-    const total = subtotal - freqDiscount + livraison;
-    return { pricePerSet, subtotal, livraison, freqDiscount, total };
-  }, [gamme, qty, freq]);
+  // Fréquence (livraisons / mois)
+  const [livraisonsParMois, setLivraisonsParMois] = useState(4);
+
+  // Durée engagement
+  const [mois, setMois] = useState(6);
+
+  // Réduction client (%)
+  const [reduction, setReduction] = useState(0);
+
+  const updateQty = useCallback((id: string, val: number) => {
+    setQtys((prev) => ({ ...prev, [id]: val }));
+  }, []);
+
+  const gamme = gammes.find((g) => g.id === gammeId)!;
+
+  const calc = useMemo(() => {
+    let totalVenteLivraison = 0;
+    let totalCoutLivraison = 0;
+    const lignes: { name: string; qty: number; prixUnit: number; cout: number; total: number }[] =
+      [];
+
+    for (const p of products) {
+      const qty = qtys[p.id] ?? 0;
+      if (qty === 0) continue;
+      const prixUnit = p.prices[gammeId] ?? 0;
+      if (prixUnit === 0) continue;
+      const total = prixUnit * qty;
+      const cout = p.costCents * qty;
+      totalVenteLivraison += total;
+      totalCoutLivraison += cout;
+      lignes.push({ name: p.shortName, qty, prixUnit, cout, total });
+    }
+
+    const livraisonFrais =
+      totalVenteLivraison > 0 && Object.values(qtys).reduce((a, b) => a + b, 0) < 4 ? 500 : 0;
+
+    // Réduction
+    const reductionMontant = Math.round(totalVenteLivraison * (reduction / 100));
+    const venteApresReduc = totalVenteLivraison - reductionMontant + livraisonFrais;
+
+    // Marge par livraison
+    const margeLivraison = venteApresReduc - totalCoutLivraison;
+    const margePct = venteApresReduc > 0 ? (margeLivraison / venteApresReduc) * 100 : 0;
+
+    // Par mois
+    const venteMois = venteApresReduc * livraisonsParMois;
+    const coutMois = totalCoutLivraison * livraisonsParMois;
+    const margeMois = venteMois - coutMois;
+
+    // Total engagement
+    const venteTotal = venteMois * mois;
+    const coutTotal = coutMois * mois;
+    const margeTotal = venteTotal - coutTotal;
+
+    return {
+      lignes,
+      totalVenteLivraison,
+      totalCoutLivraison,
+      livraisonFrais,
+      reductionMontant,
+      venteApresReduc,
+      margeLivraison,
+      margePct,
+      venteMois,
+      margeMois,
+      venteTotal,
+      coutTotal,
+      margeTotal,
+    };
+  }, [qtys, gammeId, reduction, livraisonsParMois, mois]);
 
   return (
     <div className="min-h-screen bg-cream">
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-sm border-b border-lavender-100 sticky top-0 z-50">
-        <div className="mx-auto max-w-6xl px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 h-14 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2">
             <Image
               src="/images/logo_full.svg"
               alt="Linge Serein"
-              width={160}
-              height={70}
-              className="h-10 w-auto"
+              width={140}
+              height={60}
+              className="h-9 w-auto"
             />
           </Link>
           <Link
             href="/"
-            className="flex items-center gap-2 text-sm text-gray-500 hover:text-forest transition-colors"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-forest transition-colors"
           >
-            <ArrowLeft size={16} />
-            Retour au site
+            <ArrowLeft size={15} />
+            Retour
           </Link>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-12 md:py-20">
+      <main className="mx-auto max-w-7xl px-4 sm:px-6 py-8 md:py-14">
         {/* Title */}
-        <div className="text-center mb-16">
-          <span className="inline-block text-sm font-medium uppercase tracking-[0.2em] text-lavender-600 mb-4">
-            Simulateur
-          </span>
-          <h1 className="font-serif text-4xl md:text-5xl font-bold text-forest">
-            Estimez votre devis
+        <div className="text-center mb-10">
+          <h1 className="font-serif text-3xl md:text-4xl font-bold text-forest">
+            Simulateur de devis
           </h1>
-          <p className="mt-4 text-gray-500 max-w-xl mx-auto text-lg">
-            Configurez votre besoin en 3 étapes et obtenez une estimation instantanée.
+          <p className="mt-2 text-gray-500 text-sm">
+            Choisissez vos produits, ajustez les quantités, visualisez marge et total
+            instantanément.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left — Configuration */}
-          <div className="lg:col-span-2 space-y-10">
-            {/* Step 1 — Gamme */}
-            <section>
-              <div className="flex items-center gap-3 mb-6">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-forest text-sm font-bold text-white">
-                  1
-                </span>
-                <h2 className="font-serif text-xl font-bold text-forest">Choisissez votre gamme</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* ── LEFT: Configuration ── */}
+          <div className="lg:col-span-7 space-y-6">
+            {/* Gamme */}
+            <div className="rounded-2xl bg-white border border-lavender-100 p-5">
+              <h2 className="font-serif text-base font-bold text-forest mb-4">Gamme</h2>
+              <div className="grid grid-cols-3 gap-2">
                 {gammes.map((g) => (
                   <button
                     key={g.id}
-                    onClick={() => setSelectedGamme(g.id)}
-                    className={`relative text-left rounded-2xl p-6 transition-all duration-300 ${
-                      selectedGamme === g.id
-                        ? "bg-forest text-white shadow-lg shadow-forest/20 ring-2 ring-forest"
-                        : "bg-white border border-lavender-100 hover:border-lavender-300 hover:shadow-md"
+                    onClick={() => setGammeId(g.id)}
+                    className={`rounded-xl px-3 py-3 text-center transition-all duration-200 ${
+                      gammeId === g.id
+                        ? "bg-forest text-white shadow-md"
+                        : "bg-lavender-50 text-gray-600 hover:bg-lavender-100"
                     }`}
                   >
-                    {selectedGamme === g.id && (
-                      <Check size={18} className="absolute top-4 right-4 text-lavender-300" />
-                    )}
-                    <h3
-                      className={`font-serif text-lg font-bold mb-1 ${selectedGamme === g.id ? "text-white" : "text-forest"}`}
-                    >
-                      {g.name}
-                    </h3>
+                    <p className="font-semibold text-sm">{g.name}</p>
                     <p
-                      className={`text-xs mb-3 ${selectedGamme === g.id ? "text-white/60" : "text-gray-400"}`}
+                      className={`text-[10px] mt-0.5 ${gammeId === g.id ? "text-white/60" : "text-gray-400"}`}
                     >
-                      {g.grammage}
+                      {g.label}
                     </p>
-                    <p
-                      className={`text-sm leading-relaxed ${selectedGamme === g.id ? "text-white/80" : "text-gray-500"}`}
-                    >
-                      {g.desc}
-                    </p>
-                    <div className="mt-4 pt-3 border-t border-white/10">
-                      <span
-                        className={`font-serif text-2xl font-bold ${selectedGamme === g.id ? "text-white" : "text-forest"}`}
-                      >
-                        dès {(g.prices[3]! / 100).toFixed(0)} €
-                      </span>
-                      <span
-                        className={`text-xs ml-1 ${selectedGamme === g.id ? "text-white/50" : "text-gray-400"}`}
-                      >
-                        / set
-                      </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Produits — sliders */}
+            <div className="rounded-2xl bg-white border border-lavender-100 p-5">
+              <h2 className="font-serif text-base font-bold text-forest mb-5">
+                Produits par livraison
+              </h2>
+              <div className="space-y-6">
+                {products.map((p) => {
+                  const price = p.prices[gammeId] ?? 0;
+                  if (price === 0 && gammeId === "confort" && p.id === "gant") {
+                    return (
+                      <div key={p.id} className="opacity-40">
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="text-gray-500">{p.name}</span>
+                          <span className="text-xs text-gray-400">Non inclus en Confort</span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={p.id}>
+                      <Slider
+                        label={`${p.name} — ${fmtShort(price)} / pièce`}
+                        value={qtys[p.id] ?? 0}
+                        onChange={(v) => updateQty(p.id, v)}
+                        min={0}
+                        max={50}
+                      />
                     </div>
-                  </button>
-                ))}
+                  );
+                })}
               </div>
-              {/* Contenu du set */}
-              <div className="mt-4 flex flex-wrap gap-2">
-                {gamme.items.map((item) => (
-                  <span
-                    key={item}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-lavender-50 px-3 py-1 text-xs text-lavender-700"
-                  >
-                    <span className="w-1 h-1 rounded-full bg-lavender-400" />
-                    {item}
-                  </span>
-                ))}
-              </div>
-            </section>
+            </div>
 
-            {/* Step 2 — Quantité */}
-            <section>
-              <div className="flex items-center gap-3 mb-6">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-forest text-sm font-bold text-white">
-                  2
-                </span>
-                <h2 className="font-serif text-xl font-bold text-forest">Nombre de sets</h2>
-              </div>
-              <div className="flex items-center gap-6 rounded-2xl bg-white border border-lavender-100 p-6">
-                <button
-                  onClick={() => setQty(Math.max(1, qty - 1))}
-                  className="flex h-12 w-12 items-center justify-center rounded-xl bg-lavender-50 text-forest hover:bg-lavender-100 transition-colors"
-                >
-                  <Minus size={20} />
-                </button>
-                <div className="flex-1 text-center">
-                  <span className="font-serif text-5xl font-bold text-forest">{qty}</span>
-                  <p className="text-sm text-gray-400 mt-1">
-                    set{qty > 1 ? "s" : ""} par livraison
-                  </p>
+            {/* Fréquence + Durée + Réduction */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="rounded-2xl bg-white border border-lavender-100 p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Truck size={16} className="text-forest" />
+                  <h2 className="font-serif text-sm font-bold text-forest">Livraisons / mois</h2>
                 </div>
-                <button
-                  onClick={() => setQty(Math.min(100, qty + 1))}
-                  className="flex h-12 w-12 items-center justify-center rounded-xl bg-lavender-50 text-forest hover:bg-lavender-100 transition-colors"
-                >
-                  <Plus size={20} />
-                </button>
+                <Slider
+                  label=""
+                  value={livraisonsParMois}
+                  onChange={setLivraisonsParMois}
+                  min={1}
+                  max={12}
+                  suffix="×"
+                />
               </div>
-              {/* Raccourcis */}
-              <div className="flex gap-2 mt-3">
-                {[4, 8, 12, 20, 30].map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => setQty(n)}
-                    className={`rounded-full px-4 py-1.5 text-xs font-medium transition-all ${
-                      qty === n
-                        ? "bg-forest text-white"
-                        : "bg-white border border-lavender-100 text-gray-500 hover:border-lavender-300"
-                    }`}
-                  >
-                    {n} sets
-                  </button>
-                ))}
-              </div>
-            </section>
 
-            {/* Step 3 — Fréquence */}
-            <section>
-              <div className="flex items-center gap-3 mb-6">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-forest text-sm font-bold text-white">
-                  3
-                </span>
-                <h2 className="font-serif text-xl font-bold text-forest">Fréquence de livraison</h2>
+              <div className="rounded-2xl bg-white border border-lavender-100 p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Calendar size={16} className="text-forest" />
+                  <h2 className="font-serif text-sm font-bold text-forest">Engagement</h2>
+                </div>
+                <Slider label="" value={mois} onChange={setMois} min={1} max={24} suffix=" mois" />
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {frequences.map((f) => (
-                  <button
-                    key={f.id}
-                    onClick={() => setSelectedFreq(f.id)}
-                    className={`relative rounded-2xl p-5 text-left transition-all duration-300 ${
-                      selectedFreq === f.id
-                        ? "bg-forest text-white shadow-lg shadow-forest/20"
-                        : "bg-white border border-lavender-100 hover:border-lavender-300 hover:shadow-md"
-                    }`}
-                  >
-                    <p
-                      className={`font-semibold text-sm mb-0.5 ${selectedFreq === f.id ? "text-white" : "text-forest"}`}
-                    >
-                      {f.label}
-                    </p>
-                    <p
-                      className={`text-xs ${selectedFreq === f.id ? "text-white/60" : "text-gray-400"}`}
-                    >
-                      {f.desc}
-                    </p>
-                    {f.factor < 1 && (
-                      <span
-                        className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          selectedFreq === f.id
-                            ? "bg-white/20 text-white"
-                            : "bg-lavender-50 text-lavender-600"
-                        }`}
-                      >
-                        -{Math.round((1 - f.factor) * 100)}%
-                      </span>
-                    )}
-                  </button>
-                ))}
+
+              <div className="rounded-2xl bg-white border border-lavender-100 p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Percent size={16} className="text-lavender-600" />
+                  <h2 className="font-serif text-sm font-bold text-forest">Réduction client</h2>
+                </div>
+                <Slider
+                  label=""
+                  value={reduction}
+                  onChange={setReduction}
+                  min={0}
+                  max={30}
+                  suffix="%"
+                  color="lavender-600"
+                />
               </div>
-            </section>
+            </div>
           </div>
 
-          {/* Right — Résumé devis */}
-          <div className="lg:col-span-1">
-            <div className="sticky top-24 rounded-3xl bg-white border border-lavender-100 shadow-xl shadow-lavender-100/30 overflow-hidden">
-              {/* Header */}
-              <div className="bg-forest px-6 py-5">
-                <h3 className="font-serif text-lg font-bold text-white">Votre estimation</h3>
-                <p className="text-xs text-white/60 mt-0.5">
-                  Prix indicatif, devis final sur demande
-                </p>
-              </div>
-
-              <div className="p-6 space-y-4">
-                {/* Ligne gamme */}
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Gamme</span>
-                  <span className="font-semibold text-forest">{gamme.name}</span>
+          {/* ── RIGHT: Résumé ── */}
+          <div className="lg:col-span-5">
+            <div className="sticky top-20 space-y-4">
+              {/* Récap par livraison */}
+              <div className="rounded-2xl bg-white border border-lavender-100 shadow-lg shadow-lavender-100/20 overflow-hidden">
+                <div className="bg-forest px-5 py-4">
+                  <h3 className="font-serif text-base font-bold text-white">Récap par livraison</h3>
+                  <p className="text-[11px] text-white/50">Gamme {gamme.name}</p>
                 </div>
-
-                {/* Ligne prix unitaire */}
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Prix / set</span>
-                  <span className="font-semibold text-forest">
-                    {formatEur(estimate.pricePerSet)}
-                  </span>
-                </div>
-
-                {/* Ligne quantité */}
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Quantité</span>
-                  <span className="font-semibold text-forest">
-                    {qty} set{qty > 1 ? "s" : ""}
-                  </span>
-                </div>
-
-                <div className="h-px bg-lavender-100" />
-
-                {/* Sous-total */}
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Sous-total</span>
-                  <span className="text-gray-700">{formatEur(estimate.subtotal)}</span>
-                </div>
-
-                {/* Livraison */}
-                <div className="flex justify-between text-sm">
-                  <div className="flex items-center gap-1.5 text-gray-500">
-                    <Truck size={14} />
-                    Livraison
-                  </div>
-                  <span
-                    className={
-                      estimate.livraison === 0 ? "font-semibold text-forest" : "text-gray-700"
-                    }
-                  >
-                    {estimate.livraison === 0 ? "Offerte" : formatEur(estimate.livraison)}
-                  </span>
-                </div>
-
-                {/* Réduction fréquence */}
-                {estimate.freqDiscount > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <div className="flex items-center gap-1.5 text-lavender-600">
-                      <Sparkles size={14} />
-                      Réduction {freq.label}
-                    </div>
-                    <span className="font-semibold text-lavender-600">
-                      -{formatEur(estimate.freqDiscount)}
-                    </span>
-                  </div>
-                )}
-
-                <div className="h-px bg-lavender-100" />
-
-                {/* Total */}
-                <div className="flex justify-between items-end">
-                  <span className="text-sm text-gray-500">Total estimé</span>
-                  <div className="text-right">
-                    <span className="font-serif text-3xl font-bold text-forest">
-                      {formatEur(estimate.total)}
-                    </span>
-                    {selectedFreq !== "ponctuel" && (
-                      <p className="text-[11px] text-gray-400">par livraison</p>
+                <div className="p-5">
+                  {/* Lignes produits */}
+                  <div className="space-y-2 mb-4">
+                    {calc.lignes.length === 0 && (
+                      <p className="text-sm text-gray-400 text-center py-4">Ajoutez des produits</p>
                     )}
+                    {calc.lignes.map((l) => (
+                      <div key={l.name} className="flex justify-between text-sm">
+                        <span className="text-gray-600">
+                          {l.qty}× {l.name}
+                        </span>
+                        <span className="font-medium text-gray-800">{fmt(l.total)}</span>
+                      </div>
+                    ))}
                   </div>
+
+                  {calc.lignes.length > 0 && (
+                    <>
+                      <div className="h-px bg-lavender-100 my-3" />
+
+                      {/* Sous-total */}
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Sous-total</span>
+                        <span className="text-gray-700">{fmt(calc.totalVenteLivraison)}</span>
+                      </div>
+
+                      {/* Livraison */}
+                      <div className="flex justify-between text-sm mt-1">
+                        <span className="text-gray-500">Livraison</span>
+                        <span
+                          className={
+                            calc.livraisonFrais === 0
+                              ? "font-semibold text-forest"
+                              : "text-gray-700"
+                          }
+                        >
+                          {calc.livraisonFrais === 0 ? "Offerte" : fmt(calc.livraisonFrais)}
+                        </span>
+                      </div>
+
+                      {/* Réduction */}
+                      {reduction > 0 && (
+                        <div className="flex justify-between text-sm mt-1">
+                          <span className="text-lavender-600">Réduction {reduction}%</span>
+                          <span className="font-semibold text-lavender-600">
+                            -{fmt(calc.reductionMontant)}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="h-px bg-lavender-100 my-3" />
+
+                      {/* Total livraison */}
+                      <div className="flex justify-between items-end">
+                        <span className="text-sm text-gray-500">Total / livraison</span>
+                        <span className="font-serif text-2xl font-bold text-forest">
+                          {fmt(calc.venteApresReduc)}
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
+
+              {/* Marge */}
+              {calc.lignes.length > 0 && (
+                <div className="rounded-2xl bg-forest/5 border border-forest/10 p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <TrendingUp size={16} className="text-forest" />
+                    <h3 className="font-serif text-sm font-bold text-forest">Rentabilité</h3>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl bg-white p-3 text-center">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                        Marge / livraison
+                      </p>
+                      <p
+                        className={`font-serif text-lg font-bold ${calc.margeLivraison >= 0 ? "text-forest" : "text-red-600"}`}
+                      >
+                        {fmt(calc.margeLivraison)}
+                      </p>
+                      <p className="text-[10px] text-gray-400">
+                        {calc.margePct.toFixed(1)}% de marge
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-white p-3 text-center">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                        Marge / mois
+                      </p>
+                      <p
+                        className={`font-serif text-lg font-bold ${calc.margeMois >= 0 ? "text-forest" : "text-red-600"}`}
+                      >
+                        {fmt(calc.margeMois)}
+                      </p>
+                      <p className="text-[10px] text-gray-400">
+                        {livraisonsParMois} livraison{livraisonsParMois > 1 ? "s" : ""}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-xl bg-white p-3 text-center">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                      Total sur {mois} mois
+                    </p>
+                    <div className="flex items-center justify-center gap-4">
+                      <div>
+                        <p className="text-xs text-gray-400">CA client</p>
+                        <p className="font-serif text-base font-bold text-gray-700">
+                          {fmt(calc.venteTotal)}
+                        </p>
+                      </div>
+                      <div className="h-8 w-px bg-lavender-200" />
+                      <div>
+                        <p className="text-xs text-gray-400">Coût</p>
+                        <p className="font-serif text-base font-bold text-gray-500">
+                          {fmt(calc.coutTotal)}
+                        </p>
+                      </div>
+                      <div className="h-8 w-px bg-lavender-200" />
+                      <div>
+                        <p className="text-xs text-forest">Marge</p>
+                        <p
+                          className={`font-serif text-base font-bold ${calc.margeTotal >= 0 ? "text-forest" : "text-red-600"}`}
+                        >
+                          {fmt(calc.margeTotal)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* CTA */}
-              <div className="px-6 pb-6 space-y-3">
+              <div className="space-y-2">
                 <a
                   href="https://lingeserein.fr/#contact"
-                  className="group flex items-center justify-center gap-2 rounded-full bg-forest w-full py-4 text-sm font-medium text-white shadow-lg shadow-forest/20 transition-all duration-300 hover:bg-forest-light hover:-translate-y-0.5"
+                  className="group flex items-center justify-center gap-2 rounded-full bg-forest w-full py-3.5 text-sm font-medium text-white shadow-lg shadow-forest/20 transition-all hover:bg-forest-light hover:-translate-y-0.5"
                 >
-                  Demander ce devis
+                  Envoyer ce devis au client
                   <ArrowRight
-                    size={16}
+                    size={15}
                     className="transition-transform group-hover:translate-x-1"
                   />
                 </a>
                 <a
                   href="tel:+33490000000"
-                  className="flex items-center justify-center rounded-full border border-lavender-200 w-full py-3 text-sm font-medium text-forest hover:bg-lavender-50 transition-colors"
+                  className="flex items-center justify-center rounded-full border border-lavender-200 w-full py-3 text-sm text-forest hover:bg-lavender-50 transition-colors"
                 >
-                  Nous appeler : 04 90 00 00 00
+                  04 90 00 00 00
                 </a>
               </div>
             </div>
           </div>
         </div>
-
-        {/* Bottom info */}
-        <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6">
-          {[
-            { title: "Livraison offerte", desc: "Dès 4 sets commandés, la livraison est incluse" },
-            {
-              title: "Sans engagement",
-              desc: "Pas de durée minimum, vous êtes libre à tout moment",
-            },
-            { title: "Devis final sous 24h", desc: "Recevez votre devis personnalisé par email" },
-          ].map((item) => (
-            <div
-              key={item.title}
-              className="text-center rounded-2xl bg-white border border-lavender-100 p-6"
-            >
-              <h4 className="font-serif font-bold text-forest mb-1">{item.title}</h4>
-              <p className="text-sm text-gray-500">{item.desc}</p>
-            </div>
-          ))}
-        </div>
       </main>
 
-      {/* Footer mini */}
-      <footer className="border-t border-lavender-100 py-8">
-        <div className="mx-auto max-w-6xl px-6 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-xs text-gray-400">
-            &copy; {new Date().getFullYear()} Linge Serein — Orange, Vaucluse
-          </p>
-          <Link href="/" className="text-xs text-lavender-600 hover:text-forest transition-colors">
-            Retour au site principal
-          </Link>
-        </div>
-      </footer>
+      {/* Custom slider styles */}
+      <style jsx global>{`
+        .slider {
+          -webkit-appearance: none;
+          appearance: none;
+          height: 6px;
+          border-radius: 999px;
+          background: linear-gradient(
+            to right,
+            #1b5e20 0%,
+            #1b5e20 var(--pct, 50%),
+            #ede8f5 var(--pct, 50%),
+            #ede8f5 100%
+          );
+          outline: none;
+          cursor: pointer;
+        }
+        .slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: white;
+          border: 3px solid #1b5e20;
+          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+          cursor: grab;
+          transition: transform 0.15s ease;
+        }
+        .slider::-webkit-slider-thumb:hover {
+          transform: scale(1.15);
+        }
+        .slider::-webkit-slider-thumb:active {
+          cursor: grabbing;
+          transform: scale(1.05);
+        }
+        .slider::-moz-range-thumb {
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: white;
+          border: 3px solid #1b5e20;
+          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+          cursor: grab;
+        }
+        .slider::-moz-range-track {
+          height: 6px;
+          border-radius: 999px;
+          background: #ede8f5;
+        }
+        .slider::-moz-range-progress {
+          height: 6px;
+          border-radius: 999px;
+          background: #1b5e20;
+        }
+      `}</style>
     </div>
   );
 }
