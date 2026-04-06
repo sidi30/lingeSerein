@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.next/
+out/
+.expo/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+
+# Turbo
+.turbo/
+
+# Prisma
+packages/database/prisma/*.db
+packages/database/prisma/migrations/*.sql.bak
+
+# Expo
+apps/mobile/.expo/
+
+# Misc
+*.tgz
+.cache/
+
+# Brand kit source (assets bruts, ne pas versionner)
+/images/
+
+# Next.js auto-generated
+next-env.d.ts
+**/next-env.d.ts

@@ -1,0 +1,42 @@
+name: Deploy Vitrine
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/vitrine/**"
+      - ".github/workflows/deploy-vitrine.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build vitrine
+        run: npm run build --workspace=apps/vitrine
+
+      - name: Deploy to server
+        uses: easingthemes/ssh-deploy@v5
+        with:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          REMOTE_HOST: ${{ secrets.DEPLOY_HOST }}
+          REMOTE_USER: ${{ secrets.DEPLOY_USER }}
+          SOURCE: apps/vitrine/out/
+          TARGET: /var/www/lingeserein.fr/
+          ARGS: -rlgoDzvc --delete
+          SCRIPT_BEFORE: |
+            mkdir -p /var/www/lingeserein.fr

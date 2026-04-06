@@ -1,0 +1,681 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum Role {
+  ROLE_CLIENT
+  ROLE_LIVREUR
+  ROLE_ADMIN
+  ROLE_SUPER_ADMIN
+}
+
+enum AccommodationType {
+  AIRBNB
+  GITE
+  AUBERGE
+  HOTEL
+  AUTRE
+}
+
+enum ProductRange {
+  CONFORT
+  HOTEL
+  PRESTIGE
+}
+
+enum ProductCategory {
+  SERVIETTES
+  DRAPS
+  TAPIS_BAIN
+  LINGE_LIT
+  KIT_CUISINE
+  ARTICLE_ACCUEIL
+}
+
+enum ServiceTypeKind {
+  LOCATION
+  VENTE
+  ENTRETIEN
+}
+
+enum SubscriptionPlan {
+  ESSENTIELLE
+  CONFORT
+  PRESTIGE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  PAST_DUE
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  IN_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum DeliveryRoundStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum DeliveryStopStatus {
+  PENDING
+  COMPLETED
+  SKIPPED
+  FAILED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}
+
+enum NotificationType {
+  STOCK_LOW
+  DELIVERY_REMINDER
+  DELIVERY_CONFIRMED
+  DELIVERY_CANCELLED
+  DELIVERY_DELAYED
+  PAYMENT_FAILED
+  PAYMENT_SUCCESS
+  SUBSCRIPTION_RENEWED
+  SUBSCRIPTION_EXPIRING
+  ACCOUNT_LOCKED
+  GENERAL
+}
+
+enum NotificationChannel {
+  PUSH
+  EMAIL
+  BOTH
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  ACCOUNT_LOCKED
+  PASSWORD_CHANGED
+  EXPORT_DATA
+  DELETE_ACCOUNT
+}
+
+// ============================================================================
+// OPÉRATEUR & ZONES (multi-opérateur, multi-zone dès v1)
+// ============================================================================
+
+/// Opérateur du service (permet l'expansion multi-partenaire)
+model Operator {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String    @db.VarChar(200)
+  email     String    @unique @db.VarChar(320)
+  phone     String?   @db.VarChar(20) // chiffré AES-256 en application
+  address   String?   @db.Text // chiffré AES-256 en application
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  zones          DeliveryZone[]
+  users          User[]
+  products       Product[]
+  deliveryRounds DeliveryRound[]
+  invoices       Invoice[]
+
+  @@map("operators")
+}
+
+/// Zone de livraison géographique
+model DeliveryZone {
+  id          String   @id @default(uuid()) @db.Uuid
+  operatorId  String   @map("operator_id") @db.Uuid
+  name        String   @db.VarChar(200) // ex: "Vaucluse Nord", "Luberon"
+  postalCodes String[] @map("postal_codes") // codes postaux couverts
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  operator       Operator        @relation(fields: [operatorId], references: [id])
+  users          User[]
+  deliveryRounds DeliveryRound[]
+
+  @@map("delivery_zones")
+}
+
+// ============================================================================
+// UTILISATEURS
+// ============================================================================
+
+/// Utilisateur (client, livreur, admin)
+model User {
+  id                  String             @id @default(uuid()) @db.Uuid
+  operatorId          String             @map("operator_id") @db.Uuid
+  zoneId              String?            @map("zone_id") @db.Uuid
+  email               String             @unique @db.VarChar(320)
+  passwordHash        String             @map("password_hash") @db.Text
+  name                String             @db.VarChar(200)
+  phone               String?            @db.VarChar(20) // chiffré AES-256
+  address             String?            @db.Text // chiffré AES-256
+  accommodationType   AccommodationType? @map("accommodation_type")
+  role                Role               @default(ROLE_CLIENT)
+  isActive            Boolean            @default(true) @map("is_active")
+  isEmailVerified     Boolean            @default(false) @map("is_email_verified")
+  emailVerifiedAt     DateTime?          @map("email_verified_at")
+  loginAttempts       Int                @default(0) @map("login_attempts")
+  lockedUntil         DateTime?          @map("locked_until")
+  mfaEnabled          Boolean            @default(false) @map("mfa_enabled")
+  mfaSecret           String?            @map("mfa_secret") @db.Text // chiffré AES-256
+  mfaRecoveryCodes    String?            @map("mfa_recovery_codes") @db.Text // chiffré AES-256
+  deliveryPin         String?            @map("delivery_pin") @db.VarChar(255) // hash bcrypt PIN 6 chiffres (livreur)
+  stockAlertThreshold Int                @default(30) @map("stock_alert_threshold") // pourcentage
+  preferredTimeSlot   String?            @map("preferred_time_slot") @db.VarChar(20) // ex: "08:00-10:00"
+  stripeCustomerId    String?            @unique @map("stripe_customer_id") @db.VarChar(255)
+  notes               String?            @db.Text // notes internes (admin)
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+  deletedAt           DateTime?          @map("deleted_at")
+
+  operator             Operator              @relation(fields: [operatorId], references: [id])
+  zone                 DeliveryZone?         @relation(fields: [zoneId], references: [id])
+  refreshTokens        RefreshToken[]
+  subscription         Subscription?
+  orders               Order[]
+  stockMovements       StockMovement[]
+  notifications        Notification[]
+  notificationSettings NotificationSetting[]
+  consents             Consent[]
+  deliveryStops        DeliveryStop[]        @relation("ClientStops")
+  deliveredStops       DeliveryStop[]        @relation("DriverStops")
+  deliveryRounds       DeliveryRound[]       @relation("DriverRounds")
+  invoices             Invoice[]
+  auditLogs            AuditLog[]
+
+  @@index([email])
+  @@index([role])
+  @@index([operatorId])
+  @@index([zoneId])
+  @@index([stripeCustomerId])
+  @@map("users")
+}
+
+/// Refresh token rotatif
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  token     String    @unique @db.VarChar(500)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+/// Vérification email
+model EmailVerification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  token     String    @unique @db.VarChar(500)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([token])
+  @@index([userId])
+  @@map("email_verifications")
+}
+
+// ============================================================================
+// CATALOGUE PRODUITS (scalable — JSONB pour attributs dynamiques)
+// ============================================================================
+
+/// Type de service (location, vente, entretien)
+model ServiceType {
+  id          String          @id @default(uuid()) @db.Uuid
+  kind        ServiceTypeKind @unique
+  name        String          @db.VarChar(200) // ex: "Location de linge"
+  description String?         @db.Text
+  isActive    Boolean         @default(true) @map("is_active")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  products Product[]
+
+  @@map("service_types")
+}
+
+/// Produit (serviette, drap, tapis, etc.)
+model Product {
+  id            String          @id @default(uuid()) @db.Uuid
+  operatorId    String          @map("operator_id") @db.Uuid
+  serviceTypeId String          @map("service_type_id") @db.Uuid
+  category      ProductCategory
+  range         ProductRange
+  name          String          @db.VarChar(200) // ex: "Set serviettes Confort"
+  description   String?         @db.Text
+  priceCents    Int             @map("price_cents") // prix unitaire en centimes
+  attributes    Json            @default("{}") @db.JsonB // grammage, dimensions, matière, etc.
+  imageUrl      String?         @map("image_url") @db.VarChar(500)
+  isActive      Boolean         @default(true) @map("is_active")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  deletedAt     DateTime?       @map("deleted_at")
+
+  operator             Operator              @relation(fields: [operatorId], references: [id])
+  serviceType          ServiceType           @relation(fields: [serviceTypeId], references: [id])
+  linenBatches         LinenBatch[]
+  orderItems           OrderItem[]
+  subscriptionProducts SubscriptionProduct[]
+
+  @@unique([operatorId, category, range])
+  @@index([category])
+  @@index([range])
+  @@index([serviceTypeId])
+  @@map("products")
+}
+
+/// Lot de linge physique (suivi usure/lavages)
+model LinenBatch {
+  id            String    @id @default(uuid()) @db.Uuid
+  productId     String    @map("product_id") @db.Uuid
+  batchCode     String    @unique @map("batch_code") @db.VarChar(50) // code interne du lot
+  quantity      Int // nombre d'unités dans le lot
+  washCount     Int       @default(0) @map("wash_count")
+  maxWashCycles Int       @default(100) @map("max_wash_cycles")
+  isRetired     Boolean   @default(false) @map("is_retired")
+  retiredAt     DateTime? @map("retired_at")
+  purchasedAt   DateTime  @map("purchased_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@index([washCount])
+  @@index([isRetired])
+  @@map("linen_batches")
+}
+
+// ============================================================================
+// ABONNEMENTS
+// ============================================================================
+
+/// Abonnement client
+model Subscription {
+  id                   String             @id @default(uuid()) @db.Uuid
+  userId               String             @unique @map("user_id") @db.Uuid
+  plan                 SubscriptionPlan
+  status               SubscriptionStatus @default(ACTIVE)
+  stripeSubscriptionId String?            @unique @map("stripe_subscription_id") @db.VarChar(255)
+  currentPeriodStart   DateTime           @map("current_period_start")
+  currentPeriodEnd     DateTime           @map("current_period_end")
+  pausedAt             DateTime?          @map("paused_at")
+  pauseMonthsUsed      Int                @default(0) @map("pause_months_used") // max 2/an
+  cancelledAt          DateTime?          @map("cancelled_at")
+  cancelEffectiveAt    DateTime?          @map("cancel_effective_at") // +30j préavis
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  user     User                  @relation(fields: [userId], references: [id])
+  products SubscriptionProduct[]
+
+  @@index([status])
+  @@index([currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+/// Produits inclus dans un abonnement (découplé — permet d'ajouter des produits)
+model SubscriptionProduct {
+  id             String @id @default(uuid()) @db.Uuid
+  subscriptionId String @map("subscription_id") @db.Uuid
+  productId      String @map("product_id") @db.Uuid
+  quantity       Int // nombre de sets inclus
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id])
+
+  @@unique([subscriptionId, productId])
+  @@map("subscription_products")
+}
+
+// ============================================================================
+// COMMANDES
+// ============================================================================
+
+/// Commande (ponctuelle ou générée par abonnement)
+model Order {
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+  orderNumber     String      @unique @map("order_number") @db.VarChar(30) // ex: LNG-2026-000001
+  status          OrderStatus @default(PENDING)
+  isRecurring     Boolean     @default(false) @map("is_recurring") // commande auto via abonnement
+  totalCents      Int         @map("total_cents")
+  deliveryDate    DateTime    @map("delivery_date") @db.Date
+  timeSlot        String?     @map("time_slot") @db.VarChar(20)
+  specialNotes    String?     @map("special_notes") @db.Text
+  cancelledAt     DateTime?   @map("cancelled_at")
+  cancelledReason String?     @map("cancelled_reason") @db.Text
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  deletedAt       DateTime?   @map("deleted_at")
+
+  user         User          @relation(fields: [userId], references: [id])
+  items        OrderItem[]
+  deliveryStop DeliveryStop?
+
+  @@index([userId])
+  @@index([status])
+  @@index([deliveryDate])
+  @@index([orderNumber])
+  @@map("orders")
+}
+
+/// Ligne de commande
+model OrderItem {
+  id         String @id @default(uuid()) @db.Uuid
+  orderId    String @map("order_id") @db.Uuid
+  productId  String @map("product_id") @db.Uuid
+  quantity   Int
+  unitCents  Int    @map("unit_cents") // prix unitaire au moment de la commande
+  totalCents Int    @map("total_cents")
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+// ============================================================================
+// LIVRAISONS & TOURNÉES
+// ============================================================================
+
+/// Tournée de livraison
+model DeliveryRound {
+  id          String              @id @default(uuid()) @db.Uuid
+  operatorId  String              @map("operator_id") @db.Uuid
+  zoneId      String?             @map("zone_id") @db.Uuid
+  driverId    String              @map("driver_id") @db.Uuid
+  date        DateTime            @db.Date
+  status      DeliveryRoundStatus @default(PLANNED)
+  startedAt   DateTime?           @map("started_at")
+  completedAt DateTime?           @map("completed_at")
+  notes       String?             @db.Text
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  operator Operator       @relation(fields: [operatorId], references: [id])
+  zone     DeliveryZone?  @relation(fields: [zoneId], references: [id])
+  driver   User           @relation("DriverRounds", fields: [driverId], references: [id])
+  stops    DeliveryStop[]
+
+  @@index([date])
+  @@index([driverId])
+  @@index([status])
+  @@map("delivery_rounds")
+}
+
+/// Arrêt dans une tournée
+model DeliveryStop {
+  id                  String             @id @default(uuid()) @db.Uuid
+  roundId             String             @map("round_id") @db.Uuid
+  orderId             String?            @unique @map("order_id") @db.Uuid
+  clientId            String             @map("client_id") @db.Uuid
+  driverId            String             @map("driver_id") @db.Uuid
+  stopOrder           Int                @map("stop_order") // position dans la tournée
+  status              DeliveryStopStatus @default(PENDING)
+  setsToDeliver       Int                @map("sets_to_deliver")
+  setsDelivered       Int?               @map("sets_delivered")
+  dirtyPickedUp       Int?               @map("dirty_picked_up") // sets sales récupérés
+  qrCodeScanned       Boolean            @default(false) @map("qr_code_scanned")
+  photoUrl            String?            @map("photo_url") @db.VarChar(500) // preuve de dépôt (S3 chiffré)
+  signatureUrl        String?            @map("signature_url") @db.VarChar(500)
+  specialInstructions String?            @map("special_instructions") @db.Text
+  completedAt         DateTime?          @map("completed_at")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  round  DeliveryRound @relation(fields: [roundId], references: [id])
+  order  Order?        @relation(fields: [orderId], references: [id])
+  client User          @relation("ClientStops", fields: [clientId], references: [id])
+  driver User          @relation("DriverStops", fields: [driverId], references: [id])
+
+  @@index([roundId])
+  @@index([clientId])
+  @@index([status])
+  @@map("delivery_stops")
+}
+
+// ============================================================================
+// STOCK
+// ============================================================================
+
+/// Mouvement de stock (chaque livraison/retour/lavage crée un mouvement)
+model StockMovement {
+  id           String            @id @default(uuid()) @db.Uuid
+  userId       String            @map("user_id") @db.Uuid // client concerné
+  productRange ProductRange      @map("product_range")
+  type         StockMovementType
+  quantity     Int // positif = ajout chez le client, négatif = retrait
+  reason       String?           @db.VarChar(500) // ex: "Livraison #LNG-2026-000001", "Récupération linge sale"
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([type])
+  @@map("stock_movements")
+}
+
+enum StockMovementType {
+  DELIVERY // livraison de propre au client
+  PICKUP_DIRTY // récupération de sale chez le client
+  WASH_COMPLETE // lot lavé, retour en stock propre
+  ADJUSTMENT // correction manuelle admin
+  RETIREMENT // réforme (usure)
+}
+
+/// Stock actuel du client (vue dénormalisée, mise à jour à chaque mouvement)
+model ClientStock {
+  id                 String       @id @default(uuid()) @db.Uuid
+  userId             String       @map("user_id") @db.Uuid
+  productRange       ProductRange @map("product_range")
+  cleanSets          Int          @default(0) @map("clean_sets") // propres chez le client
+  dirtySets          Int          @default(0) @map("dirty_sets") // sales à récupérer
+  totalInCirculation Int          @default(0) @map("total_in_circulation") // total attribué au client
+
+  @@unique([userId, productRange])
+  @@index([userId])
+  @@map("client_stocks")
+}
+
+/// Stock global de l'opérateur (par gamme)
+model OperatorStock {
+  id             String       @id @default(uuid()) @db.Uuid
+  operatorId     String       @map("operator_id") @db.Uuid
+  productRange   ProductRange @map("product_range")
+  cleanAvailable Int          @default(0) @map("clean_available") // propres en stock (garage)
+  dirtyPending   Int          @default(0) @map("dirty_pending") // sales en attente de lavage
+  inCirculation  Int          @default(0) @map("in_circulation") // en circulation chez les clients
+  retired        Int          @default(0) // réformés
+
+  @@unique([operatorId, productRange])
+  @@map("operator_stocks")
+}
+
+// ============================================================================
+// FACTURATION
+// ============================================================================
+
+/// Facture (Factur-X : PDF/A-3 + XML CII)
+model Invoice {
+  id                    String        @id @default(uuid()) @db.Uuid
+  operatorId            String        @map("operator_id") @db.Uuid
+  userId                String        @map("user_id") @db.Uuid
+  invoiceNumber         String        @unique @map("invoice_number") @db.VarChar(30) // ex: FACT-2026-000001
+  status                InvoiceStatus @default(DRAFT)
+  totalHtCents          Int           @map("total_ht_cents") // HT en centimes
+  vatRate               Int           @default(2000) @map("vat_rate") // 20.00% → 2000
+  vatAmountCents        Int           @map("vat_amount_cents")
+  totalTtcCents         Int           @map("total_ttc_cents") // TTC en centimes
+  periodStart           DateTime      @map("period_start") @db.Date
+  periodEnd             DateTime      @map("period_end") @db.Date
+  dueDate               DateTime      @map("due_date") @db.Date
+  paidAt                DateTime?     @map("paid_at")
+  stripeInvoiceId       String?       @unique @map("stripe_invoice_id") @db.VarChar(255)
+  stripePaymentIntentId String?       @map("stripe_payment_intent_id") @db.VarChar(255)
+  pdfUrl                String?       @map("pdf_url") @db.VarChar(500) // PDF Factur-X signé
+  xmlUrl                String?       @map("xml_url") @db.VarChar(500) // XML CII
+  metadata              Json          @default("{}") @db.JsonB // lignes de détail, mentions légales
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+
+  operator Operator @relation(fields: [operatorId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+  @@index([invoiceNumber])
+  @@map("invoices")
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+/// Notification envoyée à un utilisateur
+model Notification {
+  id        String              @id @default(uuid()) @db.Uuid
+  userId    String              @map("user_id") @db.Uuid
+  type      NotificationType
+  channel   NotificationChannel @default(BOTH)
+  title     String              @db.VarChar(200)
+  body      String              @db.Text
+  data      Json                @default("{}") @db.JsonB // deeplink, metadata
+  readAt    DateTime?           @map("read_at")
+  sentAt    DateTime?           @map("sent_at")
+  createdAt DateTime            @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, readAt])
+  @@index([type])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+/// Préférences de notification par utilisateur et par type
+model NotificationSetting {
+  id      String              @id @default(uuid()) @db.Uuid
+  userId  String              @map("user_id") @db.Uuid
+  type    NotificationType
+  channel NotificationChannel @default(BOTH)
+  enabled Boolean             @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@map("notification_settings")
+}
+
+// ============================================================================
+// RGPD — CONSENTEMENTS
+// ============================================================================
+
+/// Enregistrement du consentement RGPD (horodaté + version du document)
+model Consent {
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+  type            ConsentType
+  documentVersion String      @map("document_version") @db.VarChar(20) // ex: "1.0", "2.1"
+  accepted        Boolean
+  ipAddress       String?     @map("ip_address") @db.VarChar(45) // IPv4 ou IPv6
+  userAgent       String?     @map("user_agent") @db.VarChar(500)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  revokedAt       DateTime?   @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([type])
+  @@map("consents")
+}
+
+enum ConsentType {
+  CGU // Conditions Générales d'Utilisation
+  PRIVACY_POLICY // Politique de confidentialité
+  COOKIES_ANALYTICS // Cookies analytiques (opt-in)
+  MARKETING_EMAIL // Emails marketing (opt-in, séparé du transactionnel)
+}
+
+// ============================================================================
+// AUDIT TRAIL
+// ============================================================================
+
+/// Journal d'audit pour toutes les mutations critiques
+model AuditLog {
+  id        String      @id @default(uuid()) @db.Uuid
+  userId    String?     @map("user_id") @db.Uuid // null si action système
+  action    AuditAction
+  entity    String      @db.VarChar(100) // ex: "User", "Order", "Subscription"
+  entityId  String?     @map("entity_id") @db.Uuid
+  changes   Json        @default("{}") @db.JsonB // { before: {...}, after: {...} } — JAMAIS de données personnelles
+  ipAddress String?     @map("ip_address") @db.VarChar(45)
+  userAgent String?     @map("user_agent") @db.VarChar(500)
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// JOURS DE TOURNÉE CONFIGURABLES
+// ============================================================================
+
+/// Jours de livraison configurables par zone (ex: lundi et jeudi)
+model DeliverySchedule {
+  id        String  @id @default(uuid()) @db.Uuid
+  zoneId    String  @map("zone_id") @db.Uuid
+  dayOfWeek Int     @map("day_of_week") // 0=dimanche, 1=lundi, ..., 6=samedi
+  timeStart String  @map("time_start") @db.VarChar(5) // ex: "08:00"
+  timeEnd   String  @map("time_end") @db.VarChar(5) // ex: "12:00"
+  isActive  Boolean @default(true) @map("is_active")
+
+  @@unique([zoneId, dayOfWeek])
+  @@map("delivery_schedules")
+}

@@ -1,0 +1,8 @@
+MESSAGE=$(cat "$1")
+
+# Vérifier le format Conventional Commits
+if ! echo "$MESSAGE" | grep -qE "^(feat|fix|chore|docs|refactor|test|style|perf|ci|build|revert)(\(.+\))?: .{1,}"; then
+  echo "Erreur : Le message de commit doit suivre le format Conventional Commits."
+  echo "Exemples : feat: ajouter login, fix(api): corriger validation"
+  exit 1
+fi

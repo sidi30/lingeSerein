@@ -1,0 +1,49 @@
+{
+  "name": "@lingengo/mobile",
+  "version": "0.0.1",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "dev": "expo start",
+    "dev:web": "expo start --web",
+    "dev:ios": "expo start --ios",
+    "dev:android": "expo start --android",
+    "build": "expo export --platform web",
+    "lint": "eslint app/ components/ lib/",
+    "lint:fix": "eslint app/ components/ lib/ --fix",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "clean": "rm -rf dist .expo"
+  },
+  "dependencies": {
+    "@lingengo/shared": "*",
+    "@tanstack/react-query": "^5.67.0",
+    "expo": "~55.0.0",
+    "expo-constants": "~55.0.0",
+    "expo-linear-gradient": "^55.0.11",
+    "expo-linking": "~55.0.0",
+    "expo-router": "~55.0.0",
+    "expo-secure-store": "~55.0.0",
+    "expo-splash-screen": "~55.0.0",
+    "expo-status-bar": "~55.0.0",
+    "expo-web-browser": "~55.0.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-native": "~0.84.0",
+    "react-native-calendars": "^1.1314.0",
+    "react-native-gifted-charts": "^1.4.76",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.24.0",
+    "react-native-svg": "^15.15.4",
+    "react-native-web": "~0.21.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@lingengo/eslint-config": "*",
+    "@types/react": "~19.0.0",
+    "@types/react-dom": "~19.0.0",
+    "typescript": "^5.8.0"
+  }
+}

@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@theme {
+  /* Primary — Forest green (#1B5E20 brand) */
+  --color-primary-50: oklch(0.97 0.02 148);
+  --color-primary-100: oklch(0.93 0.04 148);
+  --color-primary-200: oklch(0.86 0.08 148);
+  --color-primary-300: oklch(0.75 0.12 148);
+  --color-primary-400: oklch(0.62 0.14 148);
+  --color-primary-500: oklch(0.52 0.14 148);
+  --color-primary-600: oklch(0.42 0.12 148);
+  --color-primary-700: oklch(0.36 0.1 148);
+  --color-primary-800: oklch(0.3 0.08 148);
+  --color-primary-900: oklch(0.26 0.07 148);
+  --color-primary-950: oklch(0.18 0.05 148);
+
+  /* Accent — Lavender (#7B6FA6 brand) */
+  --color-accent-50: oklch(0.97 0.02 290);
+  --color-accent-100: oklch(0.93 0.04 290);
+  --color-accent-500: oklch(0.55 0.1 290);
+  --color-accent-600: oklch(0.48 0.1 290);
+
+  --color-success-50: oklch(0.96 0.04 155);
+  --color-success-500: oklch(0.55 0.17 155);
+  --color-success-600: oklch(0.48 0.15 155);
+
+  --color-warning-50: oklch(0.98 0.04 85);
+  --color-warning-500: oklch(0.75 0.18 85);
+  --color-warning-600: oklch(0.68 0.17 75);
+
+  --color-danger-50: oklch(0.97 0.02 25);
+  --color-danger-500: oklch(0.58 0.22 25);
+  --color-danger-600: oklch(0.52 0.2 25);
+
+  --color-sidebar: oklch(0.98 0.005 148);
+  --color-sidebar-active: oklch(0.94 0.04 148);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+html {
+  font-family: var(--font-sans);
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.75 0 0);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.6 0 0);
+}
+
+/* Transition utilities */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fadeIn 0.15s ease-out;
+}
+
+/* Remove native search clear button for consistent styling */
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}

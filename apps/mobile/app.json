@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Linge Serein",
+    "slug": "linge-serein",
+    "version": "0.0.1",
+    "scheme": "linge-serein",
+    "platforms": ["ios", "android", "web"],
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "bundleIdentifier": "fr.linge-serein.app",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "fr.linge-serein.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["expo-router", "expo-secure-store"]
+  }
+}

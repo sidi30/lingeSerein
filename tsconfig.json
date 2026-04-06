@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@lingengo/shared": ["./packages/shared/src"],
+      "@lingengo/shared/*": ["./packages/shared/src/*"],
+      "@lingengo/ui": ["./packages/ui/src"],
+      "@lingengo/ui/*": ["./packages/ui/src/*"],
+      "@lingengo/database": ["./packages/database/src"],
+      "@lingengo/database/*": ["./packages/database/src/*"]
+    }
+  },
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/ui" },
+    { "path": "packages/database" },
+    { "path": "packages/api" },
+    { "path": "apps/admin-web" },
+    { "path": "apps/mobile" }
+  ]
+}
