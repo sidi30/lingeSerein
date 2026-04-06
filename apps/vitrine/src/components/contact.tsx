@@ -38,7 +38,7 @@ export function Contact() {
 
             <div className="flex flex-col gap-5">
               <a
-                href="tel:+33490000000"
+                href="tel:+33685218270"
                 className="group flex items-center gap-4 text-gray-600 hover:text-forest transition-colors"
               >
                 <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-lavender-50 group-hover:bg-lavender-100 transition-colors">
@@ -46,12 +46,12 @@ export function Contact() {
                 </div>
                 <div>
                   <div className="text-xs text-gray-400 uppercase tracking-wider">Téléphone</div>
-                  <div className="font-medium">04 90 00 00 00</div>
+                  <div className="font-medium">06 85 21 82 70</div>
                 </div>
               </a>
 
               <a
-                href="mailto:contact@lingeserein.fr"
+                href="mailto:lingeserein@gmail.com"
                 className="group flex items-center gap-4 text-gray-600 hover:text-forest transition-colors"
               >
                 <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-lavender-50 group-hover:bg-lavender-100 transition-colors">
@@ -59,7 +59,7 @@ export function Contact() {
                 </div>
                 <div>
                   <div className="text-xs text-gray-400 uppercase tracking-wider">Email</div>
-                  <div className="font-medium">contact@lingeserein.fr</div>
+                  <div className="font-medium">lingeserein@gmail.com</div>
                 </div>
               </a>
 

@@ -9,6 +9,7 @@ const links = [
   { href: "#espace-client", label: "Espace Client" },
   { href: "#avantages", label: "Avantages" },
   { href: "#fonctionnement", label: "Comment ça marche" },
+  { href: "#tarifs", label: "Tarifs" },
   { href: "#engagements", label: "Engagements" },
   { href: "#contact", label: "Contact" },
 ];

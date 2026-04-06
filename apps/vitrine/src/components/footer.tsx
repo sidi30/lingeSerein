@@ -53,14 +53,11 @@ export function Footer() {
               Contact
             </h4>
             <div className="flex flex-col gap-3 text-sm text-white/50">
-              <a href="tel:+33490000000" className="hover:text-white transition-colors">
-                04 90 00 00 00
+              <a href="tel:+33685218270" className="hover:text-white transition-colors">
+                06 85 21 82 70
               </a>
-              <a
-                href="mailto:contact@lingeserein.fr"
-                className="hover:text-white transition-colors"
-              >
-                contact@lingeserein.fr
+              <a href="mailto:lingeserein@gmail.com" className="hover:text-white transition-colors">
+                lingeserein@gmail.com
               </a>
               <span>Orange, Vaucluse</span>
             </div>

@@ -5,6 +5,7 @@ import { VisualBanner } from "@/components/visual-banner";
 import { EspaceClient } from "@/components/espace-client";
 import { Avantages } from "@/components/avantages";
 import { HowItWorks } from "@/components/how-it-works";
+import { Tarifs } from "@/components/tarifs";
 import { Engagements } from "@/components/engagements";
 import { Testimonials } from "@/components/testimonials";
 import { Contact } from "@/components/contact";
@@ -21,6 +22,7 @@ export default function Home() {
         <EspaceClient />
         <Avantages />
         <HowItWorks />
+        <Tarifs />
         <Engagements />
         <Testimonials />
         <Contact />
