@@ -3,11 +3,8 @@ services:
     build: .
     container_name: lingeserein-mailer
     restart: unless-stopped
-    environment:
-      - GMAIL_USER=lingeserein@gmail.com
-      - GMAIL_APP_PASSWORD=@OrangeLoss
-      - ALLOWED_ORIGIN=https://lingeserein.fr
-      - PORT=3010
+    env_file:
+      - .env
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
