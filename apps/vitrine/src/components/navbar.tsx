@@ -7,10 +7,9 @@ import { ArrowRight, Menu, X } from "lucide-react";
 const links = [
   { href: "#services", label: "Services" },
   { href: "#espace-client", label: "Espace Client" },
-  { href: "#avantages", label: "Avantages" },
   { href: "#fonctionnement", label: "Comment ça marche" },
   { href: "#tarifs", label: "Tarifs" },
-  { href: "#engagements", label: "Engagements" },
+  { href: "#faq", label: "FAQ" },
   { href: "#contact", label: "Contact" },
 ];
 
@@ -37,10 +36,10 @@ export function Navbar() {
       <div className="mx-auto max-w-7xl px-6 flex items-center justify-between">
         <a href="#" className="flex items-center gap-3">
           <Image
-            src="/images/logo_full.svg"
+            src="/images/logo_full.png"
             alt="Linge Serein"
-            width={200}
-            height={90}
+            width={512}
+            height={512}
             className="h-12 md:h-14 w-auto"
             priority
           />
@@ -56,12 +55,22 @@ export function Navbar() {
               {link.label}
             </a>
           ))}
+          <span
+            className="hidden xl:inline-flex items-center gap-1.5 text-xs font-medium text-forest/80"
+            aria-hidden
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/70 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+            </span>
+            Réponse &lt; 2h
+          </span>
           <a
-            href="#contact"
-            className="ml-4 inline-flex items-center gap-2 rounded-full bg-forest px-6 py-2.5 text-sm font-medium text-white shadow-lg shadow-forest/20 transition-all duration-300 hover:bg-forest-light hover:shadow-xl hover:shadow-forest/30 hover:-translate-y-0.5"
+            href="/devis"
+            className="ml-2 inline-flex items-center gap-2 rounded-full bg-forest px-6 py-2.5 text-sm font-medium text-white shadow-lg shadow-forest/20 transition-all duration-300 hover:bg-forest-light hover:shadow-xl hover:shadow-forest/30 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
           >
             Demander un devis
-            <ArrowRight size={16} />
+            <ArrowRight size={16} aria-hidden />
           </a>
         </div>
 
@@ -92,12 +101,12 @@ export function Navbar() {
               </a>
             ))}
             <a
-              href="#contact"
+              href="/devis"
               onClick={() => setMobileOpen(false)}
               className="mt-2 inline-flex items-center justify-center gap-2 rounded-full bg-forest px-6 py-3 text-sm font-medium text-white shadow-lg"
             >
               Demander un devis
-              <ArrowRight size={16} />
+              <ArrowRight size={16} aria-hidden />
             </a>
           </div>
         </div>

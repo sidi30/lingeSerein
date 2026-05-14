@@ -1,12 +1,12 @@
 import Image from "next/image";
 
 const navLinks = [
-  { href: "#services", label: "Services" },
-  { href: "#espace-client", label: "Espace Client" },
-  { href: "#avantages", label: "Avantages" },
-  { href: "#fonctionnement", label: "Comment ça marche" },
-  { href: "#engagements", label: "Engagements" },
-  { href: "#contact", label: "Contact" },
+  { href: "/#services", label: "Services" },
+  { href: "/#tarifs", label: "Tarifs" },
+  { href: "/#faq", label: "FAQ" },
+  { href: "/devis", label: "Simulateur de devis" },
+  { href: "/zone-de-livraison", label: "Zone de livraison" },
+  { href: "/#contact", label: "Contact" },
 ];
 
 export function Footer() {
@@ -65,15 +65,24 @@ export function Footer() {
         </div>
 
         <div className="mt-16 pt-8 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="text-xs text-white/30">
+          <p className="text-xs text-white/60">
             &copy; {new Date().getFullYear()} Linge Serein. Tous droits réservés.
           </p>
           <div className="flex gap-6">
-            <a href="#" className="text-xs text-white/30 hover:text-white/60 transition-colors">
+            <a
+              href="/mentions-legales"
+              className="text-xs text-white/60 hover:text-white transition-colors"
+            >
               Mentions légales
             </a>
-            <a href="#" className="text-xs text-white/30 hover:text-white/60 transition-colors">
+            <a
+              href="/politique-confidentialite"
+              className="text-xs text-white/60 hover:text-white transition-colors"
+            >
               Politique de confidentialité
+            </a>
+            <a href="/cgv" className="text-xs text-white/60 hover:text-white transition-colors">
+              CGV
             </a>
           </div>
         </div>

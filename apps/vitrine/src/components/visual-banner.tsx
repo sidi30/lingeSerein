@@ -8,8 +8,9 @@ export function VisualBanner() {
       <div className="relative h-[400px] md:h-[500px]">
         <Image
           src="/site/livraison-voiture.jpeg"
-          alt="Livraison Linge Serein en Provence"
+          alt=""
           fill
+          sizes="100vw"
           className="object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-forest/80 via-forest/50 to-transparent" />
@@ -27,11 +28,11 @@ export function VisualBanner() {
                   un linge d&apos;une fraîcheur et d&apos;une propreté irréprochables.
                 </p>
                 <a
-                  href="#contact"
-                  className="inline-flex items-center gap-3 rounded-full bg-white px-8 py-4 text-base font-medium text-forest shadow-xl transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl"
+                  href="/devis"
+                  className="inline-flex items-center gap-3 rounded-full bg-white px-8 py-4 text-base font-medium text-forest shadow-xl transition-all duration-300 hover:-translate-y-0.5 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-forest"
                 >
                   Demander un devis gratuit
-                  <ArrowRight size={18} />
+                  <ArrowRight size={18} aria-hidden />
                 </a>
               </div>
             </Reveal>

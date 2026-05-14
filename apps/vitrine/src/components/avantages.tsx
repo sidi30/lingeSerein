@@ -57,7 +57,7 @@ export function Avantages() {
 
           <div>
             <Reveal>
-              <span className="inline-block text-sm font-medium uppercase tracking-[0.2em] text-lavender-600 mb-4">
+              <span className="inline-block text-sm font-medium uppercase tracking-[0.2em] text-lavender-700 mb-4">
                 Pourquoi nous choisir
               </span>
               <h2 className="font-serif text-4xl md:text-5xl font-bold text-forest mb-12">
@@ -69,15 +69,15 @@ export function Avantages() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {avantages.map((item, i) => (
                 <Reveal key={item.title} delay={i * 100}>
-                  <div className="group flex gap-4 rounded-2xl bg-white/60 p-5 border border-lavender-100/40 transition-all duration-500 hover:bg-white hover:shadow-lg hover:shadow-lavender-100/30">
-                    <div className="shrink-0 mt-0.5 flex items-center justify-center w-10 h-10 rounded-xl bg-forest/5 text-forest group-hover:bg-forest group-hover:text-white transition-all duration-300">
+                  <div className="group flex gap-4 rounded-2xl bg-white/60 p-5 border border-lavender-100/40 transition-all duration-300 hover:bg-white hover:shadow-lg hover:shadow-lavender-100/30">
+                    <div className="shrink-0 mt-0.5 flex items-center justify-center w-10 h-10 rounded-xl bg-forest/5 text-forest group-hover:bg-forest group-hover:text-white transition-colors duration-300">
                       {item.icon}
                     </div>
                     <div>
                       <h3 className="font-serif text-base font-semibold text-forest mb-1">
                         {item.title}
                       </h3>
-                      <p className="text-gray-500 text-sm leading-relaxed">{item.description}</p>
+                      <p className="text-gray-700 text-sm leading-relaxed">{item.description}</p>
                     </div>
                   </div>
                 </Reveal>

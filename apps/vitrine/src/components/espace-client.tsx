@@ -16,6 +16,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { Reveal } from "./reveal";
+import { AppMockup } from "./app-mockup";
 
 const beforeItems = [
   { icon: <Phone size={18} />, text: "Appels téléphoniques pour chaque commande" },
@@ -174,13 +175,8 @@ export function EspaceClient() {
                 <div className="relative w-[260px] md:w-[300px]">
                   <div className="relative rounded-[3rem] bg-gray-900 p-3 shadow-2xl shadow-black/40 ring-1 ring-white/10">
                     <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-7 bg-gray-900 rounded-b-2xl z-10" />
-                    <div className="relative rounded-[2.4rem] overflow-hidden bg-cream aspect-[9/19.5]">
-                      <Image
-                        src="/site/app-splash.png"
-                        alt="Application mobile Linge Serein"
-                        fill
-                        className="object-cover object-top"
-                      />
+                    <div className="relative rounded-[2.4rem] overflow-hidden aspect-[9/19.5]">
+                      <AppMockup />
                     </div>
                   </div>
 

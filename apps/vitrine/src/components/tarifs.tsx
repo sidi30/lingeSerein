@@ -1,7 +1,59 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { Reveal } from "./reveal";
+
+function AnimatedPrice({ value, suffix = " €" }: { value: string; suffix?: string }) {
+  const target = Number(value);
+  const reduced = useReducedMotion();
+  const [val, setVal] = useState(reduced ? target : 0);
+  const ref = useRef<HTMLSpanElement>(null);
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (reduced) {
+      setVal(target);
+      return;
+    }
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !started.current) {
+          started.current = true;
+          const t0 = performance.now();
+          const dur = 1200;
+          const step = (now: number) => {
+            const p = Math.min(1, (now - t0) / dur);
+            const eased = 1 - Math.pow(1 - p, 3);
+            setVal(Math.round(target * eased));
+            if (p < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+          obs.disconnect();
+        }
+      },
+      { threshold: 0.4 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [target, reduced]);
+
+  return (
+    <span ref={ref} className="tabular-nums">
+      {val}
+      {suffix}
+    </span>
+  );
+}
+
+const slugByGamme: Record<string, string> = {
+  "Pack Confort": "confort",
+  "Pack Hôtel": "hotel",
+  "Pack Prestige": "prestige",
+};
 
 /* ─── Données ─── */
 
@@ -84,7 +136,7 @@ export function Tarifs() {
       <div className="relative mx-auto max-w-7xl px-6">
         {/* Header */}
         <Reveal className="text-center mb-20">
-          <span className="inline-block text-sm font-medium uppercase tracking-[0.2em] text-lavender-600 mb-4">
+          <span className="inline-block text-sm font-medium uppercase tracking-[0.2em] text-lavender-700 mb-4">
             Nos tarifs
           </span>
           <h2 className="font-serif text-4xl md:text-5xl font-bold text-forest">
@@ -92,7 +144,7 @@ export function Tarifs() {
             <br />
             adaptée à votre hébergement
           </h2>
-          <p className="mt-6 text-gray-500 max-w-2xl mx-auto text-lg leading-relaxed">
+          <p className="mt-6 text-gray-700 max-w-2xl mx-auto text-lg leading-relaxed">
             Des tarifs transparents, sans engagement. Plus vous commandez, plus le prix baisse.
           </p>
         </Reveal>
@@ -102,25 +154,33 @@ export function Tarifs() {
           <h3 className="font-serif text-2xl font-bold text-forest text-center mb-2">
             Nos gammes de linge
           </h3>
-          <p className="text-gray-400 text-center text-sm mb-10">
+          <p className="text-gray-600 text-center text-sm mb-10">
             Chaque set comprend tout le linge de bain pour une chambre
           </p>
         </Reveal>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-24">
           {gammes.map((g, i) => (
-            <Reveal key={g.name} delay={i * 150}>
-              <div
-                className={`relative h-full rounded-3xl p-8 transition-all duration-500 hover:-translate-y-2 ${
+            <Reveal key={g.name} delay={i * 100}>
+              <a
+                href={`/devis?gamme=${slugByGamme[g.name] ?? ""}`}
+                aria-label={`Simuler un devis pour le ${g.name}`}
+                className={`block relative h-full rounded-3xl p-8 transition-all duration-300 hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 focus-visible:ring-offset-cream ${
                   g.featured
                     ? "bg-forest text-white shadow-xl shadow-forest/20 ring-2 ring-forest"
                     : "bg-white border border-lavender-100/60 shadow-sm hover:shadow-lg"
                 }`}
               >
                 {g.featured && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-lavender-500 px-4 py-1 text-xs font-semibold text-white uppercase tracking-wider">
+                  <motion.div
+                    initial={{ opacity: 0, y: -8, scale: 0.7 }}
+                    whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                    viewport={{ once: true, amount: 0.5 }}
+                    transition={{ type: "spring", stiffness: 240, damping: 14, delay: 0.2 }}
+                    className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-lavender-500 px-4 py-1 text-xs font-semibold text-white uppercase tracking-wider shadow-lg shadow-lavender-300/40"
+                  >
                     Recommandé
-                  </div>
+                  </motion.div>
                 )}
 
                 <div className="mb-6">
@@ -129,7 +189,7 @@ export function Tarifs() {
                   >
                     {g.name}
                   </h4>
-                  <p className={`text-xs ${g.featured ? "text-white/60" : "text-gray-400"}`}>
+                  <p className={`text-xs ${g.featured ? "text-white/80" : "text-gray-600"}`}>
                     {g.grammage}
                   </p>
                 </div>
@@ -138,26 +198,36 @@ export function Tarifs() {
                   <span
                     className={`font-serif text-5xl font-bold ${g.featured ? "text-white" : "text-forest"}`}
                   >
-                    {g.price} €
+                    <AnimatedPrice value={g.price} />
                   </span>
                   <span
-                    className={`text-sm ml-1 ${g.featured ? "text-white/60" : "text-gray-400"}`}
+                    className={`text-sm ml-1 ${g.featured ? "text-white/80" : "text-gray-600"}`}
                   >
                     {g.unit}
                   </span>
                 </div>
 
-                <ul className="flex flex-col gap-3">
+                <ul className="flex flex-col gap-3 mb-6">
                   {g.items.map((item) => (
                     <li key={item} className="flex items-start gap-3 text-sm">
                       <span
-                        className={`shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full ${g.featured ? "bg-lavender-300" : "bg-lavender-400"}`}
+                        aria-hidden
+                        className={`shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full ${g.featured ? "bg-lavender-300" : "bg-lavender-500"}`}
                       />
-                      <span className={g.featured ? "text-white/80" : "text-gray-600"}>{item}</span>
+                      <span className={g.featured ? "text-white/90" : "text-gray-700"}>{item}</span>
                     </li>
                   ))}
                 </ul>
-              </div>
+
+                <div
+                  className={`mt-auto inline-flex items-center gap-2 text-sm font-medium ${
+                    g.featured ? "text-lavender-200" : "text-lavender-700"
+                  }`}
+                >
+                  Simuler ce pack
+                  <ArrowRight size={14} aria-hidden />
+                </div>
+              </a>
             </Reveal>
           ))}
         </div>
@@ -167,7 +237,7 @@ export function Tarifs() {
           <h3 className="font-serif text-2xl font-bold text-forest text-center mb-2">
             Tarifs dégressifs
           </h3>
-          <p className="text-gray-400 text-center text-sm mb-10">
+          <p className="text-gray-600 text-center text-sm mb-10">
             Plus vous commandez, plus le prix unitaire baisse
           </p>
 
@@ -196,8 +266,8 @@ export function Tarifs() {
                     {row.prices.map((p, j) => (
                       <td
                         key={j}
-                        className={`text-center px-6 py-4 ${
-                          p === "Offerte" ? "text-forest font-semibold" : "text-gray-600"
+                        className={`text-center px-6 py-4 tabular-nums ${
+                          p === "Offerte" ? "text-forest font-semibold" : "text-gray-700"
                         }`}
                       >
                         {p}
@@ -215,16 +285,16 @@ export function Tarifs() {
           <h3 className="font-serif text-2xl font-bold text-forest text-center mb-2">
             Abonnements mensuels
           </h3>
-          <p className="text-gray-400 text-center text-sm mb-10">
+          <p className="text-gray-600 text-center text-sm mb-10">
             Sans engagement, modifiable à tout moment
           </p>
         </Reveal>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-24">
           {abonnements.map((a, i) => (
-            <Reveal key={a.name} delay={i * 150}>
+            <Reveal key={a.name} delay={i * 100}>
               <div
-                className={`relative h-full rounded-3xl p-8 transition-all duration-500 hover:-translate-y-2 ${
+                className={`relative h-full rounded-3xl p-8 transition-all duration-300 hover:-translate-y-1 ${
                   a.featured
                     ? "bg-forest text-white shadow-xl shadow-forest/20 ring-2 ring-forest"
                     : "bg-white border border-lavender-100/60 shadow-sm hover:shadow-lg"
@@ -248,17 +318,17 @@ export function Tarifs() {
                   <span
                     className={`font-serif text-5xl font-bold ${a.featured ? "text-white" : "text-forest"}`}
                   >
-                    {a.price} €
+                    <AnimatedPrice value={a.price} />
                   </span>
                   <span
-                    className={`text-sm ml-1 ${a.featured ? "text-white/60" : "text-gray-400"}`}
+                    className={`text-sm ml-1 ${a.featured ? "text-white/80" : "text-gray-600"}`}
                   >
                     / mois
                   </span>
                 </div>
 
                 <p
-                  className={`text-xs mb-8 ${a.featured ? "text-lavender-200" : "text-lavender-500"}`}
+                  className={`text-xs mb-8 ${a.featured ? "text-lavender-200" : "text-lavender-700"}`}
                 >
                   Économie de {a.saving} € vs. tarif unitaire
                 </p>
@@ -267,9 +337,10 @@ export function Tarifs() {
                   {a.features.map((f) => (
                     <li key={f} className="flex items-start gap-3 text-sm">
                       <span
-                        className={`shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full ${a.featured ? "bg-lavender-300" : "bg-lavender-400"}`}
+                        aria-hidden
+                        className={`shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full ${a.featured ? "bg-lavender-300" : "bg-lavender-500"}`}
                       />
-                      <span className={a.featured ? "text-white/80" : "text-gray-600"}>{f}</span>
+                      <span className={a.featured ? "text-white/90" : "text-gray-700"}>{f}</span>
                     </li>
                   ))}
                 </ul>
@@ -286,9 +357,11 @@ export function Tarifs() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-20">
           {livraison.map((l, i) => (
             <Reveal key={l.label} delay={i * 100}>
-              <div className="text-center rounded-2xl bg-white border border-lavender-100/60 p-6 shadow-sm hover:shadow-md transition-all duration-300">
-                <div className="font-serif text-2xl font-bold text-forest mb-2">{l.value}</div>
-                <p className="text-gray-500 text-xs leading-relaxed">{l.label}</p>
+              <div className="text-center rounded-2xl bg-white border border-lavender-100/60 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+                <div className="font-serif text-2xl font-bold text-forest mb-2 tabular-nums">
+                  {l.value}
+                </div>
+                <p className="text-gray-700 text-xs leading-relaxed">{l.label}</p>
               </div>
             </Reveal>
           ))}
@@ -297,15 +370,17 @@ export function Tarifs() {
         {/* ─── CTA ─── */}
         <Reveal className="text-center">
           <a
-            href="#contact"
-            className="group inline-flex items-center gap-3 rounded-full bg-forest px-10 py-5 text-lg font-medium text-white shadow-xl shadow-forest/20 transition-all duration-500 hover:bg-forest-light hover:shadow-2xl hover:-translate-y-1"
+            href="/devis"
+            className="group inline-flex items-center gap-3 rounded-full bg-forest px-10 py-5 text-lg font-medium text-white shadow-xl shadow-forest/20 transition-all duration-300 hover:bg-forest-light hover:shadow-2xl hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
           >
-            Démarrer gratuitement
-            <ArrowRight size={20} className="transition-transform group-hover:translate-x-1" />
+            Lancer mon devis personnalisé
+            <ArrowRight
+              size={20}
+              aria-hidden
+              className="transition-transform group-hover:translate-x-1"
+            />
           </a>
-          <p className="mt-4 text-gray-400 text-sm">
-            Sans engagement — Devis personnalisé sous 24h
-          </p>
+          <p className="mt-4 text-gray-600 text-sm">Sans engagement — Réponse sous 24 h ouvrées</p>
         </Reveal>
       </div>
     </section>
