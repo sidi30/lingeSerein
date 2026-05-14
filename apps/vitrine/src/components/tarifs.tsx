@@ -301,9 +301,15 @@ export function Tarifs() {
                 }`}
               >
                 {a.featured && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-lavender-500 px-4 py-1 text-xs font-semibold text-white uppercase tracking-wider">
+                  <motion.div
+                    initial={{ opacity: 0, y: -8, scale: 0.7 }}
+                    whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                    viewport={{ once: true, amount: 0.5 }}
+                    transition={{ type: "spring", stiffness: 240, damping: 14, delay: 0.2 }}
+                    className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-lavender-500 px-4 py-1 text-xs font-semibold text-white uppercase tracking-wider shadow-lg shadow-lavender-300/40"
+                  >
                     Populaire
-                  </div>
+                  </motion.div>
                 )}
 
                 <div className="mb-6">
