@@ -1,5 +1,8 @@
+"use client";
+
 import Image from "next/image";
 import { ShieldCheck, Truck, Leaf, Clock, Repeat, Star } from "lucide-react";
+import { motion } from "motion/react";
 import { Reveal } from "./reveal";
 
 const avantages = [
@@ -35,6 +38,31 @@ const avantages = [
   },
 ];
 
+const container = {
+  hidden: {},
+  show: {
+    transition: { staggerChildren: 0.08, delayChildren: 0.1 },
+  },
+};
+
+const card = {
+  hidden: { opacity: 0, y: 24 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { type: "spring" as const, stiffness: 220, damping: 22 },
+  },
+};
+
+const iconV = {
+  hidden: { scale: 0, rotate: -90 },
+  show: {
+    scale: 1,
+    rotate: 0,
+    transition: { type: "spring" as const, stiffness: 260, damping: 14 },
+  },
+};
+
 export function Avantages() {
   return (
     <section id="avantages" className="relative py-28 md:py-36 gradient-lavender overflow-hidden">
@@ -43,14 +71,21 @@ export function Avantages() {
       <div className="mx-auto max-w-7xl px-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
           <Reveal>
-            <div className="relative">
-              <div className="absolute -inset-4 rounded-[2rem] bg-lavender-100/50 rotate-2" />
+            <div className="relative group">
+              <motion.div
+                aria-hidden
+                initial={{ rotate: 0 }}
+                whileInView={{ rotate: 2 }}
+                viewport={{ once: true }}
+                transition={{ duration: 1, ease: "easeOut" }}
+                className="absolute -inset-4 rounded-[2rem] bg-lavender-100/50"
+              />
               <Image
                 src="/site/livraison-hotel.jpeg"
                 alt="Livraison de linge frais à l'hôtel"
                 width={700}
                 height={467}
-                className="relative rounded-3xl shadow-2xl shadow-forest/10 object-cover"
+                className="relative rounded-3xl shadow-2xl shadow-forest/10 object-cover transition-transform duration-700 group-hover:scale-[1.02]"
               />
             </div>
           </Reveal>
@@ -66,23 +101,35 @@ export function Avantages() {
               </h2>
             </Reveal>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {avantages.map((item, i) => (
-                <Reveal key={item.title} delay={i * 100}>
-                  <div className="group flex gap-4 rounded-2xl bg-white/60 p-5 border border-lavender-100/40 transition-all duration-300 hover:bg-white hover:shadow-lg hover:shadow-lavender-100/30">
-                    <div className="shrink-0 mt-0.5 flex items-center justify-center w-10 h-10 rounded-xl bg-forest/5 text-forest group-hover:bg-forest group-hover:text-white transition-colors duration-300">
-                      {item.icon}
-                    </div>
-                    <div>
-                      <h3 className="font-serif text-base font-semibold text-forest mb-1">
-                        {item.title}
-                      </h3>
-                      <p className="text-gray-700 text-sm leading-relaxed">{item.description}</p>
-                    </div>
+            <motion.div
+              variants={container}
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true, amount: 0.2 }}
+              className="grid grid-cols-1 sm:grid-cols-2 gap-6"
+            >
+              {avantages.map((item) => (
+                <motion.div
+                  key={item.title}
+                  variants={card}
+                  whileHover={{ y: -4 }}
+                  className="group flex gap-4 rounded-2xl bg-white/60 p-5 border border-lavender-100/40 transition-colors duration-300 hover:bg-white hover:shadow-lg hover:shadow-lavender-100/40"
+                >
+                  <motion.div
+                    variants={iconV}
+                    className="shrink-0 mt-0.5 flex items-center justify-center w-10 h-10 rounded-xl bg-forest/5 text-forest group-hover:bg-forest group-hover:text-white group-hover:rotate-6 transition-all duration-300"
+                  >
+                    {item.icon}
+                  </motion.div>
+                  <div>
+                    <h3 className="font-serif text-base font-semibold text-forest mb-1">
+                      {item.title}
+                    </h3>
+                    <p className="text-gray-700 text-sm leading-relaxed">{item.description}</p>
                   </div>
-                </Reveal>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           </div>
         </div>
       </div>
