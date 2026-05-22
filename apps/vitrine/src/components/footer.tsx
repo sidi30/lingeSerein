@@ -84,6 +84,9 @@ export function Footer() {
             <a href="/cgv" className="text-xs text-white/60 hover:text-white transition-colors">
               CGV
             </a>
+            <a href="/cgps" className="text-xs text-white/60 hover:text-white transition-colors">
+              CGPS
+            </a>
           </div>
         </div>
       </div>

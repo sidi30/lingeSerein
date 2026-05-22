@@ -22,6 +22,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.2,
     },
     { url: `${base}/cgv`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
+    { url: `${base}/cgps`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
     {
       url: `${base}/politique-confidentialite`,
       lastModified: now,
