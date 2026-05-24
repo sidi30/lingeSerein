@@ -1,3 +1,5 @@
+"use client";
+
 import { ArrowRight, Check } from "lucide-react";
 import { motion } from "motion/react";
 import { Reveal } from "./reveal";
