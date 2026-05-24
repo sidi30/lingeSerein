@@ -6,23 +6,30 @@ import { useEffect, useRef, useState } from "react";
 const steps = [
   {
     number: "01",
-    title: "Échangeons ensemble",
+    title: "Vous commandez",
     description:
-      "Nous analysons vos besoins : volume, fréquence, types de linge. Un devis personnalisé vous est proposé sous 24h.",
+      "Par email, téléphone ou SMS. On convient ensemble d'un créneau de livraison adapté à votre planning de check-in.",
     image: "/site/pub-vitrine.jpeg",
   },
   {
     number: "02",
-    title: "Nous prenons le relais",
+    title: "On livre le linge propre",
     description:
-      "Collecte, lavage professionnel, contrôle qualité et conditionnement soigné. Votre linge est traité avec le plus grand soin.",
+      "Kits pliés, emballés, prêts à déposer dans le logement. Qualité blanchisserie garantie à chaque rotation.",
     image: "/site/pack-linge.jpeg",
   },
   {
     number: "03",
-    title: "Livraison à votre porte",
+    title: "Vous accueillez vos voyageurs",
     description:
-      "Votre linge frais et impeccable est livré selon le planning convenu. Simple, ponctuel, serein.",
+      "Le linge fait partie de l'expérience. Qualité hôtelière, premiers regards positifs, avis propreté qui s'améliorent.",
+    image: "/site/lit-provencal.png",
+  },
+  {
+    number: "04",
+    title: "On reprend le linge sale",
+    description:
+      "Lors de la livraison suivante, on reprend tout. Vous ne gérez rien, on s'occupe de tout, rotation après rotation.",
     image: "/site/livraison-linge.jpeg",
   },
 ];
@@ -81,7 +88,7 @@ export function HowItWorks() {
               Comment ça marche ?
             </h2>
             <p className="mt-6 text-gray-700 max-w-2xl mx-auto text-lg leading-relaxed">
-              Trois étapes simples pour ne plus jamais vous soucier de votre linge.
+              De la commande à la reprise, on gère tout à votre place.
             </p>
           </div>
           <div className="flex flex-col gap-16">
@@ -136,7 +143,7 @@ export function HowItWorks() {
               Comment ça marche ?
             </h2>
             <p className="mt-4 text-gray-700 max-w-2xl mx-auto text-base md:text-lg">
-              Trois étapes simples pour ne plus jamais vous soucier de votre linge.
+              De la commande à la reprise, on gère tout à votre place.
             </p>
           </div>
 

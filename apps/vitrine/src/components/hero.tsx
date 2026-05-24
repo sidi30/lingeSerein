@@ -4,21 +4,19 @@ import Image from "next/image";
 import { ArrowRight, Phone, ChevronDown } from "lucide-react";
 import { motion, useScroll, useTransform, useReducedMotion } from "motion/react";
 import { Magnetic } from "./magnetic";
-import { AvailabilityBadge } from "./availability-badge";
 
 function KineticHeadline() {
   const reduced = useReducedMotion();
   const words = [
-    { text: "Votre", className: "text-forest" },
-    { text: "linge,", className: "text-forest" },
-    { text: "notre", className: "text-lavender-700" },
-    { text: "sérénité", className: "text-lavender-700" },
+    { text: "Le linge", className: "text-forest" },
+    { text: "propre,", className: "text-forest" },
+    { text: "livré.", className: "text-lavender-700" },
   ];
   if (reduced) {
     return (
       <h1 className="font-serif text-5xl md:text-6xl xl:text-7xl font-bold leading-[1.1] tracking-tight">
-        <span className="text-forest">Votre linge, </span>
-        <span className="text-lavender-700">notre sérénité</span>
+        <span className="text-forest">Le linge propre, </span>
+        <span className="text-lavender-700">livré.</span>
       </h1>
     );
   }
@@ -80,24 +78,41 @@ export function Hero() {
       >
         <KineticHeadline />
 
-        <p className="mt-8 animate-fade-in-up delay-200 text-lg md:text-xl text-gray-800 max-w-2xl mx-auto leading-relaxed font-light">
-          Service de location et d&apos;entretien de linge hôtelier basé à Orange, au cœur du
-          Vaucluse.
-          <br className="hidden md:block" />
-          Une qualité irréprochable, livrée avec soin jusqu&apos;à votre établissement.
+        <p className="mt-4 animate-fade-in-up delay-100 text-xl md:text-2xl text-gray-700 max-w-xl mx-auto font-light leading-snug">
+          Vous accueillez, on s&apos;occupe du reste.
         </p>
 
-        <div className="mt-6 animate-fade-in-up delay-300">
-          <AvailabilityBadge />
+        <p className="mt-3 animate-fade-in-up delay-200 text-base text-gray-600 max-w-xl mx-auto leading-relaxed">
+          Location, livraison et entretien de linge de bain et de lit pour vos locations de courte
+          durée. Basé à Orange, on livre partout dans le Vaucluse.
+        </p>
+
+        <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl mx-auto animate-fade-in-up delay-300">
+          {[
+            { value: "7,50 €", label: "set bain / rotation" },
+            { value: "16,50 €", label: "set lit / rotation" },
+            { value: "J+0", label: "livraison à Orange" },
+            { value: "0", label: "engagement contractuel" },
+          ].map((stat) => (
+            <div
+              key={stat.label}
+              className="rounded-2xl bg-white/70 backdrop-blur border border-lavender-100/60 px-4 py-3 text-center shadow-sm"
+            >
+              <div className="font-serif text-lg font-bold text-forest tabular-nums">
+                {stat.value}
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5 leading-tight">{stat.label}</div>
+            </div>
+          ))}
         </div>
 
-        <div className="mt-10 flex flex-col sm:flex-row items-center gap-4 animate-fade-in-up delay-400">
+        <div className="mt-8 flex flex-col sm:flex-row items-center gap-4 animate-fade-in-up delay-400">
           <Magnetic strength={0.3}>
             <a
-              href="/devis"
+              href="#services"
               className="group inline-flex items-center gap-3 rounded-full bg-forest px-8 py-4 text-base font-medium text-white shadow-xl shadow-forest/20 transition-all duration-300 hover:bg-forest-light hover:shadow-2xl hover:shadow-forest/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
             >
-              Obtenir un devis en 2 min
+              Découvrir nos offres
               <ArrowRight
                 size={18}
                 aria-hidden

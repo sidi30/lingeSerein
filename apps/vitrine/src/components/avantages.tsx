@@ -1,40 +1,34 @@
 "use client";
 
 import Image from "next/image";
-import { ShieldCheck, Truck, Leaf, Clock, Repeat, Star } from "lucide-react";
+import { MapPin, Repeat, Calendar, Star } from "lucide-react";
 import { motion } from "motion/react";
 import { Reveal } from "./reveal";
 
 const avantages = [
   {
-    icon: <ShieldCheck size={24} />,
-    title: "Qualité garantie",
-    description: "Contrôle rigoureux à chaque étape. Votre linge arrive toujours impeccable.",
-  },
-  {
-    icon: <Truck size={24} />,
-    title: "Livraison fiable",
-    description: "Collecte et livraison planifiées. Jamais de rupture, jamais de retard.",
-  },
-  {
-    icon: <Leaf size={24} />,
-    title: "Éco-responsable",
-    description: "Produits écologiques, tournées optimisées et linge durable.",
-  },
-  {
-    icon: <Clock size={24} />,
-    title: "Gain de temps",
-    description: "Plus de gestion interne. Concentrez-vous sur l'accueil de vos clients.",
+    icon: <MapPin size={24} />,
+    title: "100 % local",
+    description:
+      "Basés à Orange, on connaît le Vaucluse, ses routes, ses saisons. Réactivité garantie, pas de prestataire national impersonnel.",
   },
   {
     icon: <Repeat size={24} />,
-    title: "Flexibilité totale",
-    description: "Adaptez votre volume en un clic, selon la saison et votre activité.",
+    title: "Rotation simplifiée",
+    description:
+      "On reprend le sale et on livre le propre en même temps. Zéro stock à gérer, zéro machine à lancer entre deux voyageurs.",
+  },
+  {
+    icon: <Calendar size={24} />,
+    title: "Sans engagement",
+    description:
+      "Pas d'abonnement, pas de contrat annuel. Vous commandez quand vous en avez besoin, à la rotation, sans minimum.",
   },
   {
     icon: <Star size={24} />,
-    title: "Accompagnement dédié",
-    description: "Un interlocuteur unique, des conseils personnalisés et une réactivité totale.",
+    title: "Qualité hôtelière",
+    description:
+      "Linge blanc, 550 g/m², entretenu en blanchisserie. Vos voyageurs retrouvent la qualité d'un hôtel dans votre logement.",
   },
 ];
 
@@ -93,11 +87,12 @@ export function Avantages() {
           <div>
             <Reveal>
               <span className="inline-block text-sm font-medium uppercase tracking-[0.2em] text-lavender-700 mb-4">
-                Pourquoi nous choisir
+                Pourquoi Linge Serein ?
               </span>
               <h2 className="font-serif text-4xl md:text-5xl font-bold text-forest mb-12">
-                La sérénité
-                <br />à chaque livraison
+                Ce que nos clients
+                <br />
+                apprécient
               </h2>
             </Reveal>
 
