@@ -21,11 +21,11 @@ export default function PolitiqueConfidentialite() {
       <p>
         <strong>Linge Serein</strong>
         <br />
-        Activité de location et entretien de linge hôtelier (B2B), exercée à titre individuel.
+        Rayana MAHAMAN MOUSTAPHA — Micro-entreprise
         <br />
-        Adresse : Orange, 84100, Vaucluse, France.
+        Rue Simone Weil — 84100 Orange, Vaucluse, France.
         <br />
-        Téléphone : <a href="tel:+33685218270">06 85 21 82 70</a>
+        Téléphone : <a href="tel:+33753569548">07 53 56 95 48</a>
         <br />
         Email : <a href="mailto:lingeserein@gmail.com">lingeserein@gmail.com</a>
       </p>

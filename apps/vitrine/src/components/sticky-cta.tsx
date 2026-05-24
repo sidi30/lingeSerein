@@ -30,8 +30,8 @@ export function StickyCTA() {
             Devis 2 min
           </a>
           <a
-            href="tel:+33685218270"
-            aria-label="Appeler Linge Serein au 06 85 21 82 70"
+            href="tel:+33753569548"
+            aria-label="Appeler Linge Serein au 07 53 56 95 48"
             className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-lavender-300 px-4 py-3 text-sm font-medium text-forest transition-colors duration-200 hover:bg-lavender-50"
           >
             <Phone size={16} aria-hidden className="text-lavender-700" />

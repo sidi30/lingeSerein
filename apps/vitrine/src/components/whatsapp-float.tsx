@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const PHONE = "33685218270";
+const PHONE = "33753569548";
 const PRESET = encodeURIComponent(
   "Bonjour, je souhaite obtenir des informations sur votre service de linge hôtelier.",
 );

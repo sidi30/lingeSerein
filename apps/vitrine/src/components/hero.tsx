@@ -107,8 +107,8 @@ export function Hero() {
           </Magnetic>
           <Magnetic strength={0.25}>
             <a
-              href="tel:+33685218270"
-              aria-label="Nous appeler au 06 85 21 82 70"
+              href="tel:+33753569548"
+              aria-label="Nous appeler au 07 53 56 95 48"
               className="inline-flex items-center gap-3 rounded-full border-2 border-lavender-400 bg-cream/60 backdrop-blur px-8 py-4 text-base font-medium text-forest transition-all duration-300 hover:bg-lavender-50 hover:border-lavender-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lavender-500 focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
             >
               <Phone size={18} aria-hidden className="text-lavender-700" />

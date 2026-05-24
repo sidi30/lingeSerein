@@ -89,7 +89,7 @@ export function Contact() {
 
             <div className="flex flex-col gap-5">
               <a
-                href="tel:+33685218270"
+                href="tel:+33753569548"
                 className="group flex items-center gap-4 text-gray-800 hover:text-forest transition-colors"
               >
                 <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-lavender-50 group-hover:bg-lavender-100 transition-colors">
@@ -97,7 +97,7 @@ export function Contact() {
                 </div>
                 <div>
                   <div className="text-xs text-gray-600 uppercase tracking-wider">Téléphone</div>
-                  <div className="font-medium">06 85 21 82 70</div>
+                  <div className="font-medium">07 53 56 95 48</div>
                 </div>
               </a>
 
@@ -122,7 +122,7 @@ export function Contact() {
                   <div className="text-xs text-gray-600 uppercase tracking-wider">
                     Zone d&apos;intervention
                   </div>
-                  <div className="font-medium">Orange &mdash; Vaucluse, Provence</div>
+                  <div className="font-medium">Rue Simone Weil &mdash; 84100 Orange, Vaucluse</div>
                 </div>
               </div>
             </div>

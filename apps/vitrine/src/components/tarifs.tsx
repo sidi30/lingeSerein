@@ -5,7 +5,15 @@ import { ArrowRight } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { Reveal } from "./reveal";
 
-function AnimatedPrice({ value, suffix = " €" }: { value: string; suffix?: string }) {
+function AnimatedPrice({
+  value,
+  suffix = " €",
+  decimals = 0,
+}: {
+  value: string;
+  suffix?: string;
+  decimals?: number;
+}) {
   const target = Number(value);
   const reduced = useReducedMotion();
   const [val, setVal] = useState(reduced ? target : 0);
@@ -28,7 +36,10 @@ function AnimatedPrice({ value, suffix = " €" }: { value: string; suffix?: str
           const step = (now: number) => {
             const p = Math.min(1, (now - t0) / dur);
             const eased = 1 - Math.pow(1 - p, 3);
-            setVal(Math.round(target * eased));
+            const raw = target * eased;
+            setVal(
+              decimals > 0 ? Math.round(raw * 10 ** decimals) / 10 ** decimals : Math.round(raw),
+            );
             if (p < 1) requestAnimationFrame(step);
           };
           requestAnimationFrame(step);
@@ -39,90 +50,66 @@ function AnimatedPrice({ value, suffix = " €" }: { value: string; suffix?: str
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [target, reduced]);
+  }, [target, reduced, decimals]);
+
+  const display = decimals > 0 ? val.toFixed(decimals).replace(".", ",") : String(val);
 
   return (
     <span ref={ref} className="tabular-nums">
-      {val}
+      {display}
       {suffix}
     </span>
   );
 }
 
-const slugByGamme: Record<string, string> = {
-  "Pack Confort": "confort",
-  "Pack Hôtel": "hotel",
-  "Pack Prestige": "prestige",
-};
-
 /* ─── Données ─── */
 
-const gammes = [
+const produits = [
   {
-    name: "Pack Confort",
-    grammage: "500 g/m²",
-    price: "6",
+    name: "Set bain",
+    price: "7.5",
     unit: "/ set",
-    items: ["Drap de bain 70×140", "Serviette 50×90", "Tapis de bain 50×70"],
+    items: [
+      "Serviettes de bain",
+      "Tapis de bain",
+      "Lavage & séchage inclus",
+      "Livraison & reprise incluse",
+    ],
     featured: false,
   },
   {
-    name: "Pack Hôtel",
-    grammage: "550 g/m²",
-    price: "9",
+    name: "Set lit",
+    price: "16.5",
     unit: "/ set",
-    items: ["Drap de bain 70×140", "Serviette 50×90", "Tapis de bain 50×70", "Gant de toilette"],
+    items: [
+      "Drap housse",
+      "Housse de couette",
+      "Taie d'oreiller",
+      "Lavage & séchage inclus",
+      "Livraison & reprise incluse",
+    ],
     featured: true,
-  },
-  {
-    name: "Pack Prestige",
-    grammage: "600 g/m² coton peigné",
-    price: "14",
-    unit: "/ set",
-    items: ["Drap de bain 100×150", "Serviette peignée", "Tapis épais", "Gant de toilette"],
-    featured: false,
   },
 ];
 
-const degressif = {
-  headers: ["1–3 sets", "4–9 sets", "10–19 sets", "20+ sets"],
-  rows: [
-    { name: "Confort", prices: ["6,00 €", "5,50 €", "5,00 €", "4,50 €"] },
-    { name: "Hôtel", prices: ["9,00 €", "8,50 €", "8,00 €", "7,00 €"] },
-    { name: "Prestige", prices: ["14,00 €", "13,00 €", "12,00 €", "11,00 €"] },
-    { name: "Livraison", prices: ["+5 €", "Offerte", "Offerte", "Offerte"] },
-  ],
-};
-
-const abonnements = [
-  {
-    name: "Starter",
-    price: "49",
-    saving: "9",
-    features: ["8 sets Confort", "2 livraisons / mois"],
-    featured: false,
-  },
-  {
-    name: "Essentielle",
-    price: "89",
-    saving: "39",
-    features: ["12 sets Hôtel", "4 livraisons / mois", "Alertes automatiques"],
-    featured: true,
-  },
-  {
-    name: "Pro",
-    price: "169",
-    saving: "31",
-    features: ["24 sets au choix", "8 livraisons / mois", "Multi-logements"],
-    featured: false,
-  },
+const degradations = [
+  { article: "Petite serviette 30×50 perdue ou inutilisable", tarif: "2,50 €" },
+  { article: "Serviette 50×90 perdue ou inutilisable", tarif: "5,00 €" },
+  { article: "Serviette 70×150 perdue ou inutilisable", tarif: "9,00 €" },
+  { article: "Serviette 90×150 perdue ou inutilisable", tarif: "12,00 €" },
+  { article: "Tapis de bain perdu ou inutilisable", tarif: "8,00 €" },
+  { article: "Taie / petite pièce de lit perdue ou inutilisable", tarif: "6,00 €" },
+  { article: "Housse de couette / drap housse perdu(e) ou inutilisable", tarif: "15,00 €" },
+  { article: "Kit lit complet perdu ou inutilisable", tarif: "29,90 €" },
+  { article: "Article très sale — traitement renforcé", tarif: "5,00 € / kit" },
+  { article: "Article non restitué après relance", tarif: "Remplacement + frais de gestion" },
 ];
 
 const livraison = [
-  { value: "5 €", label: "Commande de 1 à 3 sets" },
-  { value: "Offerte", label: "Dès 4 sets ou en abonnement" },
-  { value: "1–2× / sem.", label: "Créneau fixe choisi par vous" },
-  { value: "48h max", label: "Délai de livraison Vaucluse" },
+  { value: "Offerte", label: "À Orange dès 4 kits commandés" },
+  { value: "Offerte", label: "Dès 120 € de commande (alentours)" },
+  { value: "12 €", label: "Zone proche — Vaucluse" },
+  { value: "15 €", label: "Zone élargie" },
 ];
 
 /* ─── Composant ─── */
@@ -140,167 +127,39 @@ export function Tarifs() {
             Nos tarifs
           </span>
           <h2 className="font-serif text-4xl md:text-5xl font-bold text-forest">
-            Choisissez la formule
+            Des tarifs clairs,
             <br />
-            adaptée à votre hébergement
+            sans surprise
           </h2>
           <p className="mt-6 text-gray-700 max-w-2xl mx-auto text-lg leading-relaxed">
-            Des tarifs transparents, sans engagement. Plus vous commandez, plus le prix baisse.
+            Location, entretien et livraison de linge de bain et de lit pour vos locations courte
+            durée.
           </p>
         </Reveal>
 
-        {/* ─── Gammes ─── */}
+        {/* ─── Produits ─── */}
         <Reveal className="mb-6">
           <h3 className="font-serif text-2xl font-bold text-forest text-center mb-2">
-            Nos gammes de linge
+            Nos prestations
           </h3>
           <p className="text-gray-600 text-center text-sm mb-10">
-            Chaque set comprend tout le linge de bain pour une chambre
+            Tout le linge, l&apos;entretien et la logistique inclus dans un tarif unique
           </p>
         </Reveal>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-24">
-          {gammes.map((g, i) => (
-            <Reveal key={g.name} delay={i * 100}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-24 max-w-3xl mx-auto">
+          {produits.map((p, i) => (
+            <Reveal key={p.name} delay={i * 100}>
               <a
-                href={`/devis?gamme=${slugByGamme[g.name] ?? ""}`}
-                aria-label={`Simuler un devis pour le ${g.name}`}
+                href="/devis"
+                aria-label={`Simuler un devis pour le ${p.name}`}
                 className={`block relative h-full rounded-3xl p-8 transition-all duration-300 hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 focus-visible:ring-offset-cream ${
-                  g.featured
+                  p.featured
                     ? "bg-forest text-white shadow-xl shadow-forest/20 ring-2 ring-forest"
                     : "bg-white border border-lavender-100/60 shadow-sm hover:shadow-lg"
                 }`}
               >
-                {g.featured && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -8, scale: 0.7 }}
-                    whileInView={{ opacity: 1, y: 0, scale: 1 }}
-                    viewport={{ once: true, amount: 0.5 }}
-                    transition={{ type: "spring", stiffness: 240, damping: 14, delay: 0.2 }}
-                    className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-lavender-500 px-4 py-1 text-xs font-semibold text-white uppercase tracking-wider shadow-lg shadow-lavender-300/40"
-                  >
-                    Recommandé
-                  </motion.div>
-                )}
-
-                <div className="mb-6">
-                  <h4
-                    className={`font-serif text-xl font-bold mb-1 ${g.featured ? "text-white" : "text-forest"}`}
-                  >
-                    {g.name}
-                  </h4>
-                  <p className={`text-xs ${g.featured ? "text-white/80" : "text-gray-600"}`}>
-                    {g.grammage}
-                  </p>
-                </div>
-
-                <div className="mb-8">
-                  <span
-                    className={`font-serif text-5xl font-bold ${g.featured ? "text-white" : "text-forest"}`}
-                  >
-                    <AnimatedPrice value={g.price} />
-                  </span>
-                  <span
-                    className={`text-sm ml-1 ${g.featured ? "text-white/80" : "text-gray-600"}`}
-                  >
-                    {g.unit}
-                  </span>
-                </div>
-
-                <ul className="flex flex-col gap-3 mb-6">
-                  {g.items.map((item) => (
-                    <li key={item} className="flex items-start gap-3 text-sm">
-                      <span
-                        aria-hidden
-                        className={`shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full ${g.featured ? "bg-lavender-300" : "bg-lavender-500"}`}
-                      />
-                      <span className={g.featured ? "text-white/90" : "text-gray-700"}>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                <div
-                  className={`mt-auto inline-flex items-center gap-2 text-sm font-medium ${
-                    g.featured ? "text-lavender-200" : "text-lavender-700"
-                  }`}
-                >
-                  Simuler ce pack
-                  <ArrowRight size={14} aria-hidden />
-                </div>
-              </a>
-            </Reveal>
-          ))}
-        </div>
-
-        {/* ─── Tarifs dégressifs ─── */}
-        <Reveal className="mb-24">
-          <h3 className="font-serif text-2xl font-bold text-forest text-center mb-2">
-            Tarifs dégressifs
-          </h3>
-          <p className="text-gray-600 text-center text-sm mb-10">
-            Plus vous commandez, plus le prix unitaire baisse
-          </p>
-
-          <div className="overflow-x-auto rounded-2xl border border-lavender-100/60 shadow-sm">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-forest text-white">
-                  <th className="text-left font-semibold px-6 py-4 rounded-tl-2xl">Gamme</th>
-                  {degressif.headers.map((h, i) => (
-                    <th
-                      key={h}
-                      className={`text-center font-semibold px-6 py-4 ${i === degressif.headers.length - 1 ? "rounded-tr-2xl" : ""}`}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {degressif.rows.map((row, i) => (
-                  <tr
-                    key={row.name}
-                    className={`${i % 2 === 0 ? "bg-white" : "bg-lavender-50/50"} ${i === degressif.rows.length - 1 ? "border-t-2 border-lavender-200" : ""}`}
-                  >
-                    <td className="px-6 py-4 font-medium text-forest">{row.name}</td>
-                    {row.prices.map((p, j) => (
-                      <td
-                        key={j}
-                        className={`text-center px-6 py-4 tabular-nums ${
-                          p === "Offerte" ? "text-forest font-semibold" : "text-gray-700"
-                        }`}
-                      >
-                        {p}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Reveal>
-
-        {/* ─── Abonnements ─── */}
-        <Reveal className="mb-6">
-          <h3 className="font-serif text-2xl font-bold text-forest text-center mb-2">
-            Abonnements mensuels
-          </h3>
-          <p className="text-gray-600 text-center text-sm mb-10">
-            Sans engagement, modifiable à tout moment
-          </p>
-        </Reveal>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-24">
-          {abonnements.map((a, i) => (
-            <Reveal key={a.name} delay={i * 100}>
-              <div
-                className={`relative h-full rounded-3xl p-8 transition-all duration-300 hover:-translate-y-1 ${
-                  a.featured
-                    ? "bg-forest text-white shadow-xl shadow-forest/20 ring-2 ring-forest"
-                    : "bg-white border border-lavender-100/60 shadow-sm hover:shadow-lg"
-                }`}
-              >
-                {a.featured && (
+                {p.featured && (
                   <motion.div
                     initial={{ opacity: 0, y: -8, scale: 0.7 }}
                     whileInView={{ opacity: 1, y: 0, scale: 1 }}
@@ -314,43 +173,46 @@ export function Tarifs() {
 
                 <div className="mb-6">
                   <h4
-                    className={`font-serif text-xl font-bold ${a.featured ? "text-white" : "text-forest"}`}
+                    className={`font-serif text-xl font-bold mb-1 ${p.featured ? "text-white" : "text-forest"}`}
                   >
-                    {a.name}
+                    {p.name}
                   </h4>
                 </div>
 
-                <div className="mb-2">
+                <div className="mb-8">
                   <span
-                    className={`font-serif text-5xl font-bold ${a.featured ? "text-white" : "text-forest"}`}
+                    className={`font-serif text-5xl font-bold ${p.featured ? "text-white" : "text-forest"}`}
                   >
-                    <AnimatedPrice value={a.price} />
+                    <AnimatedPrice value={p.price} decimals={2} />
                   </span>
                   <span
-                    className={`text-sm ml-1 ${a.featured ? "text-white/80" : "text-gray-600"}`}
+                    className={`text-sm ml-1 ${p.featured ? "text-white/80" : "text-gray-600"}`}
                   >
-                    / mois
+                    {p.unit}
                   </span>
                 </div>
 
-                <p
-                  className={`text-xs mb-8 ${a.featured ? "text-lavender-200" : "text-lavender-700"}`}
-                >
-                  Économie de {a.saving} € vs. tarif unitaire
-                </p>
-
-                <ul className="flex flex-col gap-3">
-                  {a.features.map((f) => (
-                    <li key={f} className="flex items-start gap-3 text-sm">
+                <ul className="flex flex-col gap-3 mb-6">
+                  {p.items.map((item) => (
+                    <li key={item} className="flex items-start gap-3 text-sm">
                       <span
                         aria-hidden
-                        className={`shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full ${a.featured ? "bg-lavender-300" : "bg-lavender-500"}`}
+                        className={`shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full ${p.featured ? "bg-lavender-300" : "bg-lavender-500"}`}
                       />
-                      <span className={a.featured ? "text-white/90" : "text-gray-700"}>{f}</span>
+                      <span className={p.featured ? "text-white/90" : "text-gray-700"}>{item}</span>
                     </li>
                   ))}
                 </ul>
-              </div>
+
+                <div
+                  className={`mt-auto inline-flex items-center gap-2 text-sm font-medium ${
+                    p.featured ? "text-lavender-200" : "text-lavender-700"
+                  }`}
+                >
+                  Simuler mon devis
+                  <ArrowRight size={14} aria-hidden />
+                </div>
+              </a>
             </Reveal>
           ))}
         </div>
@@ -360,7 +222,7 @@ export function Tarifs() {
           <h3 className="font-serif text-2xl font-bold text-forest text-center mb-10">Livraison</h3>
         </Reveal>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-20">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-24">
           {livraison.map((l, i) => (
             <Reveal key={l.label} delay={i * 100}>
               <div className="text-center rounded-2xl bg-white border border-lavender-100/60 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
@@ -372,6 +234,47 @@ export function Tarifs() {
             </Reveal>
           ))}
         </div>
+
+        {/* ─── Barème dégradations ─── */}
+        <Reveal className="mb-24">
+          <h3 className="font-serif text-2xl font-bold text-forest text-center mb-2">
+            Barème de remplacement
+          </h3>
+          <p className="text-gray-600 text-center text-sm mb-10">
+            Applicable en cas de perte ou dégradation hors usure normale
+          </p>
+
+          <div className="overflow-x-auto rounded-2xl border border-lavender-100/60 shadow-sm">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-forest text-white">
+                  <th className="text-left font-semibold px-6 py-4 rounded-tl-2xl">Article</th>
+                  <th className="text-center font-semibold px-6 py-4 rounded-tr-2xl w-48">
+                    Facturation
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {degradations.map((d, i) => (
+                  <tr key={d.article} className={i % 2 === 0 ? "bg-white" : "bg-lavender-50/50"}>
+                    <td className="px-6 py-4 text-gray-700">{d.article}</td>
+                    <td className="text-center px-6 py-4 font-medium text-forest tabular-nums">
+                      {d.tarif}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-gray-500 mt-4 text-center">
+            Taches indélébiles, brûlures et déchirures : prix de remplacement de l&apos;article
+            concerné. Voir{" "}
+            <a href="/cgv" className="underline text-lavender-700 hover:text-forest">
+              CGV article 10
+            </a>
+            .
+          </p>
+        </Reveal>
 
         {/* ─── CTA ─── */}
         <Reveal className="text-center">

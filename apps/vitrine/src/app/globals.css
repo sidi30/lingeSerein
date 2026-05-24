@@ -272,6 +272,36 @@ body {
   color: #111827;
   font-weight: 600;
 }
+.prose-legal table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+  font-size: 0.875rem;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  border: 1px solid rgba(196, 181, 253, 0.3);
+}
+.prose-legal thead tr {
+  background-color: rgba(26, 79, 56, 0.06);
+}
+.prose-legal th {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  color: var(--color-forest);
+  border-bottom: 1px solid rgba(196, 181, 253, 0.4);
+}
+.prose-legal td {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid rgba(196, 181, 253, 0.2);
+  vertical-align: top;
+}
+.prose-legal tbody tr:last-child td {
+  border-bottom: none;
+}
+.prose-legal tbody tr:nth-child(even) {
+  background-color: rgba(237, 233, 254, 0.2);
+}
 
 /* Marquee */
 @keyframes marquee {

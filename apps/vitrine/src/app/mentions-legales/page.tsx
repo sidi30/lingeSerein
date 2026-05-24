@@ -14,20 +14,18 @@ export default function MentionsLegales() {
       <p>
         <strong>Linge Serein</strong>
         <br />
-        Service B2B de location et entretien de linge hôtelier.
+        Rayana MAHAMAN MOUSTAPHA — Micro-entreprise
         <br />
-        Siège social : Orange, 84100, Vaucluse, France.
+        Rue Simone Weil — 84100 Orange, Vaucluse, France.
         <br />
-        Téléphone : <a href="tel:+33685218270">06 85 21 82 70</a>
+        Téléphone : <a href="tel:+33753569548">07 53 56 95 48</a>
         <br />
         Email : <a href="mailto:lingeserein@gmail.com">lingeserein@gmail.com</a>
       </p>
       <p>
         <strong>SIRET :</strong> à compléter
         <br />
-        <strong>Numéro de TVA intracommunautaire :</strong> à compléter
-        <br />
-        <strong>Directeur de la publication :</strong> à compléter
+        <strong>Directeur de la publication :</strong> Rayana MAHAMAN MOUSTAPHA
       </p>
 
       <h2>Hébergement</h2>

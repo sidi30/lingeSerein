@@ -517,10 +517,10 @@ function DevisPageInner() {
                   />
                 </a>
                 <a
-                  href="tel:+33685218270"
+                  href="tel:+33753569548"
                   className="flex items-center justify-center rounded-full border border-lavender-300 w-full py-3 text-sm text-forest hover:bg-lavender-50 transition-colors"
                 >
-                  06 85 21 82 70
+                  07 53 56 95 48
                 </a>
               </div>
             </div>

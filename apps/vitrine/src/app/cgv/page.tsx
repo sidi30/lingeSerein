@@ -2,261 +2,320 @@ import type { Metadata } from "next";
 import { LegalPage } from "@/components/legal-page";
 
 export const metadata: Metadata = {
-  title: "Conditions générales de vente",
+  title: "Conditions générales de vente et de location",
   description:
-    "Conditions générales de vente du service de location et entretien de linge hôtelier — Linge Serein.",
+    "Conditions générales de vente et de location — Linge Serein, location et entretien de linge de bain et de lit.",
   robots: { index: true, follow: true },
 };
 
 export default function CGV() {
   return (
-    <LegalPage title="Conditions générales de vente" updatedAt="22 mai 2026">
+    <LegalPage title="Conditions générales de vente et de location" updatedAt="24 mai 2026">
       <p>
-        Les présentes conditions générales de vente (CGV) régissent l&apos;ensemble des relations
-        contractuelles entre <strong>Linge Serein</strong> (ci-après « le Prestataire ») et ses
-        clients professionnels (hôteliers, exploitants de gîtes, chambres d&apos;hôtes,
-        propriétaires en location saisonnière, résidences de tourisme — ci-après « le Client »).
-        Elles prévalent sur toute condition d&apos;achat du Client sauf accord écrit contraire signé
-        par le Prestataire.
-      </p>
-      <p>
-        Toute passation de commande vaut acceptation sans réserve des présentes CGV ainsi que des{" "}
-        <a href="/cgps">Conditions Générales de Prestation de Service (CGPS)</a>.
+        <strong>Linge Serein</strong> — Location &amp; entretien de linge de bain et de lit
+        <br />
+        Rayana MAHAMAN MOUSTAPHA — Micro-entreprise
+        <br />
+        Rue Simone Weil — 84100 Orange
+        <br />
+        Téléphone : <a href="tel:+33753569548">07 53 56 95 48</a> | Email :{" "}
+        <a href="mailto:lingeserein@gmail.com">lingeserein@gmail.com</a>
+        <br />
+        Zone de livraison : Vaucluse
       </p>
 
-      <h2>1. Objet et champ d&apos;application</h2>
+      <h2>Article 1 — Objet</h2>
       <p>
-        Linge Serein propose un service B2B de <strong>location</strong>, <strong>entretien</strong>{" "}
-        (lavage, séchage, repassage, pliage) et <strong>livraison</strong> de linge hôtelier dans le
-        Vaucluse (84), selon trois gammes :
+        Les présentes Conditions Générales de Vente et de Location (ci-après les « CGV »)
+        définissent les conditions dans lesquelles Linge Serein fournit à ses clients des
+        prestations de location, livraison, reprise, entretien et remplacement de linge de bain et
+        de lit destiné notamment aux locations de courte durée.
       </p>
+      <p>
+        Toute commande implique l&apos;acceptation pleine et entière des présentes CGV, sans
+        réserve.
+      </p>
+
+      <h2>Article 2 — Champ d&apos;application</h2>
+      <p>
+        Les présentes CGV s&apos;appliquent à toute commande passée auprès de Linge Serein, que le
+        Client agisse à titre professionnel ou particulier, par téléphone, message électronique,
+        formulaire ou tout autre moyen de commande proposé par le Prestataire.
+      </p>
+      <p>
+        Les CGV prévalent sur tout autre document du Client, sauf accord écrit contraire du
+        Prestataire.
+      </p>
+
+      <h2>Article 3 — Prestations proposées</h2>
+      <p>Linge Serein propose notamment :</p>
       <ul>
-        <li>
-          <strong>Confort</strong> — usage standard, entretien hebdomadaire.
-        </li>
-        <li>
-          <strong>Hôtel</strong> — qualité hôtellerie 3 étoiles, finitions soignées.
-        </li>
-        <li>
-          <strong>Prestige</strong> — linge haut de gamme, conditionnement premium.
-        </li>
-      </ul>
-      <p>Les présentes CGV s&apos;appliquent aux commandes ponctuelles comme aux abonnements.</p>
-
-      <h2>2. Formation du contrat</h2>
-      <p>
-        Toute commande ou abonnement est précédé d&apos;un devis émis par Linge Serein, valable{" "}
-        <strong>30 jours</strong> à compter de sa date d&apos;émission. Le contrat est formé à la
-        réception par Linge Serein du devis signé ou d&apos;un email d&apos;acceptation express du
-        Client. Aucune commande verbale ne peut engager le Prestataire.
-      </p>
-      <p>
-        Pour les abonnements, un <strong>bon de commande initial</strong> précisant la gamme, le
-        volume estimé de sets, la fréquence de livraison et l&apos;adresse d&apos;intervention est
-        obligatoire.
-      </p>
-
-      <h2>3. Tarifs et révision des prix</h2>
-      <p>
-        Les tarifs applicables sont ceux en vigueur au jour de la commande, tels qu&apos;affichés
-        sur <a href="/#tarifs">la page tarifs</a> du site. Ils sont exprimés{" "}
-        <strong>hors taxes (HT)</strong> ; la TVA au taux légal en vigueur s&apos;y ajoute.
-      </p>
-      <p>
-        Les frais de livraison sont <strong>offerts</strong> à partir de 4 sets par commande ou pour
-        tout abonnement actif. En deçà, un forfait de déplacement de <strong>8 € HT</strong> est
-        appliqué.
-      </p>
-      <p>
-        Les tarifs d&apos;abonnement peuvent être révisés une fois par an, au 1er janvier, avec un
-        préavis de <strong>60 jours</strong> par email. En cas de refus du Client, celui-ci peut
-        résilier son abonnement sans pénalité dans un délai de 30 jours suivant la notification.
-      </p>
-
-      <h2>4. Livraison et collecte</h2>
-      <p>
-        Linge Serein assure la livraison du linge propre et la collecte du linge sale dans tout le
-        Vaucluse selon la <a href="/zone-de-livraison">zone de livraison</a>. Les tournées sont
-        organisées selon un planning communiqué au Client lors de la prise de commande.
-      </p>
-      <p>
-        Le délai de traitement est de <strong>48 heures ouvrées</strong> entre la collecte du linge
-        sale et la livraison du linge propre, sauf circonstance exceptionnelle dûment notifiée. En
-        cas de retard supérieur à 24 heures par rapport au délai contractuel, le Client peut
-        demander un avoir correspondant à 10 % de la facturation du cycle concerné.
-      </p>
-      <p>
-        La livraison est réputée effectuée dès la remise du linge propre à une personne habilitée
-        sur site ou dans le contenant désigné. Toute réserve sur la livraison doit être formulée{" "}
-        <strong>dans les 24 heures</strong> par email.
-      </p>
-
-      <h2>5. Réserve de propriété</h2>
-      <p>
-        Le linge mis à disposition reste en toutes circonstances la{" "}
-        <strong>propriété exclusive de Linge Serein</strong> (article 2367 du Code civil). Le Client
-        n&apos;acquiert aucun droit de propriété, même partiel, sur le linge loué. Cette réserve
-        subsiste jusqu&apos;au paiement intégral de toutes les sommes dues.
-      </p>
-      <p>
-        En cas de procédure collective (redressement ou liquidation judiciaire), Linge Serein se
-        réserve le droit de revendiquer le linge en nature dans les conditions prévues par le Code
-        de commerce.
-      </p>
-
-      <h2>6. Obligations et usage du linge par le Client</h2>
-      <p>Le Client s&apos;engage à :</p>
-      <ul>
-        <li>
-          Utiliser le linge <strong>exclusivement</strong> dans le cadre de son activité
-          d&apos;hébergement déclarée.
-        </li>
-        <li>
-          Ne pas sous-louer, céder ou prêter le linge à des tiers sans accord écrit du Prestataire.
-        </li>
-        <li>
-          Conditionner le linge sale dans des sacs fermés fournis ou agréés par Linge Serein,
-          conformément au protocole décrit dans les CGPS.
-        </li>
-        <li>
-          Signaler <strong>immédiatement</strong> toute dégradation ou perte constatée avant la
-          collecte, par email ou WhatsApp.
-        </li>
-        <li>
-          Restituer la totalité du linge confié à chaque collecte. Tout article non restitué sans
-          justification est considéré comme perdu.
-        </li>
-      </ul>
-
-      <h2>7. Barème de dégradation et pertes</h2>
-      <p>
-        Toute dégradation anormale (hors usure normale liée à l&apos;entretien standard) ou perte de
-        linge sera facturée au Client selon le barème suivant, modulé selon l&apos;ancienneté de
-        l&apos;article :
-      </p>
-      <ul>
-        <li>
-          <strong>Linge neuf (0–6 mois)</strong> : 100 % du prix de remplacement catalogue.
-        </li>
-        <li>
-          <strong>Linge récent (6–18 mois)</strong> : 70 % du prix de remplacement catalogue.
-        </li>
-        <li>
-          <strong>Linge standard (&gt; 18 mois)</strong> : 40 % du prix de remplacement catalogue.
-        </li>
-      </ul>
-      <p>Types de dégradations facturables (liste non exhaustive) :</p>
-      <ul>
-        <li>Taches indélébiles (autobronzant, décolorant, peinture, huile moteur…).</li>
-        <li>Brûlures (cigarettes, fer à repasser).</li>
-        <li>Déchirures, découpes ou perforations volontaires.</li>
-        <li>Disparition totale de l&apos;article.</li>
-        <li>Dégradations par produits chimiques non conformes.</li>
+        <li>la location de linge de bain ;</li>
+        <li>la location de linge de lit ;</li>
+        <li>la livraison et la reprise du linge ;</li>
+        <li>l&apos;entretien et le traitement du linge ;</li>
+        <li>le remplacement des articles détériorés ou manquants.</li>
       </ul>
       <p>
-        L&apos;usure normale (jaunissement léger, petites pilules de coton, élasticité réduite)
-        n&apos;est pas facturée. Linge Serein établit un constat contradictoire en cas de litige sur
-        la qualification de la dégradation.
+        Le contenu exact des kits, les quantités, les tarifs et les modalités de livraison sont
+        communiqués au Client avant validation de la commande.
       </p>
 
-      <h2>8. Facturation et paiement</h2>
+      <h2>Article 4 — Commande</h2>
       <p>
-        Les factures sont émises <strong>mensuellement</strong> (ou à la fin de chaque commande
-        ponctuelle), par email. Elles récapitulent l&apos;ensemble des prestations réalisées et du
-        linge manquant ou dégradé.
+        Toute commande devient ferme dès confirmation par Linge Serein. Le Prestataire se réserve le
+        droit de refuser toute commande en cas d&apos;indisponibilité du stock, d&apos;adresse hors
+        zone desservie, d&apos;incident de paiement ou de tout autre motif légitime.
       </p>
       <p>
-        Paiement exigible à <strong>30 jours fin de mois</strong> par virement bancaire sur le
-        compte indiqué sur la facture. Aucun escompte pour paiement anticipé, sauf accord
-        spécifique.
-      </p>
-      <p>Tout retard de paiement entraîne de plein droit, sans mise en demeure préalable :</p>
-      <ul>
-        <li>
-          Des intérêts de retard au taux directeur de la Banque Centrale Européenne (BCE) majoré de{" "}
-          <strong>10 points</strong> par an (art. L441-10 du Code de commerce).
-        </li>
-        <li>
-          Une indemnité forfaitaire de recouvrement de <strong>40 €</strong> (art. D441-5 du Code de
-          commerce), sans préjudice de toute demande de dommages-intérêts supplémentaires si les
-          frais de recouvrement réels sont supérieurs.
-        </li>
-      </ul>
-      <p>
-        En cas de non-paiement persistant au-delà de <strong>60 jours</strong>, Linge Serein se
-        réserve le droit de suspendre toute prestation en cours sans préavis et de procéder à la
-        récupération immédiate du linge mis à disposition.
+        Le Client est responsable de l&apos;exactitude des informations fournies, notamment
+        l&apos;adresse de livraison, les horaires et le nombre de kits commandés.
       </p>
 
-      <h2>9. Durée, renouvellement et résiliation</h2>
+      <h2>Article 5 — Tarifs</h2>
       <p>
-        <strong>Commandes ponctuelles :</strong> sans engagement, valables pour la commande
-        concernée.
-      </p>
-      <p>
-        <strong>Abonnements :</strong> conclus pour une durée initiale d&apos;un mois, renouvelables
-        tacitement par mois. Chaque partie peut résilier l&apos;abonnement avec un préavis de{" "}
-        <strong>30 jours calendaires</strong>, notifié par lettre recommandée avec accusé de
-        réception ou par email avec accusé de lecture.
-      </p>
-      <p>Linge Serein peut résilier immédiatement et sans indemnité en cas de :</p>
-      <ul>
-        <li>Non-paiement persistant après relance formelle.</li>
-        <li>Usage anormal ou non conforme du linge.</li>
-        <li>Comportement abusif ou frauduleux du Client.</li>
-        <li>Ouverture d&apos;une procédure collective à l&apos;encontre du Client.</li>
-      </ul>
-
-      <h2>10. Force majeure</h2>
-      <p>
-        Conformément à l&apos;article 1218 du Code civil, Linge Serein ne saurait être tenu
-        responsable d&apos;une inexécution ou d&apos;un retard résultant d&apos;un événement de
-        force majeure. Sont notamment considérés comme tels : catastrophe naturelle, épidémie, grève
-        générale des transports, panne majeure d&apos;équipement industriel indépendante de la
-        volonté du Prestataire, réquisition administrative.
-      </p>
-      <p>
-        Dès que possible, Linge Serein informe le Client par tout moyen de l&apos;événement et de sa
-        durée prévisible. Si l&apos;empêchement dure plus de <strong>15 jours</strong>, les deux
-        parties peuvent résilier le contrat sans pénalité.
+        Les tarifs applicables sont ceux en vigueur au jour de la commande, exprimés en euros TTC.
+        Ils peuvent être modifiés à tout moment ; le prix facturé est celui confirmé lors de la
+        commande.
       </p>
 
-      <h2>11. Responsabilité et assurances</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Prestation</th>
+            <th>Tarif TTC</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Set bain</td>
+            <td>7,50 €</td>
+          </tr>
+          <tr>
+            <td>Set lit</td>
+            <td>16,50 €</td>
+          </tr>
+          <tr>
+            <td>Livraison à Orange (dès 4 kits)</td>
+            <td>Offerte</td>
+          </tr>
+          <tr>
+            <td>Livraison dès 120 € de commande (alentours)</td>
+            <td>Offerte</td>
+          </tr>
+          <tr>
+            <td>Livraison zone proche</td>
+            <td>12,00 €</td>
+          </tr>
+          <tr>
+            <td>Livraison zone élargie</td>
+            <td>15,00 €</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Article 6 — Modalités de paiement</h2>
       <p>
-        Linge Serein est soumis à une <strong>obligation de moyens</strong>. Sa responsabilité est
-        limitée au montant des prestations facturées au cours des 3 derniers mois précédant le
-        sinistre. Linge Serein décline toute responsabilité pour les dommages indirects, pertes
-        d&apos;exploitation ou manque à gagner subis par le Client.
+        Sauf accord contraire, le paiement est exigible à la commande ou à la livraison. Le
+        règlement peut s&apos;effectuer par virement, carte bancaire ou tout autre moyen accepté par
+        le Prestataire.
       </p>
       <p>
-        Linge Serein justifie d&apos;une assurance{" "}
-        <strong>responsabilité civile professionnelle</strong> couvrant les risques liés à son
-        activité. Le Client s&apos;engage à maintenir une assurance multirisque couvrant les
-        dommages causés au linge mis à sa disposition.
+        En cas de retard ou de défaut de paiement, Linge Serein pourra suspendre la prestation en
+        cours ou refuser toute nouvelle commande jusqu&apos;à règlement complet.
       </p>
 
-      <h2>12. Cession et sous-traitance</h2>
+      <h2>Article 7 — Livraison et reprise</h2>
       <p>
-        Le Client ne peut céder tout ou partie de ses droits et obligations issus du présent contrat
-        sans accord écrit préalable de Linge Serein. Linge Serein peut faire appel à des
-        sous-traitants pour l&apos;exécution de certaines prestations (blanchisserie industrielle,
-        transports), sous sa responsabilité.
+        La livraison et la reprise s&apos;effectuent selon les créneaux convenus avec le Client. Le
+        Client s&apos;engage à assurer l&apos;accessibilité du lieu de livraison et de reprise, ou à
+        désigner une personne habilitée à réceptionner les articles.
+      </p>
+      <p>
+        Tout retard, absence, impossibilité d&apos;accès ou demande de déplacement supplémentaire
+        pourra entraîner une facturation additionnelle.
+      </p>
+      <p>
+        Le linge doit être restitué dans les contenants fournis ou dans un conditionnement
+        équivalent propre à faciliter la reprise et le tri.
       </p>
 
-      <h2>13. Données personnelles</h2>
+      <h2>Article 8 — Vérification à réception</h2>
       <p>
-        Le traitement des données à caractère personnel du Client (coordonnées, données de
-        facturation) est régi par notre{" "}
-        <a href="/politique-confidentialite">politique de confidentialité</a>, conforme au RGPD.
+        Le Client doit vérifier l&apos;état et la conformité du linge dès réception. Toute anomalie,
+        article manquant ou détérioré doit être signalé par écrit dans un délai de{" "}
+        <strong>24 heures</strong> à compter de la livraison ou de la reprise.
+      </p>
+      <p>
+        À défaut de réclamation dans ce délai, le linge est réputé conforme, sauf preuve contraire
+        ou disposition légale impérative.
       </p>
 
-      <h2>14. Droit applicable et règlement des litiges</h2>
+      <h2>Article 9 — Utilisation du linge</h2>
+      <p>
+        Le linge loué demeure la propriété exclusive de Linge Serein pendant toute la durée de la
+        prestation. Le Client s&apos;engage à utiliser le linge conformément à son usage normal, à
+        en assurer la garde et à éviter toute manipulation inadaptée.
+      </p>
+      <p>
+        Le Client est responsable du linge depuis sa remise jusqu&apos;à sa restitution effective.
+      </p>
+
+      <h2>Article 10 — Dégradations, pertes et remplacement</h2>
+      <p>
+        Le Client est tenu de restituer les articles loués en bon état d&apos;usage, hors usure
+        normale liée à une utilisation conforme et au lavage courant. Toute détérioration, tache
+        indélébile, brûlure, déchirure, rétrécissement anormal, disparition ou retour d&apos;un
+        article inutilisable pourra donner lieu à facturation selon le barème ci-dessous.
+      </p>
+      <p>
+        La distinction entre usure normale et dégradation est appréciée par le Prestataire au moment
+        du retour des articles.
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Article / dommage</th>
+            <th>Facturation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Petite serviette 30×50 perdue ou inutilisable</td>
+            <td>2,50 €</td>
+          </tr>
+          <tr>
+            <td>Serviette 50×90 perdue ou inutilisable</td>
+            <td>5,00 €</td>
+          </tr>
+          <tr>
+            <td>Serviette 70×150 perdue ou inutilisable</td>
+            <td>9,00 €</td>
+          </tr>
+          <tr>
+            <td>Serviette 90×150 perdue ou inutilisable</td>
+            <td>12,00 €</td>
+          </tr>
+          <tr>
+            <td>Tapis de bain perdu ou inutilisable</td>
+            <td>8,00 €</td>
+          </tr>
+          <tr>
+            <td>Taie / petite pièce de lit perdue ou inutilisable</td>
+            <td>6,00 €</td>
+          </tr>
+          <tr>
+            <td>Housse de couette / drap housse perdu(e) ou inutilisable</td>
+            <td>15,00 €</td>
+          </tr>
+          <tr>
+            <td>Kit lit complet perdu ou inutilisable</td>
+            <td>29,90 €</td>
+          </tr>
+          <tr>
+            <td>Tache indélébile nécessitant remplacement</td>
+            <td>Prix de remplacement de l&apos;article</td>
+          </tr>
+          <tr>
+            <td>Déchirure, brûlure, rétrécissement anormal</td>
+            <td>Prix de remplacement de l&apos;article</td>
+          </tr>
+          <tr>
+            <td>Article rendu très sale — traitement renforcé</td>
+            <td>5,00 € par kit</td>
+          </tr>
+          <tr>
+            <td>Article non restitué après relance</td>
+            <td>Prix de remplacement + frais de gestion</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        Lorsque la dégradation entraîne un temps de tri, de contrôle ou de remise en état
+        exceptionnel, un forfait de traitement complémentaire pourra être appliqué selon la nature
+        du dommage.
+      </p>
+
+      <h2>Article 11 — Annulation de commande et rétractation</h2>
+      <p>
+        Le Client peut demander l&apos;annulation de sa commande avant la date de livraison, sous
+        réserve de confirmation écrite du Prestataire. Lorsque la commande n&apos;a pas encore été
+        préparée, aucun frais d&apos;annulation ne sera appliqué.
+      </p>
+      <p>
+        Si la commande a déjà été préparée, emballée ou planifiée pour une tournée, Linge Serein
+        pourra conserver tout ou partie des sommes versées à titre de compensation des frais
+        engagés, dans la limite du préjudice réellement subi.
+      </p>
+      <p>
+        Pour les commandes conclues à distance par un consommateur, le droit légal de rétractation
+        de <strong>14 jours</strong> s&apos;applique dans les conditions prévues par le Code de la
+        consommation, sauf si le Client a demandé l&apos;exécution immédiate de la prestation avec
+        son accord exprès.
+      </p>
+      <p>
+        En cas d&apos;annulation tardive (moins de 24 heures avant la livraison prévue) ou
+        d&apos;absence au créneau convenu, le Prestataire pourra facturer des frais de préparation
+        et de déplacement correspondant aux coûts réellement engagés.
+      </p>
+      <p>
+        En cas d&apos;annulation après livraison, les articles déjà remis seront facturés selon les
+        conditions tarifaires applicables.
+      </p>
+      <p>
+        Toute demande d&apos;annulation doit être adressée par écrit à :{" "}
+        <a href="mailto:lingeserein@gmail.com">lingeserein@gmail.com</a>. Le Prestataire confirmera
+        la prise en compte par retour écrit.
+      </p>
+
+      <h2>Article 12 — Réserve de propriété et responsabilité</h2>
+      <p>
+        Le linge demeure la propriété de Linge Serein jusqu&apos;à sa restitution complète. Le
+        Client supporte la responsabilité des pertes, vols, disparitions ou détériorations
+        intervenus pendant la période où le linge est sous sa garde, sauf preuve d&apos;une faute
+        imputable exclusivement au Prestataire.
+      </p>
+      <p>
+        Le Prestataire ne pourra être tenu responsable des dommages causés par une mauvaise
+        utilisation du linge, un usage non conforme ou un stockage inadapté par le Client.
+      </p>
+
+      <h2>Article 13 — Réclamations</h2>
+      <p>
+        Toute réclamation relative à la prestation doit être adressée par écrit dans les meilleurs
+        délais et au plus tard dans les <strong>24 heures</strong> suivant la livraison ou la
+        reprise. Le Prestataire pourra demander toute preuve utile (photographies, messages ou
+        éléments permettant de constater le dommage allégué).
+      </p>
+
+      <h2>Article 14 — Force majeure</h2>
+      <p>
+        Le Prestataire ne pourra être tenu responsable d&apos;un retard ou d&apos;un manquement dans
+        l&apos;exécution de ses obligations lorsqu&apos;il résulte d&apos;un événement de force
+        majeure, d&apos;un cas fortuit ou de toute cause extérieure indépendante de sa volonté.
+      </p>
+
+      <h2>Article 15 — Données personnelles</h2>
+      <p>
+        Les données personnelles collectées sont utilisées uniquement pour la gestion des commandes,
+        la facturation, la livraison, la reprise et le suivi client. Le Client dispose des droits
+        prévus par la <a href="/politique-confidentialite">politique de confidentialité</a> conforme
+        au RGPD.
+      </p>
+
+      <h2>Article 16 — Droit applicable et litiges</h2>
       <p>
         Les présentes CGV sont soumises au <strong>droit français</strong>. En cas de litige, les
-        parties s&apos;engagent à rechercher une solution amiable dans un délai de 30 jours. À
-        défaut d&apos;accord, compétence exclusive est attribuée au{" "}
-        <strong>Tribunal de Commerce d&apos;Avignon (84)</strong>, même en cas de pluralité de
-        défendeurs ou d&apos;appel en garantie.
+        parties rechercheront en priorité une solution amiable. À défaut d&apos;accord amiable, le
+        litige sera soumis aux juridictions compétentes conformément aux règles de droit commun.
+      </p>
+
+      <h2>Article 17 — Acceptation</h2>
+      <p>
+        La validation de la commande implique l&apos;acceptation pleine et entière des présentes CGV
+        par le Client, qui reconnaît en avoir pris connaissance avant toute commande.
       </p>
     </LegalPage>
   );
