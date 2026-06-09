@@ -3,16 +3,8 @@ import { randomBytes } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
-import {
-  MAX_LOGIN_ATTEMPTS,
-  JWT_REFRESH_TOKEN_EXPIRY,
-} from "@lingengo/shared";
-import {
-  UnauthorizedError,
-  ConflictError,
-  AccountLockedError,
-  NotFoundError,
-} from "../utils/errors.js";
+import { MAX_LOGIN_ATTEMPTS, JWT_REFRESH_TOKEN_EXPIRY } from "@lingengo/shared";
+import { UnauthorizedError, AccountLockedError, NotFoundError } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
 import { encrypt } from "../utils/crypto.js";
 
@@ -49,14 +41,23 @@ export class AuthService {
     private readonly app: FastifyInstance,
   ) {}
 
-  /** Inscription d'un nouveau client */
-  async register(params: RegisterParams): Promise<{ userId: string; emailVerificationToken: string }> {
+  /** Inscription d'un nouveau client.
+   *
+   * Anti-énumération : si l'email existe déjà, on retourne un résultat
+   * générique sans lever d'erreur ni créer de doublon en base.
+   * La réponse HTTP 201 et le message sont identiques dans les deux cas.
+   */
+  async register(
+    params: RegisterParams,
+  ): Promise<{ userId: string | null; emailVerificationToken: string | null }> {
     const existing = await this.prisma.user.findUnique({
       where: { email: params.email },
     });
 
     if (existing) {
-      throw new ConflictError("Un compte existe déjà avec cet email");
+      // Ne pas révéler que l'email est pris — répondre silencieusement.
+      // Pas de création en base, pas d'envoi d'email.
+      return { userId: null, emailVerificationToken: null };
     }
 
     const passwordHash = await bcrypt.hash(params.password, BCRYPT_ROUNDS);
@@ -223,7 +224,12 @@ export class AuthService {
   }
 
   /** Déconnexion — révoquer le refresh token */
-  async logout(refreshToken: string, userId: string, ipAddress?: string, userAgent?: string): Promise<void> {
+  async logout(
+    refreshToken: string,
+    userId: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<void> {
     await this.prisma.refreshToken.updateMany({
       where: { token: refreshToken, userId },
       data: { revokedAt: new Date() },
