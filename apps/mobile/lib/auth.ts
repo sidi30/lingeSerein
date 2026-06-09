@@ -1,5 +1,6 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
+import type { RegisterInput } from "@lingengo/shared";
 import { apiFetch } from "./api";
 import { useAuthStore } from "./store";
 
@@ -8,11 +9,7 @@ interface LoginPayload {
   password: string;
 }
 
-interface RegisterPayload {
-  name: string;
-  email: string;
-  password: string;
-}
+type RegisterPayload = RegisterInput;
 
 interface LoginResponse {
   success: boolean;
@@ -42,21 +39,26 @@ export function useLogin() {
         body: JSON.stringify(data),
       });
 
-      // Store token first so /me request is authenticated
+      // Store tokens first so the /me request is authenticated
       useAuthStore
         .getState()
         .setAuth(
           { id: loginRes.data.userId, name: "", email: data.email, role: loginRes.data.role },
           loginRes.data.accessToken,
+          loginRes.data.refreshToken,
         );
 
       // Fetch full user profile
       const meRes = await apiFetch<MeResponse>("/auth/me");
 
-      return { user: meRes.data, accessToken: loginRes.data.accessToken };
+      return {
+        user: meRes.data,
+        accessToken: loginRes.data.accessToken,
+        refreshToken: loginRes.data.refreshToken,
+      };
     },
-    onSuccess: ({ user, accessToken }) => {
-      useAuthStore.getState().setAuth(user, accessToken);
+    onSuccess: ({ user, accessToken, refreshToken }) => {
+      useAuthStore.getState().setAuth(user, accessToken, refreshToken);
       router.replace("/(tabs)");
     },
   });
@@ -71,6 +73,29 @@ export function useRegister() {
       }),
     onSuccess: () => {
       // API requires email verification before login
+      router.replace("/(auth)/login");
+    },
+  });
+}
+
+export function useLogout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const refreshToken = useAuthStore.getState().refreshToken;
+      try {
+        // Révoque le refresh token côté serveur (best-effort).
+        await apiFetch("/auth/logout", {
+          method: "POST",
+          body: JSON.stringify({ refreshToken }),
+        });
+      } catch {
+        // Échec réseau/serveur : on déconnecte quand même localement.
+      }
+    },
+    onSettled: () => {
+      useAuthStore.getState().logout();
+      qc.clear();
       router.replace("/(auth)/login");
     },
   });

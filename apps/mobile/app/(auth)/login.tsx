@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform } from "react-native";
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  type ViewStyle,
+} from "react-native";
 import { Link } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLogin } from "@/lib/auth";
@@ -43,7 +51,7 @@ export default function LoginScreen() {
             keyboardType="email-address"
             autoComplete="email"
             textContentType="emailAddress"
-            accessibilityLabelledBy={"email-label" as unknown as string}
+            accessibilityLabel="Adresse email"
             placeholder="client@example.com"
             placeholderTextColor={colors.textTertiary}
           />
@@ -58,7 +66,7 @@ export default function LoginScreen() {
             secureTextEntry
             autoComplete="password"
             textContentType="password"
-            accessibilityLabelledBy={"password-label" as unknown as string}
+            accessibilityLabel="Mot de passe"
             placeholder="Votre mot de passe"
             placeholderTextColor={colors.textTertiary}
           />
@@ -123,7 +131,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     padding: spacing.xxl,
     ...Platform.select({
-      web: { boxShadow: "0px 4px 24px rgba(0,0,0,0.08)" } as any,
+      web: { boxShadow: "0px 4px 24px rgba(0,0,0,0.08)" } as unknown as ViewStyle,
       default: {
         elevation: 6,
         shadowColor: "#000",

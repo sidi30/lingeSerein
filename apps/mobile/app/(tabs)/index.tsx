@@ -1,6 +1,8 @@
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { PieChart } from "react-native-gifted-charts";
 import { ScreenWrapper } from "@/components/ScreenWrapper";
 import { Card } from "@/components/Card";
@@ -17,8 +19,6 @@ import {
   useDashboardKpis,
   useTodayRound,
   formatCents,
-  formatDateShort,
-  formatDate,
 } from "@/lib/api";
 import { colors, font, spacing, radius } from "@/lib/theme";
 
@@ -31,6 +31,8 @@ function ClientHome() {
   const orders = useOrders();
 
   const isLoading = profile.isLoading || stock.isLoading || sub.isLoading || orders.isLoading;
+  const refreshing =
+    profile.isRefetching || stock.isRefetching || sub.isRefetching || orders.isRefetching;
   const refetch = () => {
     profile.refetch();
     stock.refetch();
@@ -46,7 +48,7 @@ function ClientHome() {
   const totalCirc = stock.data?.stocks.reduce((s, st) => s + st.totalInCirculation, 0) ?? 0;
 
   return (
-    <ScreenWrapper refreshing={isLoading} onRefresh={refetch}>
+    <ScreenWrapper refreshing={refreshing} onRefresh={refetch}>
       {/* Hero greeting */}
       <LinearGradient
         colors={[colors.primary, colors.primaryDark]}
@@ -104,7 +106,7 @@ function ClientHome() {
                 </Text>
               </View>
             </View>
-            <Text style={styles.chevron}>{"\u203a"}</Text>
+            <Ionicons name="chevron-forward" size={24} color={colors.textTertiary} />
           </View>
         </Card>
       </Pressable>
@@ -135,7 +137,9 @@ function ClientHome() {
                     {nextOrder.timeSlot ?? "Creneau a confirmer"}
                   </Text>
                   <Text style={styles.deliveryItems}>
-                    {nextOrder.items.map((i) => `${i.quantity}x ${i.product.range}`).join(", ")}
+                    {nextOrder.items
+                      .map((i) => `${i.quantity}x ${i.product?.range ?? "?"}`)
+                      .join(", ")}
                   </Text>
                 </View>
                 <View style={{ alignItems: "flex-end" }}>
@@ -157,7 +161,7 @@ function ClientHome() {
           accessibilityRole="button"
           accessibilityLabel="Nouvelle commande"
         >
-          <Text style={styles.actionIcon}>{"\ud83d\udce6"}</Text>
+          <Ionicons name="add-circle" size={28} color={colors.primary} style={styles.actionIcon} />
           <Text style={[styles.actionLabel, { color: colors.primary }]}>Commander</Text>
         </Pressable>
         <Pressable
@@ -166,7 +170,7 @@ function ClientHome() {
           accessibilityRole="button"
           accessibilityLabel="Mes commandes"
         >
-          <Text style={styles.actionIcon}>{"\ud83d\udcdd"}</Text>
+          <Ionicons name="receipt" size={28} color={colors.success} style={styles.actionIcon} />
           <Text style={[styles.actionLabel, { color: colors.success }]}>Commandes</Text>
         </Pressable>
         <Pressable
@@ -175,7 +179,12 @@ function ClientHome() {
           accessibilityRole="button"
           accessibilityLabel="Notifications"
         >
-          <Text style={styles.actionIcon}>{"\ud83d\udd14"}</Text>
+          <Ionicons
+            name="notifications"
+            size={28}
+            color={colors.warning}
+            style={styles.actionIcon}
+          />
           <Text style={[styles.actionLabel, { color: colors.warning }]}>Alertes</Text>
         </Pressable>
         <Pressable
@@ -184,7 +193,7 @@ function ClientHome() {
           accessibilityRole="button"
           accessibilityLabel="Mon profil"
         >
-          <Text style={styles.actionIcon}>{"\ud83d\udc64"}</Text>
+          <Ionicons name="person" size={28} color={colors.info} style={styles.actionIcon} />
           <Text style={[styles.actionLabel, { color: colors.info }]}>Profil</Text>
         </Pressable>
       </View>
@@ -200,6 +209,7 @@ function AdminHome() {
   const orders = useOrders();
 
   const isLoading = profile.isLoading || kpis.isLoading;
+  const refreshing = profile.isRefetching || kpis.isRefetching || orders.isRefetching;
   const refetch = () => {
     profile.refetch();
     kpis.refetch();
@@ -211,7 +221,7 @@ function AdminHome() {
   const k = kpis.data;
 
   return (
-    <ScreenWrapper refreshing={isLoading} onRefresh={refetch}>
+    <ScreenWrapper refreshing={refreshing} onRefresh={refetch}>
       <LinearGradient
         colors={["#0f172a", "#1e293b"]}
         start={{ x: 0, y: 0 }}
@@ -225,14 +235,14 @@ function AdminHome() {
         <>
           <View style={styles.statsRow}>
             <StatCard
-              icon={"\ud83d\udcb0"}
+              icon="cash-outline"
               label="CA semaine"
               value={formatCents(k.revenueCents)}
               sub={`vs ${formatCents(k.revenuePrevWeekCents)}`}
               color={colors.success}
             />
             <StatCard
-              icon={"\ud83d\ude9a"}
+              icon="car-outline"
               label="Livraisons"
               value={k.deliveriesCompleted}
               color={colors.info}
@@ -240,13 +250,13 @@ function AdminHome() {
           </View>
           <View style={[styles.statsRow, { marginTop: spacing.sm }]}>
             <StatCard
-              icon={"\ud83d\udc65"}
+              icon="people-outline"
               label="Nouveaux"
               value={k.newClients}
               color={colors.primary}
             />
             <StatCard
-              icon={"\ud83d\udd04"}
+              icon="sync-outline"
               label="Abos actifs"
               value={k.activeSubscriptions}
               color={colors.accent}
@@ -270,24 +280,26 @@ function AdminHome() {
       {orders.data
         ?.filter((o) => o.status === "PENDING")
         .slice(0, 5)
-        .map((order) => (
-          <Pressable key={order.id} onPress={() => router.push(`/(tabs)/orders/${order.id}`)}>
-            <Card style={{ marginBottom: spacing.sm }}>
-              <View style={styles.deliveryRow}>
-                <View style={styles.deliveryDateBox}>
-                  <Text style={styles.deliveryDay}>{new Date(order.deliveryDate).getDate()}</Text>
-                  <Text style={styles.deliveryMonth}>
-                    {new Date(order.deliveryDate).toLocaleDateString("fr-FR", { month: "short" })}
-                  </Text>
+        .map((order, i) => (
+          <Animated.View key={order.id} entering={FadeInDown.delay(i * 60).springify()}>
+            <Pressable onPress={() => router.push(`/(tabs)/orders/${order.id}`)}>
+              <Card style={{ marginBottom: spacing.sm }}>
+                <View style={styles.deliveryRow}>
+                  <View style={styles.deliveryDateBox}>
+                    <Text style={styles.deliveryDay}>{new Date(order.deliveryDate).getDate()}</Text>
+                    <Text style={styles.deliveryMonth}>
+                      {new Date(order.deliveryDate).toLocaleDateString("fr-FR", { month: "short" })}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.deliveryNum}>{order.orderNumber}</Text>
+                    <Text style={styles.deliverySlot}>{order.user?.name ?? "Client"}</Text>
+                  </View>
+                  <Text style={styles.deliveryPrice}>{formatCents(order.totalCents)}</Text>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.deliveryNum}>{order.orderNumber}</Text>
-                  <Text style={styles.deliverySlot}>{order.user?.name ?? "Client"}</Text>
-                </View>
-                <Text style={styles.deliveryPrice}>{formatCents(order.totalCents)}</Text>
-              </View>
-            </Card>
-          </Pressable>
+              </Card>
+            </Pressable>
+          </Animated.View>
         ))}
     </ScreenWrapper>
   );
@@ -300,6 +312,7 @@ function DriverHome() {
   const round = useTodayRound();
 
   const isLoading = profile.isLoading || round.isLoading;
+  const refreshing = profile.isRefetching || round.isRefetching;
   const refetch = () => {
     profile.refetch();
     round.refetch();
@@ -313,7 +326,7 @@ function DriverHome() {
   const pending = todayRound?.stops.filter((s) => s.status === "PENDING") ?? [];
 
   return (
-    <ScreenWrapper refreshing={isLoading} onRefresh={refetch}>
+    <ScreenWrapper refreshing={refreshing} onRefresh={refetch}>
       <LinearGradient
         colors={[colors.success, "#059669"]}
         start={{ x: 0, y: 0 }}
@@ -330,7 +343,7 @@ function DriverHome() {
         <Card
           style={{ marginTop: spacing.lg, alignItems: "center", paddingVertical: spacing.xxxl }}
         >
-          <Text style={{ fontSize: 48 }}>{"\ud83d\ude9a"}</Text>
+          <Ionicons name="car-outline" size={48} color={colors.textTertiary} />
           <Text
             style={{
               fontSize: font.sizes.lg,
@@ -388,22 +401,24 @@ function DriverHome() {
 
           <SectionHeader title={`Arrets restants (${pending.length})`} />
           {pending.map((stop, i) => (
-            <Card key={stop.id} style={{ marginBottom: spacing.sm }}>
-              <View style={styles.deliveryRow}>
-                <View style={[styles.deliveryDateBox, { backgroundColor: colors.successLight }]}>
-                  <Text style={[styles.deliveryDay, { color: colors.success }]}>
-                    #{stop.stopOrder}
-                  </Text>
+            <Animated.View key={stop.id} entering={FadeInDown.delay(i * 60).springify()}>
+              <Card style={{ marginBottom: spacing.sm }}>
+                <View style={styles.deliveryRow}>
+                  <View style={[styles.deliveryDateBox, { backgroundColor: colors.successLight }]}>
+                    <Text style={[styles.deliveryDay, { color: colors.success }]}>
+                      #{stop.stopOrder}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.deliveryNum}>{stop.client.name}</Text>
+                    <Text style={styles.deliverySlot}>{stop.setsToDeliver} sets a livrer</Text>
+                    {stop.specialInstructions && (
+                      <Text style={styles.deliveryItems}>{stop.specialInstructions}</Text>
+                    )}
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.deliveryNum}>{stop.client.name}</Text>
-                  <Text style={styles.deliverySlot}>{stop.setsToDeliver} sets a livrer</Text>
-                  {stop.specialInstructions && (
-                    <Text style={styles.deliveryItems}>{stop.specialInstructions}</Text>
-                  )}
-                </View>
-              </View>
-            </Card>
+              </Card>
+            </Animated.View>
           ))}
         </>
       )}

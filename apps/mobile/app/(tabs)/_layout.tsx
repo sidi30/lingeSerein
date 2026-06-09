@@ -1,11 +1,28 @@
 import { Tabs } from "expo-router";
 import { View, Text, StyleSheet } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { colors, font } from "@/lib/theme";
 import { useNotifications } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 
-function TabIcon({ icon, focused }: { icon: string; focused: boolean }) {
-  return <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.5 }}>{icon}</Text>;
+type IoniconName = keyof typeof Ionicons.glyphMap;
+
+function TabIcon({
+  name,
+  outline,
+  focused,
+}: {
+  name: IoniconName;
+  outline: IoniconName;
+  focused: boolean;
+}) {
+  return (
+    <Ionicons
+      name={focused ? name : outline}
+      size={24}
+      color={focused ? colors.primary : colors.textTertiary}
+    />
+  );
 }
 
 function NotifIcon({ focused }: { focused: boolean }) {
@@ -14,7 +31,11 @@ function NotifIcon({ focused }: { focused: boolean }) {
 
   return (
     <View>
-      <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.5 }}>{"\ud83d\udd14"}</Text>
+      <Ionicons
+        name={focused ? "notifications" : "notifications-outline"}
+        size={24}
+        color={focused ? colors.primary : colors.textTertiary}
+      />
       {count > 0 && (
         <View
           style={styles.badge}
@@ -63,7 +84,9 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: "Accueil",
-          tabBarIcon: ({ focused }) => <TabIcon icon={"\ud83c\udfe0"} focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="home" outline="home-outline" focused={focused} />
+          ),
           tabBarAccessibilityLabel: "Accueil",
         }}
       />
@@ -72,7 +95,9 @@ export default function TabsLayout() {
         options={{
           title: "Commandes",
           headerShown: false,
-          tabBarIcon: ({ focused }) => <TabIcon icon={"\ud83d\udce6"} focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="cube" outline="cube-outline" focused={focused} />
+          ),
           tabBarAccessibilityLabel: "Commandes",
           // Hide for drivers - they use deliveries
           href: isDriver ? null : "/(tabs)/orders",
@@ -82,7 +107,9 @@ export default function TabsLayout() {
         name="stock"
         options={{
           title: "Stock",
-          tabBarIcon: ({ focused }) => <TabIcon icon={"\ud83d\udcca"} focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="stats-chart" outline="stats-chart-outline" focused={focused} />
+          ),
           tabBarAccessibilityLabel: "Mon stock de linge",
           // Only for clients
           href: isClient ? "/(tabs)/stock" : null,
@@ -100,7 +127,9 @@ export default function TabsLayout() {
         name="profile"
         options={{
           title: "Profil",
-          tabBarIcon: ({ focused }) => <TabIcon icon={"\ud83d\udc64"} focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="person" outline="person-outline" focused={focused} />
+          ),
           tabBarAccessibilityLabel: "Mon profil",
         }}
       />

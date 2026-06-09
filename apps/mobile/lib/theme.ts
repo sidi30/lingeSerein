@@ -3,7 +3,7 @@
  * WCAG AA compliant color contrasts
  */
 
-import { Platform } from "react-native";
+import { Platform, type ViewStyle } from "react-native";
 
 export const colors = {
   // Primary brand – forest green
@@ -92,9 +92,10 @@ export const font = {
 
 function makeShadow(offsetY: number, blur: number, opacity: number, elevation: number) {
   if (Platform.OS === "web") {
+    // boxShadow est une propriété web (react-native-web) absente de ViewStyle.
     return {
       boxShadow: `0px ${offsetY}px ${blur}px rgba(0,0,0,${opacity})`,
-    } as any;
+    } as unknown as ViewStyle;
   }
   return {
     shadowColor: "#000",

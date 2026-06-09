@@ -1,5 +1,4 @@
 import { View, Text, StyleSheet, Alert } from "react-native";
-import { router } from "expo-router";
 import { ScreenWrapper } from "@/components/ScreenWrapper";
 import { Card } from "@/components/Card";
 import { Badge } from "@/components/Badge";
@@ -14,10 +13,9 @@ import {
   useResumeSubscription,
   useCancelSubscription,
   useIsClient,
-  formatCents,
   formatDate,
 } from "@/lib/api";
-import { useAuthStore } from "@/lib/store";
+import { useLogout } from "@/lib/auth";
 import { colors, font, spacing, radius } from "@/lib/theme";
 
 const PLAN_INFO: Record<string, { deliveries: string; sets: string }> = {
@@ -40,10 +38,11 @@ export default function ProfileScreen() {
   const pauseSub = usePauseSubscription();
   const resumeSub = useResumeSubscription();
   const cancelSub = useCancelSubscription();
-  const logout = useAuthStore((s) => s.logout);
+  const logout = useLogout();
 
   const isClient = useIsClient();
   const isLoading = profile.isLoading || (isClient && sub.isLoading);
+  const refreshing = profile.isRefetching || (isClient && sub.isRefetching);
   const refetch = () => {
     profile.refetch();
     sub.refetch();
@@ -90,16 +89,13 @@ export default function ProfileScreen() {
       { text: "Non", style: "cancel" },
       {
         text: "Se deconnecter",
-        onPress: () => {
-          logout();
-          router.replace("/(auth)/login");
-        },
+        onPress: () => logout.mutate(),
       },
     ]);
   };
 
   return (
-    <ScreenWrapper refreshing={isLoading} onRefresh={refetch}>
+    <ScreenWrapper refreshing={refreshing} onRefresh={refetch}>
       {/* User info */}
       <View style={styles.profileHeader}>
         <View style={styles.avatar}>
@@ -233,11 +229,12 @@ export default function ProfileScreen() {
         title="Se deconnecter"
         onPress={handleLogout}
         variant="outline"
+        loading={logout.isPending}
         style={{ marginTop: spacing.xxxl }}
         accessibilityHint="Se deconnecter de l'application"
       />
 
-      <Text style={styles.version}>Linge Serein v0.0.1</Text>
+      <Text style={styles.version}>Linge Serein v0.1.0</Text>
     </ScreenWrapper>
   );
 }

@@ -1,29 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { router } from "expo-router";
 import { useAuthStore } from "./store";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3001/api/v1";
 
-// ─── Generic fetch ───────────────────────────────────────────────
-
-export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = useAuthStore.getState().accessToken;
-
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options?.headers,
-    },
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const msg = body?.error?.message ?? `API error: ${res.status}`;
-    throw new ApiError(res.status, msg);
-  }
-
-  return res.json() as Promise<T>;
+// Transport: interdire le cleartext (HTTP) hors développement. Un build
+// release qui pointerait vers http:// exposerait le Bearer token à un MITM.
+if (!__DEV__ && API_URL.startsWith("http://")) {
+  throw new Error("EXPO_PUBLIC_API_URL doit utiliser HTTPS en production (cleartext interdit).");
 }
 
 export class ApiError extends Error {
@@ -33,6 +17,91 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+// ─── Refresh token (single-flight) ───────────────────────────────
+// Un seul appel /auth/refresh à la fois ; les requêtes concurrentes en 401
+// partagent la même promesse pour éviter une rafale de refresh.
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = useAuthStore.getState().refreshToken;
+  if (!refreshToken) return null;
+
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      try {
+        const res = await fetch(`${API_URL}/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken }),
+        });
+        if (!res.ok) return null;
+        const body = (await res.json().catch(() => null)) as {
+          data?: { accessToken?: string; refreshToken?: string };
+        } | null;
+        const next = body?.data;
+        if (next?.accessToken && next?.refreshToken) {
+          useAuthStore.getState().setTokens(next.accessToken, next.refreshToken);
+          return next.accessToken;
+        }
+        return null;
+      } catch {
+        return null;
+      } finally {
+        refreshPromise = null;
+      }
+    })();
+  }
+  return refreshPromise;
+}
+
+// ─── Generic fetch ───────────────────────────────────────────────
+
+export async function apiFetch<T>(
+  path: string,
+  options?: RequestInit,
+  retried = false,
+): Promise<T> {
+  const token = useAuthStore.getState().accessToken;
+  const hasBody = options?.body != null;
+
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: {
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
+      ...options?.headers,
+      // Authorization placé en dernier pour ne pas être écrasé par options.headers
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  // 401 sur une route protégée → tenter un refresh une seule fois, puis rejouer.
+  // Les routes /auth/* (login, refresh, logout) sont exclues : un 401 y est
+  // légitime (mauvais identifiants) et ne doit pas déclencher de refresh/logout.
+  if (
+    res.status === 401 &&
+    !retried &&
+    !path.startsWith("/auth/") &&
+    useAuthStore.getState().refreshToken
+  ) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      return apiFetch<T>(path, options, true);
+    }
+    // Refresh impossible → session expirée : on purge et on renvoie au login.
+    useAuthStore.getState().logout();
+    router.replace("/(auth)/login");
+    throw new ApiError(401, "Session expirée, veuillez vous reconnecter.");
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const msg = body?.error?.message ?? `API error: ${res.status}`;
+    throw new ApiError(res.status, msg);
+  }
+
+  return res.json() as Promise<T>;
 }
 
 // ─── Response wrappers ───────────────────────────────────────────
@@ -326,7 +395,8 @@ export function useNotifications() {
       return { notifications: res.data, unreadCount: res.unreadCount };
     },
     enabled: !!token,
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -466,19 +536,26 @@ export function useDashboardKpis() {
 // ─── Helpers ─────────────────────────────────────────────────────
 
 export function formatCents(cents: number): string {
+  if (typeof cents !== "number" || Number.isNaN(cents)) return "-";
   return (cents / 100).toFixed(2).replace(".", ",") + " \u20ac";
 }
 
-export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("fr-FR", {
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("fr-FR", {
     day: "numeric",
     month: "short",
     year: "numeric",
   });
 }
 
-export function formatDateShort(iso: string): string {
-  return new Date(iso).toLocaleDateString("fr-FR", {
+export function formatDateShort(iso: string | null | undefined): string {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("fr-FR", {
     day: "numeric",
     month: "short",
   });

@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { View, Text, Pressable, FlatList, StyleSheet } from "react-native";
 import { router } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { LoadingScreen } from "@/components/LoadingScreen";
-import { Button } from "@/components/Button";
 import { useOrders, useIsClient, formatCents, formatDateShort } from "@/lib/api";
 import type { Order } from "@/lib/api";
 import { colors, font, spacing, radius, MIN_HIT_TARGET } from "@/lib/theme";
@@ -23,32 +24,34 @@ export default function OrdersListScreen() {
   const { data, isLoading, refetch, isRefetching } = useOrders(filter);
   const isClient = useIsClient();
 
-  const renderOrder = ({ item }: { item: Order }) => (
-    <Pressable
-      onPress={() => router.push(`/(tabs)/orders/${item.id}`)}
-      accessibilityRole="button"
-      accessibilityLabel={`Commande ${item.orderNumber}, ${item.status}`}
-      accessibilityHint="Voir le detail"
-    >
-      <Card style={styles.card}>
-        <View style={styles.cardTop}>
-          <Text style={styles.orderNum}>{item.orderNumber}</Text>
-          <StatusBadge type="order" status={item.status} />
-        </View>
-        <View style={styles.cardBottom}>
-          <Text style={styles.date}>
-            {formatDateShort(item.deliveryDate)}
-            {item.timeSlot ? ` · ${item.timeSlot}` : ""}
-          </Text>
-          <Text style={styles.price}>{formatCents(item.totalCents)}</Text>
-        </View>
-        {item.items.length > 0 && (
-          <Text style={styles.items} numberOfLines={1}>
-            {item.items.map((i) => `${i.quantity}x ${i.product.name}`).join(", ")}
-          </Text>
-        )}
-      </Card>
-    </Pressable>
+  const renderOrder = ({ item, index }: { item: Order; index: number }) => (
+    <Animated.View entering={FadeInDown.delay(Math.min(index, 8) * 50).springify()}>
+      <Pressable
+        onPress={() => router.push(`/(tabs)/orders/${item.id}`)}
+        accessibilityRole="button"
+        accessibilityLabel={`Commande ${item.orderNumber}, ${item.status}`}
+        accessibilityHint="Voir le detail"
+      >
+        <Card style={styles.card}>
+          <View style={styles.cardTop}>
+            <Text style={styles.orderNum}>{item.orderNumber}</Text>
+            <StatusBadge type="order" status={item.status} />
+          </View>
+          <View style={styles.cardBottom}>
+            <Text style={styles.date}>
+              {formatDateShort(item.deliveryDate)}
+              {item.timeSlot ? ` · ${item.timeSlot}` : ""}
+            </Text>
+            <Text style={styles.price}>{formatCents(item.totalCents)}</Text>
+          </View>
+          {item.items.length > 0 && (
+            <Text style={styles.items} numberOfLines={1}>
+              {item.items.map((i) => `${i.quantity}x ${i.product?.name ?? "?"}`).join(", ")}
+            </Text>
+          )}
+        </Card>
+      </Pressable>
+    </Animated.View>
   );
 
   return (
@@ -102,7 +105,7 @@ export default function OrdersListScreen() {
           accessibilityRole="button"
           accessibilityLabel="Nouvelle commande"
         >
-          <Text style={styles.fabIcon}>{"\u2795"}</Text>
+          <Ionicons name="add" size={28} color={colors.textInverse} />
         </Pressable>
       )}
     </View>

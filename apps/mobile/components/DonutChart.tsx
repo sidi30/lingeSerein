@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet } from "react-native";
 import { PieChart } from "react-native-gifted-charts";
-import { colors, font, spacing, radius } from "@/lib/theme";
+import { colors, font, spacing } from "@/lib/theme";
 
 interface Segment {
   value: number;

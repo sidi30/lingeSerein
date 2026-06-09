@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, Alert } from "react-native";
+import { View, Text, TextInput, Pressable, StyleSheet, Alert, Platform } from "react-native";
 import { router } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { Calendar, type DateData, LocaleConfig } from "react-native-calendars";
 import { ScreenWrapper } from "@/components/ScreenWrapper";
 import { Card } from "@/components/Card";
@@ -67,6 +69,21 @@ interface CartItem {
   quantity: number;
 }
 
+// Date locale au format YYYY-MM-DD (sans passer par UTC, qui décale d'un jour
+// en soirée pour les fuseaux à l'est de Greenwich comme la France).
+function localYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function tomorrowYmd(): string {
+  const t = new Date();
+  t.setDate(t.getDate() + 1);
+  return localYmd(t);
+}
+
 export default function NewOrderScreen() {
   const { data: products, isLoading } = useProducts();
   const createOrder = useCreateOrder();
@@ -74,15 +91,20 @@ export default function NewOrderScreen() {
   const [timeSlot, setTimeSlot] = useState(TIME_SLOTS[0]!.value);
   const [notes, setNotes] = useState("");
 
-  // Date: minimum tomorrow
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const minDate = tomorrow.toISOString().split("T")[0]!;
+  // Date: minimum tomorrow (en date locale)
+  const minDate = tomorrowYmd();
   const [selectedDate, setSelectedDate] = useState(minDate);
 
   if (isLoading) return <LoadingScreen />;
 
+  const haptic = () => {
+    if (Platform.OS !== "web") {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  };
+
   const addToCart = (product: Product) => {
+    haptic();
     setCart((prev) => {
       const existing = prev.find((c) => c.product.id === product.id);
       if (existing) {
@@ -95,6 +117,7 @@ export default function NewOrderScreen() {
   };
 
   const removeFromCart = (productId: string) => {
+    haptic();
     setCart((prev) => {
       const existing = prev.find((c) => c.product.id === productId);
       if (existing && existing.quantity > 1) {
@@ -110,6 +133,19 @@ export default function NewOrderScreen() {
 
   const handleOrder = () => {
     if (cart.length === 0) return;
+
+    // L'écran a pu rester ouvert jusqu'au lendemain : on revalide la date min
+    // au moment du submit pour éviter d'envoyer une date désormais passée.
+    const minAtSubmit = tomorrowYmd();
+    if (selectedDate < minAtSubmit) {
+      setSelectedDate(minAtSubmit);
+      Alert.alert(
+        "Date à confirmer",
+        "La date de livraison doit être au minimum demain. Veuillez la confirmer.",
+      );
+      return;
+    }
+
     createOrder.mutate(
       {
         items: cart.map((c) => ({ productId: c.product.id, quantity: c.quantity })),
@@ -123,6 +159,12 @@ export default function NewOrderScreen() {
             "Commande creee !",
             `${order.orderNumber}\nLivraison le ${new Date(selectedDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}`,
             [{ text: "OK", onPress: () => router.back() }],
+          );
+        },
+        onError: (e) => {
+          Alert.alert(
+            "Échec de la commande",
+            e instanceof Error ? e.message : "Une erreur est survenue. Réessayez.",
           );
         },
       },
@@ -225,7 +267,7 @@ export default function NewOrderScreen() {
                           style={styles.qtyBtn}
                           accessibilityLabel={`Retirer ${product.name}`}
                         >
-                          <Text style={styles.qtyBtnText}>{"\u2212"}</Text>
+                          <Ionicons name="remove" size={20} color={colors.textPrimary} />
                         </Pressable>
                       )}
                       {qty > 0 && <Text style={styles.qtyText}>{qty}</Text>}

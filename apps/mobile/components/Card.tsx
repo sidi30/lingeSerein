@@ -1,9 +1,9 @@
-import { View, StyleSheet, type ViewStyle, type ViewProps } from "react-native";
+import { View, StyleSheet, type StyleProp, type ViewStyle, type ViewProps } from "react-native";
 import { colors, radius, spacing, shadow } from "@/lib/theme";
 
 interface Props extends ViewProps {
   children: React.ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   padded?: boolean;
 }
 

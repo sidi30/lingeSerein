@@ -1,20 +1,23 @@
 import { View, Text, StyleSheet } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Card } from "./Card";
 import { colors, font, spacing } from "@/lib/theme";
+
+type IoniconName = keyof typeof Ionicons.glyphMap;
 
 interface Props {
   label: string;
   value: string | number;
   sub?: string;
   color?: string;
-  icon?: string;
+  icon?: IoniconName;
 }
 
 export function StatCard({ label, value, sub, color = colors.primary, icon }: Props) {
   return (
     <Card style={styles.card}>
       <View style={[styles.iconContainer, { backgroundColor: color + "15" }]}>
-        <Text style={styles.icon}>{icon ?? "\u2022"}</Text>
+        <Ionicons name={icon ?? "ellipse"} size={18} color={color} />
       </View>
       <Text style={[styles.value, { color }]}>{value}</Text>
       <Text style={styles.label}>{label}</Text>

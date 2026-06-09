@@ -7,14 +7,36 @@ import { Badge } from "@/components/Badge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/Button";
 import { LoadingScreen } from "@/components/LoadingScreen";
+import { EmptyState } from "@/components/EmptyState";
 import { useOrder, useCancelOrder, formatCents, formatDate } from "@/lib/api";
 import { colors, font, spacing } from "@/lib/theme";
 
 export default function OrderDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const { data: order, isLoading } = useOrder(id ?? "");
+  const params = useLocalSearchParams<{ id: string | string[] }>();
+  const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  const { data: order, isLoading, isError } = useOrder(id ?? "");
   const cancel = useCancelOrder();
   const [cancelling, setCancelling] = useState(false);
+
+  // Id absent/invalide ou commande introuvable (404) → état d'erreur explicite,
+  // pas un spinner infini.
+  if (!id || isError || (!isLoading && !order)) {
+    return (
+      <ScreenWrapper>
+        <EmptyState
+          icon={"📦"}
+          title="Commande introuvable"
+          description="Cette commande n'existe pas ou n'est plus accessible."
+        />
+        <Button
+          title="Retour"
+          onPress={() => router.back()}
+          variant="outline"
+          style={{ marginTop: spacing.lg }}
+        />
+      </ScreenWrapper>
+    );
+  }
 
   if (isLoading || !order) return <LoadingScreen />;
 
@@ -67,7 +89,7 @@ export default function OrderDetailScreen() {
         {order.items.map((item, i) => (
           <View key={item.id} style={[styles.itemRow, i > 0 && styles.itemBorder]}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.itemName}>{item.product.name}</Text>
+              <Text style={styles.itemName}>{item.product?.name ?? "Article"}</Text>
               <Text style={styles.itemMeta}>
                 {item.quantity} x {formatCents(item.unitCents)}
               </Text>

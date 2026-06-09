@@ -9,11 +9,14 @@ import {
   ScrollView,
 } from "react-native";
 import { Link } from "expo-router";
+import type { RegisterInput } from "@lingengo/shared";
 import { useRegister } from "@/lib/auth";
 import { Button } from "@/components/Button";
 import { colors, font, spacing, radius } from "@/lib/theme";
 
-const ACCOMMODATION_TYPES = [
+type AccommodationType = RegisterInput["accommodationType"];
+
+const ACCOMMODATION_TYPES: { value: AccommodationType; label: string }[] = [
   { value: "HOTEL", label: "Hotel" },
   { value: "GITE", label: "Gite" },
   { value: "AIRBNB", label: "Airbnb" },
@@ -26,7 +29,7 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [address, setAddress] = useState("");
-  const [accoType, setAccoType] = useState("HOTEL");
+  const [accoType, setAccoType] = useState<AccommodationType>("HOTEL");
   const [success, setSuccess] = useState(false);
   const register = useRegister();
 
@@ -39,7 +42,7 @@ export default function RegisterScreen() {
         password,
         address: address.trim(),
         accommodationType: accoType,
-      } as any,
+      },
       { onSuccess: () => setSuccess(true) },
     );
   };

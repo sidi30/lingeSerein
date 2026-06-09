@@ -5,7 +5,7 @@ import { DonutChart } from "@/components/DonutChart";
 import { SectionHeader } from "@/components/SectionHeader";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { EmptyState } from "@/components/EmptyState";
-import { useMyStock, useIsClient, formatDateShort } from "@/lib/api";
+import { useMyStock, formatDateShort } from "@/lib/api";
 import type { ClientStock, StockMovement } from "@/lib/api";
 import { colors, font, spacing, radius } from "@/lib/theme";
 

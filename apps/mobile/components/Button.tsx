@@ -1,4 +1,13 @@
-import { Pressable, Text, ActivityIndicator, StyleSheet, type ViewStyle } from "react-native";
+import {
+  Pressable,
+  Text,
+  ActivityIndicator,
+  StyleSheet,
+  Platform,
+  type ViewStyle,
+} from "react-native";
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated";
+import * as Haptics from "expo-haptics";
 import { colors, radius, font, spacing, MIN_HIT_TARGET } from "@/lib/theme";
 
 type Variant = "primary" | "secondary" | "outline" | "danger" | "ghost";
@@ -29,6 +38,8 @@ const variantStyles: Record<
   ghost: { bg: "transparent", bgPressed: colors.borderLight, text: colors.textSecondary },
 };
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 export function Button({
   title,
   onPress,
@@ -40,23 +51,42 @@ export function Button({
 }: Props) {
   const v = variantStyles[variant];
   const isDisabled = disabled || loading;
+  const scale = useSharedValue(1);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const handlePress = () => {
+    if (Platform.OS !== "web") {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    onPress();
+  };
 
   return (
-    <Pressable
-      onPress={onPress}
+    <AnimatedPressable
+      onPress={handlePress}
+      onPressIn={() => {
+        scale.value = withTiming(0.96, { duration: 80 });
+      }}
+      onPressOut={() => {
+        scale.value = withTiming(1, { duration: 120 });
+      }}
       disabled={isDisabled}
       accessibilityRole="button"
       accessibilityLabel={title}
       accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: isDisabled, busy: loading }}
-      style={({ pressed }) => [
+      style={[
         styles.base,
         {
-          backgroundColor: pressed ? v.bgPressed : v.bg,
+          backgroundColor: v.bg,
           borderColor: v.border ?? "transparent",
           borderWidth: v.border ? 1.5 : 0,
           opacity: isDisabled ? 0.5 : 1,
         },
+        animatedStyle,
         style,
       ]}
     >
@@ -65,7 +95,7 @@ export function Button({
       ) : (
         <Text style={[styles.text, { color: v.text }]}>{title}</Text>
       )}
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
