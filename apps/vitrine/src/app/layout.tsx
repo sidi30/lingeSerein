@@ -88,9 +88,18 @@ const serviceSchema = {
   provider: { "@type": "LocalBusiness", name: "Linge Serein" },
   areaServed: { "@type": "AdministrativeArea", name: "Vaucluse" },
   offers: [
-    { "@type": "Offer", name: "Pack Confort", price: "6.00", priceCurrency: "EUR" },
-    { "@type": "Offer", name: "Pack Hôtel", price: "9.00", priceCurrency: "EUR" },
-    { "@type": "Offer", name: "Pack Prestige", price: "14.00", priceCurrency: "EUR" },
+    {
+      "@type": "Offer",
+      name: "Pack Sérénité — abonnement mensuel",
+      price: "89.00",
+      priceCurrency: "EUR",
+    },
+    { "@type": "Offer", name: "Serviette 50×90", price: "4.50", priceCurrency: "EUR" },
+    { "@type": "Offer", name: "Drap de bain 70×150", price: "6.50", priceCurrency: "EUR" },
+    { "@type": "Offer", name: "Tapis de bain 50×70", price: "4.00", priceCurrency: "EUR" },
+    { "@type": "Offer", name: "Petite serviette 30×50", price: "2.50", priceCurrency: "EUR" },
+    { "@type": "Offer", name: "Drap housse", price: "7.50", priceCurrency: "EUR" },
+    { "@type": "Offer", name: "Housse de couette", price: "9.00", priceCurrency: "EUR" },
   ],
 };
 

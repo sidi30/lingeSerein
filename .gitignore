@@ -50,3 +50,4 @@ apps/mobile/.expo/
 # Next.js auto-generated
 next-env.d.ts
 **/next-env.d.ts
+/apps/vitrine/test-results/

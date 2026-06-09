@@ -1,0 +1,82 @@
+{
+  "scan_at": "2026-06-09T00:00:00+02:00",
+  "total": 5,
+  "by_severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 3,
+    "low": 1
+  },
+  "bugs": [
+    {
+      "id": "BUG-001",
+      "severity": "high",
+      "area": "frontend",
+      "feature": "footer",
+      "title": "Footer — contraste insuffisant WCAG AA (4.35:1 < 4.5:1 requis)",
+      "steps": "1. Ouvrir la page d'accueil. 2. Scroller jusqu'au footer. 3. Observer les textes et liens (ex. description, nav links, tel, email, adresse) sur fond #0d3b13 (forest-dark). 4. Mesurer le contraste : les éléments utilisent text-white/50 (~#869d89) sur #0d3b13, ratio = 4.35:1.",
+      "expected": "Ratio de contraste >= 4.5:1 pour tout texte de taille normale (WCAG 2.1 AA — critère 1.4.3). Les 10 éléments affectés doivent être lisibles pour les utilisateurs malvoyants.",
+      "actual": "Ratio mesuré 4.35:1 sur 10 nœuds : paragraphe de description, 6 liens de navigation (/#services, /#tarifs, /#faq, /devis, /zone-de-livraison, /#contact), lien tel, lien email, span adresse. Tous portent la classe text-white/50 sur bg-forest-dark (#0d3b13). Axe-core : impact 'serious', règle WCAG 2.1 AA — 1.4.3.",
+      "file": "apps/vitrine/src/components/footer.tsx:27,42,52,56,58,62",
+      "screenshot": "test-results/accessibility-A11Y-—-Accueil-—-WCAG-2-1-AA-chromium/test-failed-1.png",
+      "status": "open",
+      "iterations": 0
+    },
+    {
+      "id": "BUG-002",
+      "severity": "medium",
+      "area": "frontend",
+      "feature": "contact-form",
+      "title": "Contact — conflit role=alert entre le formulaire et le route-announcer Next.js",
+      "steps": "1. Ouvrir la page d'accueil. 2. Scroller jusqu'au formulaire de contact. 3. Soumettre le formulaire sans cocher la case de consentement, ou provoquer une erreur. 4. Observer avec les DevTools: la page contient désormais 2 éléments role='alert': le div d'erreur du formulaire ET le div#__next-route-announcer__ injecté par Next.js.",
+      "expected": "Un seul élément role='alert' visible (le message d'erreur du formulaire). Les technologies d'assistance (lecteurs d'écran) ne doivent recevoir qu'une seule annonce live. Les tests Playwright en strict mode doivent pouvoir cibler l'alerte sans ambiguïté.",
+      "actual": "Deux éléments portent role='alert' simultanément: (1) le div d'erreur formulaire visible, (2) div#__next-route-announcer__ injecté par Next.js avec aria-live='assertive'. Cela perturbe les lecteurs d'écran (double annonce potentielle) et bloque les tests Playwright en strict mode.",
+      "file": "apps/vitrine/src/components/contact.tsx:284",
+      "screenshot": null,
+      "status": "open",
+      "iterations": 0
+    },
+    {
+      "id": "BUG-003",
+      "severity": "medium",
+      "area": "frontend",
+      "feature": "navigation",
+      "title": "Skip link et SectionDots — deux <a href='#main'> dans la page, conflit clavier",
+      "steps": "1. Ouvrir la page d'accueil sur desktop (viewport >= 1024px). 2. Inspecter le DOM : chercher a[href='#main']. 3. Il existe 2 éléments: (a) le skip link dans layout.tsx, (b) le premier point du SectionDots dans section-dots.tsx. 4. Appuyer sur Tab depuis le début de la page : les deux liens sont focusables.",
+      "expected": "Un seul lien <a href='#main'> dans le DOM. Le skip link de navigation rapide doit être unique pour que les utilisateurs clavier puissent l'utiliser sans ambiguïté. Le SectionDots doit pointer vers l'ancre de section correspondante.",
+      "actual": "Deux <a href='#main'> coexistent : le skip link dans <body> (layout.tsx:109) et la première entrée du composant SectionDots (section-dots.tsx:57) dont l'id de section est 'main'. Le premier point de navigation rapide est donc un doublon du skip link, ce qui crée confusion pour les utilisateurs de lecteurs d'écran et casse les tests de navigation clavier (strict mode violation).",
+      "file": "apps/vitrine/src/components/section-dots.tsx:57 et apps/vitrine/src/app/layout.tsx:109",
+      "screenshot": null,
+      "status": "open",
+      "iterations": 0
+    },
+    {
+      "id": "BUG-004",
+      "severity": "medium",
+      "area": "frontend",
+      "feature": "navigation",
+      "title": "SectionDots — aria-current=\"true\" sémantiquement incorrect pour un lien de navigation",
+      "steps": "1. Ouvrir la page d'accueil sur desktop. 2. Inspecter les dots de navigation rapide (fixed right-6). 3. Observer aria-current='true' sur le dot actif.",
+      "expected": "Pour un lien de navigation représentant la section courante, la valeur correcte de aria-current est 'location' (ou 'page' si c'est la page active). La valeur 'true' est un booléen générique sans sémantique de navigation.",
+      "actual": "aria-current=\"true\" est utilisé sur les points de navigation (section-dots.tsx:63). Cette valeur n'a pas de sémantique précise pour les liens de navigation de sections. Les lecteurs d'écran annoncent 'current link' sans contexte. La valeur correcte serait aria-current=\"location\".",
+      "file": "apps/vitrine/src/components/section-dots.tsx:63",
+      "screenshot": null,
+      "status": "open",
+      "iterations": 0
+    },
+    {
+      "id": "BUG-005",
+      "severity": "low",
+      "area": "frontend",
+      "feature": "devis",
+      "title": "Simulateur — slider Livraisons/mois a min=1, impossible de descendre à 0 unités",
+      "steps": "1. Ouvrir /devis. 2. Mettre tous les sliders produits à 0. 3. Observer le récapitulatif : 'Ajoutez des produits pour voir votre devis'. 4. Essayer de mettre le slider 'Livraisons par mois' à 0 — impossible, min=1. 5. Observer la logique de calcul : livraisonsParMois est toujours >= 1, donc venteMois = 0 * 1 = 0 quand tous les produits sont à 0, ce qui est correct. Cependant l'UI ne permet pas de simuler '0 livraison' comme état explicite.",
+      "expected": "Soit (a) le slider Livraisons/mois accepte 0 pour symboliser l'absence de livraison, soit (b) la doc/UX indique clairement que ce slider représente une fréquence minimale d'1 livraison par mois.",
+      "actual": "Le slider Livraisons/mois a min=1 (contact.tsx logique correcte) mais aucune indication visuelle n'explique pourquoi on ne peut pas descendre à 0. L'UX est silencieuse sur ce point. Si un prospect veut simuler une période sans commande, il n'a pas de moyen direct.",
+      "file": "apps/vitrine/src/app/devis/page.tsx:318",
+      "screenshot": null,
+      "status": "open",
+      "iterations": 0
+    }
+  ]
+}

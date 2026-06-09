@@ -1,59 +1,67 @@
 "use client";
 
-import { Suspense, useState, useMemo, useCallback, useEffect } from "react";
+import { Suspense, useState, useMemo, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, Percent, TrendingUp, Calendar, Truck } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Percent,
+  TrendingUp,
+  Calendar,
+  Truck,
+  Sparkles,
+} from "lucide-react";
+import { DevisGenerator } from "@/components/devis-generator";
 
-/* ─── Catalogue produits ─── */
+/* ─── Catalogue (source de vérité : page Tarifs) ─── */
 
-interface Product {
+interface Item {
   id: string;
   name: string;
-  shortName: string;
-  costCents: number; // ton prix d'achat
-  prices: Record<string, number>; // prix de vente par gamme (cents)
+  desc?: string;
+  priceCents: number;
+  costCents: number;
 }
 
-const products: Product[] = [
+// Kits = offre principale (prix par rotation)
+const kits: Item[] = [
   {
-    id: "drap",
-    name: "Drap de bain",
-    shortName: "Draps",
-    costCents: 120,
-    prices: { confort: 250, hotel: 380, prestige: 550 },
+    id: "bain",
+    name: "Kit Bain",
+    desc: "Drap de bain + serviette + tapis",
+    priceCents: 750,
+    costCents: 290,
   },
   {
-    id: "serviette",
-    name: "Serviette",
-    shortName: "Serviettes",
-    costCents: 80,
-    prices: { confort: 180, hotel: 270, prestige: 420 },
-  },
-  {
-    id: "tapis",
-    name: "Tapis de bain",
-    shortName: "Tapis",
-    costCents: 90,
-    prices: { confort: 170, hotel: 250, prestige: 430 },
-  },
-  {
-    id: "gant",
-    name: "Gant de toilette",
-    shortName: "Gants",
-    costCents: 30,
-    prices: { confort: 0, hotel: 100, prestige: 150 },
+    id: "lit",
+    name: "Kit Lit",
+    desc: "Housse de couette + drap housse + taies",
+    priceCents: 1650,
+    costCents: 520,
   },
 ];
 
-const gammes = [
-  { id: "confort", name: "Confort", label: "500 g/m²" },
-  { id: "hotel", name: "Hôtel", label: "550 g/m² peigné" },
-  { id: "prestige", name: "Prestige", label: "600 g/m² égyptien" },
+// Articles à l'unité (extras, hors livraison). Coûts lit estimés — à ajuster.
+const extras: Item[] = [
+  { id: "serviette", name: "Serviette 50×90", priceCents: 450, costCents: 80 },
+  { id: "drapbain", name: "Drap de bain 70×150", priceCents: 650, costCents: 120 },
+  { id: "tapis", name: "Tapis de bain 50×70", priceCents: 400, costCents: 90 },
+  { id: "petite", name: "Petite serviette 30×50", priceCents: 250, costCents: 30 },
+  { id: "draphousse", name: "Drap housse", priceCents: 750, costCents: 200 },
+  { id: "houssecouette", name: "Housse de couette", priceCents: 900, costCents: 280 },
 ];
 
-const VALID_GAMMES = new Set(gammes.map((g) => g.id));
+const zones = [
+  { id: "orange", name: "Orange", fraisCents: 0, note: "Offerte dès 4 kits" },
+  { id: "proche", name: "Zone proche", fraisCents: 1200, note: "Carpentras, Vaison…" },
+  { id: "elargie", name: "Zone élargie", fraisCents: 1500, note: "Avignon, Apt…" },
+];
+
+const GROUP_DISCOUNT = 200; // Kit Complet : -2 € par paire bain+lit groupée
+const ABO_PRICE = 8900; // Pack Sérénité 89 €/mois
+const FREE_DELIVERY_THRESHOLD = 12000; // livraison offerte dès 120 €
 
 function fmt(cents: number): string {
   return (
@@ -69,7 +77,7 @@ function fmtShort(cents: number): string {
   );
 }
 
-/* ─── Slider component ─── */
+/* ─── Slider ─── */
 
 function Slider({
   label,
@@ -125,77 +133,84 @@ function Slider({
   );
 }
 
-/* ─── Page inner (uses searchParams) ─── */
+/* ─── Page inner ─── */
 
 function DevisPageInner() {
   const searchParams = useSearchParams();
-  const initialGamme = (() => {
-    const g = searchParams.get("gamme");
-    return g && VALID_GAMMES.has(g) ? g : "hotel";
-  })();
   const isAdmin = searchParams.get("admin") === "1";
 
-  const [gammeId, setGammeId] = useState(initialGamme);
-  const [qtys, setQtys] = useState<Record<string, number>>({
-    drap: 8,
-    serviette: 8,
-    tapis: 8,
-    gant: 4,
-  });
+  const [kitQtys, setKitQtys] = useState<Record<string, number>>({ bain: 8, lit: 4 });
+  const [extraQtys, setExtraQtys] = useState<Record<string, number>>({});
+  const [grouper, setGrouper] = useState(true);
+  const [zoneId, setZoneId] = useState("orange");
   const [livraisonsParMois, setLivraisonsParMois] = useState(4);
   const [mois, setMois] = useState(6);
   const [reduction, setReduction] = useState(0);
 
-  useEffect(() => {
-    const g = searchParams.get("gamme");
-    if (g && VALID_GAMMES.has(g)) setGammeId(g);
-  }, [searchParams]);
-
-  const updateQty = useCallback((id: string, val: number) => {
-    setQtys((prev) => ({ ...prev, [id]: val }));
+  const updateKit = useCallback((id: string, val: number) => {
+    setKitQtys((prev) => ({ ...prev, [id]: val }));
+  }, []);
+  const updateExtra = useCallback((id: string, val: number) => {
+    setExtraQtys((prev) => ({ ...prev, [id]: val }));
   }, []);
 
-  const gamme = gammes.find((g) => g.id === gammeId)!;
+  const zone = zones.find((z) => z.id === zoneId)!;
 
   const calc = useMemo(() => {
-    let totalVenteLivraison = 0;
-    let totalCoutLivraison = 0;
-    const lignes: { name: string; qty: number; prixUnit: number; cout: number; total: number }[] =
-      [];
+    const lignes: { name: string; qty: number; total: number }[] = [];
+    let sumVente = 0;
+    let sumCout = 0;
 
-    for (const p of products) {
-      const qty = qtys[p.id] ?? 0;
-      if (qty === 0) continue;
-      const prixUnit = p.prices[gammeId] ?? 0;
-      if (prixUnit === 0) continue;
-      const total = prixUnit * qty;
-      const cout = p.costCents * qty;
-      totalVenteLivraison += total;
-      totalCoutLivraison += cout;
-      lignes.push({ name: p.shortName, qty, prixUnit, cout, total });
+    for (const k of kits) {
+      const qty = kitQtys[k.id] ?? 0;
+      if (qty <= 0) continue;
+      sumVente += k.priceCents * qty;
+      sumCout += k.costCents * qty;
+      lignes.push({ name: k.name, qty, total: k.priceCents * qty });
+    }
+    for (const e of extras) {
+      const qty = extraQtys[e.id] ?? 0;
+      if (qty <= 0) continue;
+      sumVente += e.priceCents * qty;
+      sumCout += e.costCents * qty;
+      lignes.push({ name: e.name, qty, total: e.priceCents * qty });
     }
 
+    const qBain = kitQtys.bain ?? 0;
+    const qLit = kitQtys.lit ?? 0;
+    const pairs = grouper ? Math.min(qBain, qLit) : 0;
+    const groupDiscount = pairs * GROUP_DISCOUNT;
+
+    const nbKits = qBain + qLit;
+    const totalVente = sumVente - groupDiscount;
+
+    // Livraison : offerte dès 120 € ou (Orange dès 4 kits), sinon frais de zone
     const livraisonFrais =
-      totalVenteLivraison > 0 && Object.values(qtys).reduce((a, b) => a + b, 0) < 4 ? 500 : 0;
+      totalVente >= FREE_DELIVERY_THRESHOLD || (zoneId === "orange" && nbKits >= 4)
+        ? 0
+        : zone.fraisCents;
 
-    const reductionMontant = Math.round(totalVenteLivraison * (reduction / 100));
-    const venteApresReduc = totalVenteLivraison - reductionMontant + livraisonFrais;
+    const reductionMontant = Math.round(totalVente * (reduction / 100));
+    const venteApresReduc = totalVente - reductionMontant + livraisonFrais;
 
-    const margeLivraison = venteApresReduc - totalCoutLivraison;
+    const margeLivraison = venteApresReduc - sumCout;
     const margePct = venteApresReduc > 0 ? (margeLivraison / venteApresReduc) * 100 : 0;
 
     const venteMois = venteApresReduc * livraisonsParMois;
-    const coutMois = totalCoutLivraison * livraisonsParMois;
+    const coutMois = sumCout * livraisonsParMois;
     const margeMois = venteMois - coutMois;
 
     const venteTotal = venteMois * mois;
     const coutTotal = coutMois * mois;
     const margeTotal = venteTotal - coutTotal;
 
+    const ecoAbo = venteMois - ABO_PRICE;
+
     return {
       lignes,
-      totalVenteLivraison,
-      totalCoutLivraison,
+      pairs,
+      groupDiscount,
+      totalVente,
       livraisonFrais,
       reductionMontant,
       venteApresReduc,
@@ -206,8 +221,9 @@ function DevisPageInner() {
       venteTotal,
       coutTotal,
       margeTotal,
+      ecoAbo,
     };
-  }, [qtys, gammeId, reduction, livraisonsParMois, mois]);
+  }, [kitQtys, extraQtys, grouper, zoneId, zone.fraisCents, reduction, livraisonsParMois, mois]);
 
   return (
     <div className="min-h-dvh bg-cream">
@@ -238,84 +254,124 @@ function DevisPageInner() {
             Simulateur de devis
           </h1>
           <p className="mt-2 text-gray-700 text-sm">
-            Choisissez vos produits, ajustez les quantités, visualisez votre total instantanément.
+            Choisissez vos kits, ajustez les quantités, visualisez votre total instantanément.
           </p>
           {isAdmin && (
             <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-lavender-100 px-3 py-1 text-[11px] font-semibold text-lavender-800">
-              Mode commercial — rentabilité visible
+              Mode commercial — rentabilité & génération de devis
             </span>
           )}
         </div>
 
+        {/* Générateur de devis PDF — admin uniquement */}
+        {isAdmin && <DevisGenerator />}
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-7 space-y-6">
+            {/* Kits */}
             <div className="rounded-2xl bg-white border border-lavender-100 p-5">
-              <h2 className="font-serif text-base font-bold text-forest mb-4">Gamme</h2>
-              <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Choix de gamme">
-                {gammes.map((g) => (
-                  <button
-                    key={g.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={gammeId === g.id}
-                    onClick={() => setGammeId(g.id)}
-                    className={`min-h-[44px] rounded-xl px-3 py-3 text-center transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 focus-visible:ring-offset-white ${
-                      gammeId === g.id
-                        ? "bg-forest text-white shadow-md"
-                        : "bg-lavender-50 text-gray-800 hover:bg-lavender-100"
-                    }`}
-                  >
-                    <p className="font-semibold text-sm">{g.name}</p>
-                    <p
-                      className={`text-[10px] mt-0.5 ${gammeId === g.id ? "text-white/80" : "text-gray-700"}`}
-                    >
-                      {g.label}
-                    </p>
-                  </button>
+              <h2 className="font-serif text-base font-bold text-forest mb-5">Kits par rotation</h2>
+              <div className="space-y-6">
+                {kits.map((k) => (
+                  <div key={k.id}>
+                    <Slider
+                      label={`${k.name} — ${fmtShort(k.priceCents)} / rotation`}
+                      value={kitQtys[k.id] ?? 0}
+                      onChange={(v) => updateKit(k.id, v)}
+                      min={0}
+                      max={40}
+                    />
+                    {k.desc && <p className="text-[11px] text-gray-500 mt-1">{k.desc}</p>}
+                  </div>
+                ))}
+              </div>
+
+              <label className="mt-5 flex items-start gap-2.5 rounded-xl bg-lavender-50 border border-lavender-100 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={grouper}
+                  onChange={(e) => setGrouper(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-lavender-300 text-forest focus-visible:ring-forest"
+                />
+                <span className="text-xs text-gray-700">
+                  <span className="font-semibold text-forest">
+                    Grouper Bain + Lit (Kit Complet)
+                  </span>{" "}
+                  — 22 € au lieu de 24 €, soit <strong>−2 € par paire</strong> livrée ensemble.
+                </span>
+              </label>
+            </div>
+
+            {/* Extras à l'unité */}
+            <div className="rounded-2xl bg-white border border-lavender-100 p-5">
+              <h2 className="font-serif text-base font-bold text-forest mb-1">
+                Articles à l&apos;unité
+              </h2>
+              <p className="text-[11px] text-gray-500 mb-5">
+                Optionnel — pièces supplémentaires hors kit.
+              </p>
+              <div className="space-y-6">
+                {extras.map((e) => (
+                  <Slider
+                    key={e.id}
+                    label={`${e.name} — ${fmtShort(e.priceCents)} / pièce`}
+                    value={extraQtys[e.id] ?? 0}
+                    onChange={(v) => updateExtra(e.id, v)}
+                    min={0}
+                    max={50}
+                  />
                 ))}
               </div>
             </div>
 
+            {/* Zone de livraison */}
             <div className="rounded-2xl bg-white border border-lavender-100 p-5">
-              <h2 className="font-serif text-base font-bold text-forest mb-5">
-                Produits par livraison
-              </h2>
-              <div className="space-y-6">
-                {products.map((p) => {
-                  const price = p.prices[gammeId] ?? 0;
-                  if (price === 0 && gammeId === "confort" && p.id === "gant") {
-                    return (
-                      <div key={p.id} className="opacity-50">
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-700">{p.name}</span>
-                          <span className="text-xs text-gray-600">Non inclus en Confort</span>
-                        </div>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div key={p.id}>
-                      <Slider
-                        label={`${p.name} — ${fmtShort(price)} / pièce`}
-                        value={qtys[p.id] ?? 0}
-                        onChange={(v) => updateQty(p.id, v)}
-                        min={0}
-                        max={50}
-                      />
-                    </div>
-                  );
-                })}
+              <div className="flex items-center gap-2 mb-4">
+                <Truck size={16} aria-hidden className="text-forest" />
+                <h2 className="font-serif text-sm font-bold text-forest">Zone de livraison</h2>
               </div>
+              <div
+                className="grid grid-cols-3 gap-2"
+                role="radiogroup"
+                aria-label="Zone de livraison"
+              >
+                {zones.map((z) => (
+                  <button
+                    key={z.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={zoneId === z.id}
+                    onClick={() => setZoneId(z.id)}
+                    className={`min-h-[44px] rounded-xl px-2 py-2.5 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 ${
+                      zoneId === z.id
+                        ? "bg-forest text-white shadow-md"
+                        : "bg-lavender-50 text-gray-800 hover:bg-lavender-100"
+                    }`}
+                  >
+                    <p className="font-semibold text-xs">{z.name}</p>
+                    <p
+                      className={`text-[10px] mt-0.5 ${zoneId === z.id ? "text-white/80" : "text-gray-600"}`}
+                    >
+                      {z.fraisCents === 0 ? "Offerte" : fmtShort(z.fraisCents)}
+                    </p>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-3">
+                Livraison offerte dès 4 kits à Orange ou dès 120 € de commande, partout dans le
+                Vaucluse.
+              </p>
             </div>
 
+            {/* Fréquence / engagement / remise */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="rounded-2xl bg-white border border-lavender-100 p-5">
                 <div className="flex items-center gap-2 mb-4">
                   <Truck size={16} aria-hidden className="text-forest" />
-                  <h2 className="font-serif text-sm font-bold text-forest">Livraisons / mois</h2>
+                  <h2 className="font-serif text-sm font-bold text-forest">Rotations / mois</h2>
                 </div>
                 <Slider
-                  label="Livraisons par mois"
+                  label="Rotations par mois"
                   value={livraisonsParMois}
                   onChange={setLivraisonsParMois}
                   min={1}
@@ -330,7 +386,7 @@ function DevisPageInner() {
                   <h2 className="font-serif text-sm font-bold text-forest">Engagement</h2>
                 </div>
                 <Slider
-                  label="Durée d'engagement"
+                  label="Durée"
                   value={mois}
                   onChange={setMois}
                   min={1}
@@ -359,18 +415,19 @@ function DevisPageInner() {
             </div>
           </div>
 
+          {/* Récap */}
           <div className="lg:col-span-5">
             <div className="sticky top-20 space-y-4">
               <div className="rounded-2xl bg-white border border-lavender-100 shadow-lg shadow-lavender-100/20 overflow-hidden">
                 <div className="bg-forest px-5 py-4">
-                  <h3 className="font-serif text-base font-bold text-white">Récap par livraison</h3>
-                  <p className="text-[11px] text-white/80">Gamme {gamme.name}</p>
+                  <h3 className="font-serif text-base font-bold text-white">Récap par rotation</h3>
+                  <p className="text-[11px] text-white/80">Zone {zone.name}</p>
                 </div>
                 <div className="p-5">
                   <div className="space-y-2 mb-4">
                     {calc.lignes.length === 0 && (
                       <p className="text-sm text-gray-700 text-center py-4">
-                        Ajoutez des produits pour voir votre devis
+                        Ajoutez des kits pour voir votre devis
                       </p>
                     )}
                     {calc.lignes.map((l) => (
@@ -381,6 +438,12 @@ function DevisPageInner() {
                         <span className="font-medium text-gray-900">{fmt(l.total)}</span>
                       </div>
                     ))}
+                    {calc.groupDiscount > 0 && (
+                      <div className="flex justify-between text-sm tabular-nums text-forest">
+                        <span>Remise groupage ({calc.pairs}× Kit Complet)</span>
+                        <span className="font-semibold">-{fmt(calc.groupDiscount)}</span>
+                      </div>
+                    )}
                   </div>
 
                   {calc.lignes.length > 0 && (
@@ -389,11 +452,11 @@ function DevisPageInner() {
 
                       <div className="flex justify-between text-sm tabular-nums">
                         <span className="text-gray-700">Sous-total</span>
-                        <span className="text-gray-900">{fmt(calc.totalVenteLivraison)}</span>
+                        <span className="text-gray-900">{fmt(calc.totalVente)}</span>
                       </div>
 
                       <div className="flex justify-between text-sm mt-1 tabular-nums">
-                        <span className="text-gray-700">Livraison</span>
+                        <span className="text-gray-700">Livraison ({zone.name})</span>
                         <span
                           className={
                             calc.livraisonFrais === 0
@@ -417,14 +480,16 @@ function DevisPageInner() {
                       <div className="h-px bg-lavender-100 my-3" />
 
                       <div className="flex justify-between items-end">
-                        <span className="text-sm text-gray-700">Total / livraison</span>
+                        <span className="text-sm text-gray-700">Total / rotation</span>
                         <span className="font-serif text-2xl font-bold text-forest tabular-nums">
                           {fmt(calc.venteApresReduc)}
                         </span>
                       </div>
 
                       <div className="flex justify-between items-end mt-1">
-                        <span className="text-xs text-gray-700">Estimé / mois</span>
+                        <span className="text-xs text-gray-700">
+                          Estimé / mois ({livraisonsParMois}×)
+                        </span>
                         <span className="font-serif text-base font-semibold text-forest tabular-nums">
                           {fmt(calc.venteMois)}
                         </span>
@@ -434,6 +499,24 @@ function DevisPageInner() {
                 </div>
               </div>
 
+              {/* Comparaison abonnement */}
+              {calc.lignes.length > 0 && calc.ecoAbo > 0 && (
+                <div className="rounded-2xl bg-lavender-50 border border-lavender-200 p-5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles size={16} aria-hidden className="text-lavender-700" />
+                    <h3 className="font-serif text-sm font-bold text-forest">
+                      Pack Sérénité — 89 € / mois
+                    </h3>
+                  </div>
+                  <p className="text-xs text-gray-700 leading-relaxed">
+                    8 kits bain + 4 kits lit + livraisons inclus. À votre volume estimé (
+                    {fmt(calc.venteMois)}/mois), l&apos;abonnement pourrait vous faire économiser{" "}
+                    <strong className="text-lavender-700">~{fmt(calc.ecoAbo)} / mois</strong>.
+                  </p>
+                </div>
+              )}
+
+              {/* Rentabilité admin */}
               {isAdmin && calc.lignes.length > 0 && (
                 <div className="rounded-2xl bg-forest/5 border border-forest/10 p-5">
                   <div className="flex items-center gap-2 mb-3">
@@ -446,7 +529,7 @@ function DevisPageInner() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-xl bg-white p-3 text-center">
                       <p className="text-[10px] uppercase tracking-wider text-gray-700 mb-1">
-                        Marge / livraison
+                        Marge / rotation
                       </p>
                       <p
                         className={`font-serif text-lg font-bold tabular-nums ${calc.margeLivraison >= 0 ? "text-forest" : "text-red-700"}`}
@@ -467,7 +550,7 @@ function DevisPageInner() {
                         {fmt(calc.margeMois)}
                       </p>
                       <p className="text-[10px] text-gray-700">
-                        {livraisonsParMois} livraison{livraisonsParMois > 1 ? "s" : ""}
+                        {livraisonsParMois} rotation{livraisonsParMois > 1 ? "s" : ""}
                       </p>
                     </div>
                   </div>
