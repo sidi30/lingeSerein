@@ -5,6 +5,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      # Persistance des demandes de devis (JSONL) hors du conteneur.
+      - mailer_data:/data
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
@@ -20,6 +23,9 @@ services:
       - "traefik.http.services.mailer.loadbalancer.server.port=3010"
     networks:
       - traefik-public
+
+volumes:
+  mailer_data:
 
 networks:
   traefik-public:

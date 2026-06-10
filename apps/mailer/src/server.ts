@@ -1,9 +1,11 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import nodemailer from "nodemailer";
 import { z } from "zod";
 import { confirmationEmail, notificationEmail } from "./templates.js";
+import { addQuoteRequest, deleteQuoteRequest, listQuoteRequests, setQuoteStatus } from "./store.js";
+import { renderInbox, requireBasicAuth } from "./inbox.js";
 
 const PORT = Number(process.env.PORT) || 3010;
 const GMAIL_USER = process.env.GMAIL_USER!;
@@ -77,10 +79,19 @@ await app.register(cors, {
   methods: ["POST"],
 });
 
+// Limite globale généreuse (permet à l'admin de parcourir l'inbox sans être
+// bloqué). La limite stricte anti-abus est appliquée par route sur /api/contact.
 await app.register(rateLimit, {
-  max: 5,
-  timeWindow: "15 minutes",
+  max: 60,
+  timeWindow: "1 minute",
 });
+
+// Le formulaire admin POST en application/x-www-form-urlencoded. On n'a pas
+// besoin du corps (l'action et l'id sont dans l'URL) : on parse en objet vide
+// pour éviter un 415 Unsupported Media Type sur ces requêtes.
+app.addContentTypeParser("application/x-www-form-urlencoded", (_req, _payload, done) =>
+  done(null, {}),
+);
 
 // NOTE délivrabilité : le VPS de prod bloque les ports SMTP sortants 25 et 465
 // (timeout). Seul le 587 (submission / STARTTLS) est ouvert. On utilise donc
@@ -120,51 +131,110 @@ transporter
 // Health check — réponse minimale, aucune info d'environnement divulguée.
 app.get("/health", async () => ({ status: "ok" }));
 
-// Contact form
-app.post("/api/contact", async (request, reply) => {
-  const result = contactSchema.safeParse(request.body);
+// Contact form — limite stricte anti-abus (5 / 15 min) propre à cet endpoint public.
+app.post(
+  "/api/contact",
+  {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: "15 minutes",
+      },
+    },
+  },
+  async (request, reply) => {
+    const result = contactSchema.safeParse(request.body);
 
-  if (!result.success) {
-    return reply.status(400).send({
-      error: "Données invalides",
-      details: result.error.flatten().fieldErrors,
-    });
-  }
+    if (!result.success) {
+      return reply.status(400).send({
+        error: "Données invalides",
+        details: result.error.flatten().fieldErrors,
+      });
+    }
 
-  const data = result.data;
+    const data = result.data;
 
-  // Honeypot rempli => bot. On répond 200 (pas d'indice à l'attaquant) sans envoyer.
-  if (data.website && data.website.length > 0) {
-    return reply.status(200).send({ message: "Demande envoyée avec succès" });
-  }
+    // Honeypot rempli => bot. On répond 200 (pas d'indice à l'attaquant) sans envoyer.
+    if (data.website && data.website.length > 0) {
+      return reply.status(200).send({ message: "Demande envoyée avec succès" });
+    }
 
-  // Défense en profondeur : neutralise tout CR/LF résiduel dans le sujet.
-  const safeCompany = data.company.replace(/[\r\n]+/g, " ").trim();
+    // Défense en profondeur : neutralise tout CR/LF résiduel dans le sujet.
+    const safeCompany = data.company.replace(/[\r\n]+/g, " ").trim();
 
-  try {
-    // Email de notification pour Linge Serein
-    await transporter.sendMail({
-      from: `"Linge Serein" <${GMAIL_USER}>`,
-      to: GMAIL_USER,
-      replyTo: data.email,
-      subject: `Nouvelle demande de devis — ${safeCompany}`,
-      html: notificationEmail(data),
-    });
+    // Persiste la demande AVANT l'envoi email : ainsi aucun lead n'est perdu même
+    // si le SMTP échoue. Une erreur de stockage ne doit jamais casser la réponse.
+    try {
+      addQuoteRequest({
+        name: data.name,
+        company: data.company,
+        email: data.email,
+        phone: data.phone,
+        message: data.message,
+        ip: request.ip,
+      });
+    } catch (err) {
+      app.log.error({ err }, "Échec de la persistance de la demande de devis");
+    }
 
-    // Email de confirmation pour le client
-    await transporter.sendMail({
-      from: `"Linge Serein" <${GMAIL_USER}>`,
-      to: data.email,
-      subject: "Linge Serein — Nous avons bien reçu votre demande",
-      html: confirmationEmail(data),
-    });
+    try {
+      // Email de notification pour Linge Serein
+      await transporter.sendMail({
+        from: `"Linge Serein" <${GMAIL_USER}>`,
+        to: GMAIL_USER,
+        replyTo: data.email,
+        subject: `Nouvelle demande de devis — ${safeCompany}`,
+        html: notificationEmail(data),
+      });
 
-    return reply.status(200).send({ message: "Demande envoyée avec succès" });
-  } catch (error) {
-    app.log.error(error);
-    return reply.status(500).send({ error: "Erreur lors de l'envoi" });
-  }
+      // Email de confirmation pour le client
+      await transporter.sendMail({
+        from: `"Linge Serein" <${GMAIL_USER}>`,
+        to: data.email,
+        subject: "Linge Serein — Nous avons bien reçu votre demande",
+        html: confirmationEmail(data),
+      });
+
+      return reply.status(200).send({ message: "Demande envoyée avec succès" });
+    } catch (error) {
+      app.log.error(error);
+      return reply.status(500).send({ error: "Erreur lors de l'envoi" });
+    }
+  },
+);
+
+// ─── Inbox admin (Basic Auth) ───
+// Liste des demandes de devis reçues, avec actions lu / archiver / supprimer.
+
+// GET /admin/devis — page HTML de l'inbox.
+app.get("/admin/devis", async (request, reply) => {
+  if (!requireBasicAuth(request, reply)) return reply;
+  return reply.type("text/html; charset=utf-8").send(renderInbox(listQuoteRequests()));
 });
+
+// Actions de mutation : redirigent vers l'inbox (303) après traitement.
+const idParamSchema = z.object({ id: z.string().uuid() });
+
+function handleAction(action: "read" | "archive" | "delete") {
+  return async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!requireBasicAuth(request, reply)) return reply;
+    const parsed = idParamSchema.safeParse(request.params);
+    if (!parsed.success) {
+      return reply.status(400).type("text/plain; charset=utf-8").send("Identifiant invalide.");
+    }
+    const { id } = parsed.data;
+    if (action === "delete") {
+      deleteQuoteRequest(id);
+    } else {
+      setQuoteStatus(id, action === "read" ? "read" : "archived");
+    }
+    return reply.redirect("/admin/devis", 303);
+  };
+}
+
+app.post<{ Params: { id: string } }>("/admin/devis/:id/read", handleAction("read"));
+app.post<{ Params: { id: string } }>("/admin/devis/:id/archive", handleAction("archive"));
+app.post<{ Params: { id: string } }>("/admin/devis/:id/delete", handleAction("delete"));
 
 try {
   await app.listen({ port: PORT, host: "0.0.0.0" });
