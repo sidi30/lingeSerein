@@ -15,6 +15,25 @@ interface ContactData {
   message: string;
 }
 
+/**
+ * Échappe les caractères HTML dangereux pour empêcher toute injection
+ * (XSS / HTML injection) dans les emails. Les valeurs proviennent d'un
+ * formulaire public non authentifié et ne doivent JAMAIS être interpolées
+ * brutes dans le markup. Le retour à la ligne du message est converti en <br>.
+ */
+function esc(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escMultiline(value: string): string {
+  return esc(value).replace(/\r?\n/g, "<br>");
+}
+
 function layout(content: string): string {
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -65,11 +84,11 @@ function layout(content: string): string {
 export function confirmationEmail(data: ContactData): string {
   return layout(`
     <h2 style="margin:0 0 20px;font-size:22px;color:${BRAND.forest};font-weight:600;">
-      Merci pour votre demande, ${data.name}
+      Merci pour votre demande, ${esc(data.name)}
     </h2>
     <p style="margin:0 0 16px;font-size:15px;color:${BRAND.gray};line-height:1.7;">
       Nous avons bien re\u00e7u votre demande de devis pour
-      <strong style="color:${BRAND.forest};">${data.company}</strong>.
+      <strong style="color:${BRAND.forest};">${esc(data.company)}</strong>.
     </p>
     <p style="margin:0 0 24px;font-size:15px;color:${BRAND.gray};line-height:1.7;">
       Notre \u00e9quipe va \u00e9tudier vos besoins et vous recontacter
@@ -79,7 +98,7 @@ export function confirmationEmail(data: ContactData): string {
     <div style="background-color:${BRAND.lavender50};border-radius:12px;padding:20px 24px;margin-bottom:24px;border-left:4px solid ${BRAND.lavender};">
       <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:${BRAND.forest};">Votre message :</p>
       <p style="margin:0;font-size:14px;color:${BRAND.gray};line-height:1.6;font-style:italic;">
-        "${data.message}"
+        "${escMultiline(data.message)}"
       </p>
     </div>
     <p style="margin:0;font-size:14px;color:${BRAND.gray};line-height:1.7;">
@@ -99,35 +118,35 @@ export function notificationEmail(data: ContactData): string {
       <tr>
         <td style="padding:12px 16px;background-color:${BRAND.lavender50};border-radius:8px 8px 0 0;border-bottom:1px solid #e5e7eb;">
           <span style="font-size:12px;color:${BRAND.gray};text-transform:uppercase;letter-spacing:0.5px;">Nom</span><br>
-          <span style="font-size:15px;color:${BRAND.forest};font-weight:600;">${data.name}</span>
+          <span style="font-size:15px;color:${BRAND.forest};font-weight:600;">${esc(data.name)}</span>
         </td>
       </tr>
       <tr>
         <td style="padding:12px 16px;background-color:#ffffff;border-bottom:1px solid #e5e7eb;">
           <span style="font-size:12px;color:${BRAND.gray};text-transform:uppercase;letter-spacing:0.5px;">\u00c9tablissement</span><br>
-          <span style="font-size:15px;color:${BRAND.forest};font-weight:600;">${data.company}</span>
+          <span style="font-size:15px;color:${BRAND.forest};font-weight:600;">${esc(data.company)}</span>
         </td>
       </tr>
       <tr>
         <td style="padding:12px 16px;background-color:${BRAND.lavender50};border-bottom:1px solid #e5e7eb;">
           <span style="font-size:12px;color:${BRAND.gray};text-transform:uppercase;letter-spacing:0.5px;">Email</span><br>
-          <a href="mailto:${data.email}" style="font-size:15px;color:${BRAND.forest};font-weight:600;text-decoration:none;">${data.email}</a>
+          <a href="mailto:${esc(data.email)}" style="font-size:15px;color:${BRAND.forest};font-weight:600;text-decoration:none;">${esc(data.email)}</a>
         </td>
       </tr>
       <tr>
         <td style="padding:12px 16px;background-color:#ffffff;border-bottom:1px solid #e5e7eb;">
           <span style="font-size:12px;color:${BRAND.gray};text-transform:uppercase;letter-spacing:0.5px;">T\u00e9l\u00e9phone</span><br>
-          <a href="tel:${data.phone}" style="font-size:15px;color:${BRAND.forest};font-weight:600;text-decoration:none;">${data.phone}</a>
+          <a href="tel:${esc(data.phone)}" style="font-size:15px;color:${BRAND.forest};font-weight:600;text-decoration:none;">${esc(data.phone)}</a>
         </td>
       </tr>
       <tr>
         <td style="padding:12px 16px;background-color:${BRAND.lavender50};border-radius:0 0 8px 8px;">
           <span style="font-size:12px;color:${BRAND.gray};text-transform:uppercase;letter-spacing:0.5px;">Message</span><br>
-          <span style="font-size:15px;color:#374151;line-height:1.6;">${data.message}</span>
+          <span style="font-size:15px;color:#374151;line-height:1.6;">${escMultiline(data.message)}</span>
         </td>
       </tr>
     </table>
-    <a href="mailto:${data.email}?subject=Re: Demande de devis Linge Serein"
+    <a href="mailto:${esc(data.email)}?subject=Re: Demande de devis Linge Serein"
        style="display:inline-block;background-color:${BRAND.forest};color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:50px;font-size:14px;font-weight:600;">
       R\u00e9pondre au client
     </a>

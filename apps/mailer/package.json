@@ -7,18 +7,19 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "test": "tsc && node --test dist/templates.test.js",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "fastify": "^5.0.0",
     "@fastify/cors": "^10.0.0",
     "@fastify/rate-limit": "^10.0.0",
-    "nodemailer": "^6.9.0",
+    "fastify": "^5.6.1",
+    "nodemailer": "^7.0.13",
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@types/nodemailer": "^6.4.0",
     "@types/node": "^22.0.0",
+    "@types/nodemailer": "^6.4.23",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0"
   }
