@@ -22,7 +22,8 @@
     "production": {
       "ios": {
         "appleId": "rsidiibrahim@gmail.com",
-        "appleTeamId": "4SRJRX4N45"
+        "appleTeamId": "4SRJRX4N45",
+        "ascAppId": "6778966066"
       },
       "android": {
         "serviceAccountKeyPath": "./play-service-account.json",
