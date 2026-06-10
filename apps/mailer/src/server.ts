@@ -8,7 +8,14 @@ import { confirmationEmail, notificationEmail } from "./templates.js";
 const PORT = Number(process.env.PORT) || 3010;
 const GMAIL_USER = process.env.GMAIL_USER!;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD!;
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://lingeserein.fr";
+// Origins autorisées (CORS). Supporte une liste séparée par des virgules.
+// Inclut apex + www par défaut (le site répond sur les deux via Traefik).
+const ALLOWED_ORIGINS = (
+  process.env.ALLOWED_ORIGIN || "https://lingeserein.fr,https://www.lingeserein.fr"
+)
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 const contactSchema = z.object({
   name: z.string().min(2).max(100),
@@ -21,7 +28,7 @@ const contactSchema = z.object({
 const app = Fastify({ logger: true });
 
 await app.register(cors, {
-  origin: [ALLOWED_ORIGIN, "http://localhost:3002"],
+  origin: [...ALLOWED_ORIGINS, "http://localhost:3002"],
   methods: ["POST"],
 });
 
