@@ -1,6 +1,5 @@
 "use client";
 
-import Script from "next/script";
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -24,16 +23,16 @@ const faqs = [
     a: "Oui. Nous utilisons des lessives certifiées Ecolabel européen, sans phosphates ni allergènes, et nous appliquons la méthode RABC de traçabilité bactériologique. Nos tournées de livraison sont optimisées pour limiter les émissions.",
   },
   {
-    q: "Comment fonctionne l'abonnement ?",
-    a: "Vous choisissez une formule mensuelle (Starter, Essentielle, Pro) avec un nombre fixe de sets et de livraisons. Sans engagement de durée, modifiable à tout moment selon votre saison.",
+    q: "Comment fonctionne l'abonnement de location de linge ?",
+    a: "L'abonnement repose sur une formule mensuelle (Starter, Essentielle ou Pro) incluant un nombre fixe de sets de linge et de livraisons. Il est sans engagement de durée et modifiable à tout moment, ce qui vous permet d'ajuster les volumes selon votre saison touristique en Vaucluse.",
   },
   {
     q: "Que se passe-t-il en cas de dégradation du linge ?",
     a: "L'usure normale est incluse. Pour les dégradations anormales (taches indélébiles, brûlures, déchirures), un barème transparent vous est communiqué à la signature du contrat.",
   },
   {
-    q: "Livrez-vous toute l'année ?",
-    a: "Oui, y compris pendant les pics de saison estivale où nous renforçons nos équipes pour absorber les volumes.",
+    q: "Linge Serein livre-t-il toute l'année dans le Vaucluse ?",
+    a: "Oui, Linge Serein livre toute l'année dans le Vaucluse, y compris pendant les pics de la saison estivale. Durant l'été, nous renforçons nos équipes et nos tournées pour absorber les volumes supplémentaires des hôtels, gîtes et locations saisonnières, sans allonger les délais de livraison.",
   },
 ];
 
@@ -52,6 +51,10 @@ export function FAQ() {
 
   return (
     <section id="faq" className="relative py-20 md:py-28 overflow-hidden">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+      />
       <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-lavender-200 to-transparent" />
       <div className="mx-auto max-w-4xl px-6">
         <Reveal className="text-center mb-14">
@@ -109,9 +112,6 @@ export function FAQ() {
           })}
         </ul>
       </div>
-      <Script id="ld-faq" type="application/ld+json" strategy="afterInteractive">
-        {JSON.stringify(faqSchema)}
-      </Script>
     </section>
   );
 }

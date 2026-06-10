@@ -5,6 +5,7 @@ export const metadata: Metadata = {
   title: "Conditions générales de prestation de service",
   description:
     "Conditions générales de prestation de service de location et entretien de linge hôtelier — Linge Serein.",
+  alternates: { canonical: "https://lingeserein.fr/cgps" },
   robots: { index: true, follow: true },
 };
 

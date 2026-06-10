@@ -9,28 +9,32 @@ const steps = [
     title: "Vous commandez",
     description:
       "Par email, téléphone ou SMS. On convient ensemble d'un créneau de livraison adapté à votre planning de check-in.",
-    image: "/site/pub-vitrine.jpeg",
+    image: "/site/pub-vitrine.webp",
+    alt: "Commande de linge hôtelier Linge Serein pour un hébergement en Vaucluse",
   },
   {
     number: "02",
     title: "On livre le linge propre",
     description:
       "Kits pliés, emballés, prêts à déposer dans le logement. Qualité blanchisserie garantie à chaque rotation.",
-    image: "/site/pack-linge.jpeg",
+    image: "/site/pack-linge.webp",
+    alt: "Pack de linge hôtelier propre, plié et emballé, livré à Orange et dans le Vaucluse",
   },
   {
     number: "03",
     title: "Vous accueillez vos voyageurs",
     description:
       "Le linge fait partie de l'expérience. Qualité hôtelière, premiers regards positifs, avis propreté qui s'améliorent.",
-    image: "/site/lit-provencal.png",
+    image: "/site/lit-provencal.webp",
+    alt: "Lit dressé avec des draps hôteliers Linge Serein dans une location saisonnière provençale",
   },
   {
     number: "04",
     title: "On reprend le linge sale",
     description:
       "Lors de la livraison suivante, on reprend tout. Vous ne gérez rien, on s'occupe de tout, rotation après rotation.",
-    image: "/site/livraison-linge.jpeg",
+    image: "/site/livraison-linge.webp",
+    alt: "Reprise du linge usagé par Linge Serein lors d'une tournée de livraison en Vaucluse",
   },
 ];
 
@@ -100,7 +104,7 @@ export function HowItWorks() {
                 <div className={`relative ${i % 2 === 1 ? "lg:order-2" : ""}`}>
                   <Image
                     src={step.image}
-                    alt={step.title}
+                    alt={step.alt}
                     width={700}
                     height={467}
                     className="relative rounded-3xl shadow-xl object-cover w-full"
@@ -192,7 +196,7 @@ export function HowItWorks() {
                   />
                   <Image
                     src={step.image}
-                    alt={step.title}
+                    alt={step.alt}
                     width={700}
                     height={467}
                     className="relative rounded-3xl shadow-2xl object-cover w-full max-h-[42vh] lg:max-h-[55vh]"

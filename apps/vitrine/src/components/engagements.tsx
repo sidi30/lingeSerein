@@ -10,7 +10,7 @@ export function Engagements() {
       <div className="relative mx-auto max-w-7xl px-6">
         <div className="relative rounded-[2rem] overflow-hidden shadow-2xl shadow-forest/20">
           <div className="absolute inset-0">
-            <Image src="/site/livraison-voiture.jpeg" alt="" fill className="object-cover" />
+            <Image src="/site/livraison-voiture.webp" alt="" fill className="object-cover" />
             <div className="absolute inset-0 bg-forest/85" />
           </div>
 

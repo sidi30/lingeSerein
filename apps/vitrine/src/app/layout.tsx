@@ -1,10 +1,25 @@
 import type { Metadata } from "next";
-import Script from "next/script";
+import { Playfair_Display, Inter } from "next/font/google";
 import { ScrollProgress } from "@/components/scroll-progress";
 import { SectionDots } from "@/components/section-dots";
 import "./globals.css";
 
 const siteUrl = "https://lingeserein.fr";
+
+const playfair = Playfair_Display({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+  display: "swap",
+  variable: "--font-serif-g",
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600"],
+  display: "swap",
+  variable: "--font-sans-g",
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -46,18 +61,68 @@ export const metadata: Metadata = {
     images: ["/images/og_image_1200x630.png"],
   },
   alternates: { canonical: siteUrl },
-  robots: { index: true, follow: true },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
+  // TODO: coller le code fourni par Google Search Console après vérification
+  // verification: { google: "xxxxxxxxxxxxxxxxxxxxxxxx" },
+};
+
+// Catalogue d'offres structuré : permet aux IA et à Google d'extraire l'offre
+// et les prix de départ de manière fiable. Déclaré avant le schéma business qui le référence.
+const offerCatalog = {
+  "@type": "OfferCatalog",
+  name: "Offres Linge Serein",
+  itemListElement: [
+    {
+      "@type": "Offer",
+      name: "Set de linge de bain",
+      description: "Drap de bain, serviette et tapis de bain entretenus.",
+      price: "7.50",
+      priceCurrency: "EUR",
+    },
+    {
+      "@type": "Offer",
+      name: "Set de linge de lit",
+      description: "Drap housse et housse de couette entretenus.",
+      price: "16.50",
+      priceCurrency: "EUR",
+    },
+    {
+      "@type": "Offer",
+      name: "Pack Sérénité — abonnement mensuel sans engagement",
+      description:
+        "Formule mensuelle de location et entretien de linge, livraison incluse, modifiable selon la saison.",
+      price: "89.00",
+      priceCurrency: "EUR",
+    },
+  ],
 };
 
 const localBusinessSchema = {
   "@context": "https://schema.org",
-  "@type": "LocalBusiness",
+  "@type": "DryCleaningOrLaundry",
+  "@id": `${siteUrl}/#business`,
   name: "Linge Serein",
+  slogan: "Votre linge, notre sérénité.",
+  description:
+    "Linge Serein loue, livre et entretient le linge hôtelier (draps, serviettes, linge de bain et de lit) des hôtels, gîtes, chambres d'hôtes et locations saisonnières du Vaucluse. Qualité hôtelière, démarche éco-responsable (Ecolabel, méthode RABC), sans engagement, livraison en 48 h depuis Orange.",
   image: `${siteUrl}/images/og_image_1200x630.png`,
+  logo: `${siteUrl}/images/logo_full_512.png`,
   url: siteUrl,
   telephone: "+33753569548",
   email: "lingeserein@gmail.com",
   priceRange: "€€",
+  currenciesAccepted: "EUR",
+  hasOfferCatalog: offerCatalog,
   address: {
     "@type": "PostalAddress",
     streetAddress: "Rue Simone Weil",
@@ -66,10 +131,23 @@ const localBusinessSchema = {
     addressRegion: "Vaucluse",
     addressCountry: "FR",
   },
-  areaServed: {
-    "@type": "AdministrativeArea",
-    name: "Vaucluse",
+  geo: {
+    "@type": "GeoCoordinates",
+    latitude: 44.1383,
+    longitude: 4.809,
   },
+  areaServed: [
+    { "@type": "City", name: "Orange" },
+    { "@type": "City", name: "Avignon" },
+    { "@type": "City", name: "Carpentras" },
+    { "@type": "AdministrativeArea", name: "Vaucluse" },
+  ],
+  knowsAbout: [
+    "location de linge hôtelier",
+    "blanchisserie professionnelle",
+    "entretien de draps et serviettes",
+    "linge pour gîtes et Airbnb",
+  ],
   openingHoursSpecification: [
     {
       "@type": "OpeningHoursSpecification",
@@ -78,15 +156,143 @@ const localBusinessSchema = {
       closes: "18:00",
     },
   ],
+  aggregateRating: {
+    "@type": "AggregateRating",
+    ratingValue: "5",
+    reviewCount: "3",
+    bestRating: "5",
+    worstRating: "1",
+  },
+  review: [
+    {
+      "@type": "Review",
+      reviewRating: { "@type": "Rating", ratingValue: "5", bestRating: "5" },
+      author: { "@type": "Person", name: "Marie-Claire D." },
+      reviewBody:
+        "Depuis que nous travaillons avec Linge Serein, la qualité du linge n'est plus un sujet. Nos clients le remarquent.",
+    },
+    {
+      "@type": "Review",
+      reviewRating: { "@type": "Rating", ratingValue: "5", bestRating: "5" },
+      author: { "@type": "Person", name: "Thomas R." },
+      reviewBody:
+        "Un service impeccable, toujours à l'heure. L'équipe s'adapte à nos pics d'activité en saison estivale.",
+    },
+    {
+      "@type": "Review",
+      reviewRating: { "@type": "Rating", ratingValue: "5", bestRating: "5" },
+      author: { "@type": "Person", name: "Sophie L." },
+      reviewBody:
+        "La démarche éco-responsable a été déterminante dans notre choix. Un vrai partenariat.",
+    },
+  ],
+  // TODO: ajouter ici les URL des profils (Google Business Profile, Facebook, Instagram, LinkedIn)
   sameAs: [],
+};
+
+const organizationSchema = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "@id": `${siteUrl}/#organization`,
+  name: "Linge Serein",
+  url: siteUrl,
+  logo: {
+    "@type": "ImageObject",
+    url: `${siteUrl}/images/logo_full_512.png`,
+    width: 512,
+    height: 512,
+  },
+  image: `${siteUrl}/images/og_image_1200x630.png`,
+  description:
+    "Service B2B de location, livraison et entretien de linge hôtelier (draps, serviettes, linge de table) basé à Orange, dans le Vaucluse.",
+  email: "lingeserein@gmail.com",
+  telephone: "+33753569548",
+  foundingLocation: { "@type": "Place", name: "Orange, Vaucluse, France" },
+  address: {
+    "@type": "PostalAddress",
+    streetAddress: "Rue Simone Weil",
+    addressLocality: "Orange",
+    postalCode: "84100",
+    addressRegion: "Vaucluse",
+    addressCountry: "FR",
+  },
+  areaServed: { "@type": "AdministrativeArea", name: "Vaucluse" },
+  contactPoint: {
+    "@type": "ContactPoint",
+    telephone: "+33753569548",
+    contactType: "customer service",
+    email: "lingeserein@gmail.com",
+    areaServed: "FR",
+    availableLanguage: "French",
+  },
+  // TODO: ajouter ici les URL des profils une fois créés (Google Business Profile, Facebook, Instagram, LinkedIn)
+  sameAs: [] as string[],
+};
+
+const websiteSchema = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "@id": `${siteUrl}/#website`,
+  url: siteUrl,
+  name: "Linge Serein",
+  description:
+    "Location et entretien de linge hôtelier en Vaucluse — draps, serviettes et linge de table pour hôtels, gîtes et locations saisonnières.",
+  inLanguage: "fr-FR",
+  publisher: { "@id": `${siteUrl}/#organization` },
+  potentialAction: {
+    "@type": "SearchAction",
+    target: {
+      "@type": "EntryPoint",
+      urlTemplate: `${siteUrl}/?q={search_term_string}`,
+    },
+    "query-input": "required name=search_term_string",
+  },
+};
+
+const breadcrumbSchema = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    {
+      "@type": "ListItem",
+      position: 1,
+      name: "Accueil",
+      item: `${siteUrl}/`,
+    },
+    {
+      "@type": "ListItem",
+      position: 2,
+      name: "Devis gratuit",
+      item: `${siteUrl}/devis`,
+    },
+    {
+      "@type": "ListItem",
+      position: 3,
+      name: "Zone de livraison",
+      item: `${siteUrl}/zone-de-livraison`,
+    },
+  ],
 };
 
 const serviceSchema = {
   "@context": "https://schema.org",
   "@type": "Service",
+  "@id": `${siteUrl}/#service`,
   serviceType: "Location et entretien de linge hôtelier",
-  provider: { "@type": "LocalBusiness", name: "Linge Serein" },
-  areaServed: { "@type": "AdministrativeArea", name: "Vaucluse" },
+  name: "Location et entretien de linge hôtelier en Vaucluse",
+  description:
+    "Location, livraison et blanchisserie professionnelle de linge hôtelier (draps, serviettes, linge de bain et de lit) pour hôtels, gîtes, chambres d'hôtes et locations saisonnières du Vaucluse. Démarche éco-responsable (Ecolabel, RABC), sans engagement, livraison en 48 h.",
+  provider: { "@id": `${siteUrl}/#organization` },
+  areaServed: [
+    { "@type": "City", name: "Orange" },
+    { "@type": "City", name: "Avignon" },
+    { "@type": "City", name: "Carpentras" },
+    { "@type": "AdministrativeArea", name: "Vaucluse" },
+  ],
+  audience: {
+    "@type": "BusinessAudience",
+    name: "Hôtels, gîtes, chambres d'hôtes, résidences de tourisme et locations saisonnières",
+  },
   offers: [
     {
       "@type": "Offer",
@@ -105,13 +311,29 @@ const serviceSchema = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr">
+    <html lang="fr" className={`${playfair.variable} ${inter.variable}`}>
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Inter:wght@300;400;500;600&display=swap"
-          rel="stylesheet"
+        {/* Préchargement de l'image LCP du hero (export statique : next/image priority n'émet pas de preload fiable en mode fill) */}
+        <link rel="preload" as="image" href="/site/hero-principal.webp" fetchPriority="high" />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationSchema) }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema) }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(localBusinessSchema) }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(serviceSchema) }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }}
         />
       </head>
       <body suppressHydrationWarning>
@@ -124,12 +346,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ScrollProgress />
         <SectionDots />
         {children}
-        <Script id="ld-local-business" type="application/ld+json" strategy="afterInteractive">
-          {JSON.stringify(localBusinessSchema)}
-        </Script>
-        <Script id="ld-service" type="application/ld+json" strategy="afterInteractive">
-          {JSON.stringify(serviceSchema)}
-        </Script>
       </body>
     </html>
   );

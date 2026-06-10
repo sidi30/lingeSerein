@@ -51,3 +51,6 @@ apps/mobile/.expo/
 next-env.d.ts
 **/next-env.d.ts
 /apps/vitrine/test-results/
+
+# Devis PDF generes (artefacts)
+apps/Devis_*.pdf

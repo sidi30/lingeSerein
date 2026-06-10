@@ -4,6 +4,7 @@ import { LegalPage } from "@/components/legal-page";
 export const metadata: Metadata = {
   title: "Mentions légales",
   description: "Mentions légales du site Linge Serein.",
+  alternates: { canonical: "https://lingeserein.fr/mentions-legales" },
   robots: { index: true, follow: true },
 };
 

@@ -78,8 +78,8 @@ export function Contact() {
 
             <div className="relative rounded-2xl overflow-hidden mb-10 shadow-lg">
               <Image
-                src="/site/livraison-hotel.jpeg"
-                alt="Livraison Linge Serein"
+                src="/site/livraison-hotel.webp"
+                alt="Livraison de linge hôtelier Linge Serein à Orange et dans le Vaucluse"
                 width={600}
                 height={300}
                 className="w-full h-48 object-cover"

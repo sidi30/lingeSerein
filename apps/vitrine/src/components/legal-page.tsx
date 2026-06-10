@@ -18,7 +18,7 @@ export function LegalPage({
           <Link href="/" className="flex items-center gap-2">
             <Image
               src="/images/logo_full.png"
-              alt="Linge Serein"
+              alt="Linge Serein — location et entretien de linge hôtelier en Vaucluse"
               width={512}
               height={512}
               className="h-9 w-auto"

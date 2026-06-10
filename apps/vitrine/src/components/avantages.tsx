@@ -75,8 +75,8 @@ export function Avantages() {
                 className="absolute -inset-4 rounded-[2rem] bg-lavender-100/50"
               />
               <Image
-                src="/site/livraison-hotel.jpeg"
-                alt="Livraison de linge frais à l'hôtel"
+                src="/site/livraison-hotel.webp"
+                alt="Livraison de linge hôtelier frais par Linge Serein dans un hôtel du Vaucluse"
                 width={700}
                 height={467}
                 className="relative rounded-3xl shadow-2xl shadow-forest/10 object-cover transition-transform duration-700 group-hover:scale-[1.02]"

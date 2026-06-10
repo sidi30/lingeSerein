@@ -5,6 +5,7 @@ export const metadata: Metadata = {
   title: "Conditions générales de vente et de location",
   description:
     "Conditions générales de vente et de location — Linge Serein, location et entretien de linge de bain et de lit.",
+  alternates: { canonical: "https://lingeserein.fr/cgv" },
   robots: { index: true, follow: true },
 };
 

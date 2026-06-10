@@ -4,6 +4,7 @@ import { LegalPage } from "@/components/legal-page";
 export const metadata: Metadata = {
   title: "Politique de confidentialité",
   description: "Politique de confidentialité et gestion des données personnelles — Linge Serein.",
+  alternates: { canonical: "https://lingeserein.fr/politique-confidentialite" },
   robots: { index: true, follow: true },
 };
 

@@ -19,7 +19,7 @@ export function Footer() {
           <div>
             <Image
               src="/images/logo_dark_bg.png"
-              alt="Linge Serein"
+              alt="Linge Serein — blanchisserie et location de linge hôtelier à Orange, Vaucluse"
               width={200}
               height={100}
               className="h-16 w-auto mb-6 opacity-90"

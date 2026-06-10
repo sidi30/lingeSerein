@@ -44,7 +44,7 @@ export function Hero() {
     <section className="relative min-h-dvh flex flex-col overflow-hidden">
       <motion.div className="absolute inset-0" style={reduced ? undefined : { y: bgY }}>
         <Image
-          src="/site/hero-principal.jpeg"
+          src="/site/hero-principal.webp"
           alt=""
           fill
           sizes="100vw"
@@ -137,10 +137,10 @@ export function Hero() {
         <div className="mx-auto max-w-6xl px-6">
           <div className="grid grid-cols-3 gap-4 animate-fade-in-up delay-500">
             {[
-              { src: "/site/pack-linge.jpeg", alt: "Pack de linge premium prêt à être livré" },
-              { src: "/site/lit-provencal.png", alt: "Lit dressé avec draps hôteliers en lin" },
+              { src: "/site/pack-linge.webp", alt: "Pack de linge premium prêt à être livré" },
+              { src: "/site/lit-provencal.webp", alt: "Lit dressé avec draps hôteliers en lin" },
               {
-                src: "/site/livraison-hotel.jpeg",
+                src: "/site/livraison-hotel.webp",
                 alt: "Livraison de linge à un hôtel partenaire",
               },
             ].map((img) => (

@@ -38,6 +38,8 @@ jobs:
           REMOTE_USER: ${{ secrets.DEPLOY_USER }}
           SOURCE: apps/vitrine/out/
           TARGET: /var/www/lingeserein.fr/
-          ARGS: -rlgoDzvc --delete
+          # -rltvz : pas de préservation owner/group (-o/-g) → évite les échecs chgrp.
+          # --delete : miroir exact. DEPLOY_USER=root → peut écraser tous les fichiers.
+          ARGS: -rltvz --delete
           SCRIPT_BEFORE: |
             mkdir -p /var/www/lingeserein.fr

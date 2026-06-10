@@ -36,7 +36,7 @@ export function Navbar() {
         <a href="#" className="flex items-center gap-3">
           <Image
             src="/images/logo_full.png"
-            alt="Linge Serein"
+            alt="Linge Serein — location et entretien de linge hôtelier en Vaucluse"
             width={512}
             height={512}
             className="h-12 md:h-14 w-auto"

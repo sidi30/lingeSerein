@@ -24,7 +24,7 @@ export function VisualBanner() {
           style={reduced ? undefined : { y: bgY }}
         >
           <Image
-            src="/site/livraison-voiture.jpeg"
+            src="/site/livraison-voiture.webp"
             alt=""
             fill
             sizes="100vw"

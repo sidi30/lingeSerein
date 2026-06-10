@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   title: "Zone de livraison — Vaucluse",
   description:
     "Linge Serein livre dans tout le Vaucluse depuis Orange : Avignon, Carpentras, Cavaillon, Apt, Vaison-la-Romaine, L'Isle-sur-la-Sorgue et alentours.",
+  alternates: { canonical: "https://lingeserein.fr/zone-de-livraison" },
   robots: { index: true, follow: true },
 };
 
