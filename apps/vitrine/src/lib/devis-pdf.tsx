@@ -24,6 +24,10 @@ export interface DevisData {
   livraisonCents: number;
   notes: string;
   tvaApplicable: boolean;
+  /** Conditions de règlement (texte libre, valeur par défaut côté générateur). */
+  reglement?: string;
+  /** Signature de l'émetteur (data URL PNG dessinée dans l'admin), placée sur le devis. */
+  signatureSrc?: string;
 }
 
 /* ─── Branding ─── */
@@ -171,6 +175,26 @@ const styles = StyleSheet.create({
   notesText: { fontSize: 9, color: GRAY, lineHeight: 1.5 },
   /* Conditions */
   conditions: { marginTop: 18, fontSize: 8, color: GRAY, lineHeight: 1.5 },
+  /* Signature */
+  signWrap: { flexDirection: "row", justifyContent: "space-between", marginTop: 16, gap: 24 },
+  signBox: { flex: 1 },
+  signLabel: {
+    fontSize: 7.5,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: LAVENDER,
+    fontFamily: "Helvetica-Bold",
+    marginBottom: 4,
+  },
+  signName: { fontSize: 9, color: INK, fontFamily: "Helvetica-Bold", marginBottom: 2 },
+  signImg: { width: 150, height: 60, objectFit: "contain" },
+  signLineBox: {
+    height: 60,
+    borderBottomWidth: 1,
+    borderBottomColor: LINE,
+    justifyContent: "flex-end",
+  },
+  signHint: { fontSize: 7, color: GRAY, marginTop: 3 },
   /* Footer */
   footer: {
     position: "absolute",
@@ -317,7 +341,26 @@ export function DevisDocument({ data, logoSrc }: { data: DevisData; logoSrc?: st
             Prestation de location et entretien de linge — facturation à la rotation.
             {data.tvaApplicable ? "" : " TVA non applicable, art. 293 B du CGI."}
           </Text>
-          <Text style={{ marginTop: 4 }}>Bon pour accord (date + signature) :</Text>
+          {!!data.reglement?.trim() && <Text style={{ marginTop: 3 }}>{data.reglement}</Text>}
+        </View>
+
+        {/* Signatures */}
+        <View style={styles.signWrap} wrap={false}>
+          <View style={styles.signBox}>
+            <Text style={styles.signLabel}>Bon pour accord — Client</Text>
+            <View style={styles.signLineBox} />
+            <Text style={styles.signHint}>Date, nom et signature</Text>
+          </View>
+          <View style={styles.signBox}>
+            <Text style={styles.signLabel}>L&apos;émetteur</Text>
+            <Text style={styles.signName}>{SOCIETE.nom}</Text>
+            {data.signatureSrc ? (
+              // eslint-disable-next-line jsx-a11y/alt-text
+              <Image src={data.signatureSrc} style={styles.signImg} />
+            ) : (
+              <View style={styles.signLineBox} />
+            )}
+          </View>
         </View>
 
         {/* Footer */}

@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { DevisGenerator } from "@/components/devis-generator";
+import { DevisRequest } from "@/components/devis-request";
 
 /* ─── Catalogue (source de vérité : page Tarifs) ─── */
 
@@ -224,6 +225,23 @@ function DevisPageInner() {
       ecoAbo,
     };
   }, [kitQtys, extraQtys, grouper, zoneId, zone.fraisCents, reduction, livraisonsParMois, mois]);
+
+  // Récap texte (joint à la demande envoyée au propriétaire).
+  const recap = useMemo(() => {
+    const l = calc.lignes.map((x) => `- ${x.qty}× ${x.name} : ${fmt(x.total)}`).join("\n");
+    const parts = [
+      l,
+      calc.groupDiscount > 0
+        ? `Remise groupage (${calc.pairs}× Kit Complet) : -${fmt(calc.groupDiscount)}`
+        : "",
+      `Sous-total : ${fmt(calc.totalVente)}`,
+      `Livraison (${zone.name}) : ${calc.livraisonFrais === 0 ? "Offerte" : fmt(calc.livraisonFrais)}`,
+      `Total / rotation : ${fmt(calc.venteApresReduc)}`,
+      `Rotations/mois : ${livraisonsParMois}× → estimé ${fmt(calc.venteMois)}/mois`,
+      `Engagement envisagé : ${mois} mois`,
+    ].filter(Boolean);
+    return parts.join("\n");
+  }, [calc, zone.name, livraisonsParMois, mois]);
 
   return (
     <div className="min-h-dvh bg-cream">
@@ -588,17 +606,21 @@ function DevisPageInner() {
               )}
 
               <div className="space-y-2">
-                <a
-                  href="/#contact"
-                  className="group flex items-center justify-center gap-2 rounded-full bg-forest w-full py-3.5 text-sm font-medium text-white shadow-lg shadow-forest/20 transition-colors hover:bg-forest-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
-                >
-                  Recevoir mon devis officiel
-                  <ArrowRight
-                    size={15}
-                    aria-hidden
-                    className="transition-transform group-hover:translate-x-1"
-                  />
-                </a>
+                {calc.lignes.length > 0 ? (
+                  <DevisRequest recap={recap} />
+                ) : (
+                  <a
+                    href="/#contact"
+                    className="group flex items-center justify-center gap-2 rounded-full bg-forest w-full py-3.5 text-sm font-medium text-white shadow-lg shadow-forest/20 transition-colors hover:bg-forest-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
+                  >
+                    Recevoir mon devis officiel
+                    <ArrowRight
+                      size={15}
+                      aria-hidden
+                      className="transition-transform group-hover:translate-x-1"
+                    />
+                  </a>
+                )}
                 <a
                   href="tel:+33753569548"
                   className="flex items-center justify-center rounded-full border border-lavender-300 w-full py-3 text-sm text-forest hover:bg-lavender-50 transition-colors"

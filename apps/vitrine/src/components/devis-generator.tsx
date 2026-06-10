@@ -1,8 +1,18 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Plus, Trash2, Download, FileText, Loader2 } from "lucide-react";
+import { Plus, Trash2, Download, FileText, Loader2, History, X } from "lucide-react";
 import type { DevisData, DevisLine } from "@/lib/devis-pdf";
+import { SignaturePad } from "./signature-pad";
+import {
+  loadHistory,
+  saveToHistory,
+  removeFromHistory,
+  type DevisHistoryEntry,
+} from "@/lib/devis-history";
+
+const DEFAULT_REGLEMENT =
+  "Règlement à 30 jours par virement bancaire. Facturation mensuelle à la rotation.";
 
 /* ─── Catalogue (source de vérité : page Tarifs) ─── */
 
@@ -66,7 +76,15 @@ export function DevisGenerator() {
   const [livraisonEuros, setLivraisonEuros] = useState(0);
   const [tva, setTva] = useState(false);
   const [notes, setNotes] = useState("");
+  const [reglement, setReglement] = useState(DEFAULT_REGLEMENT);
+  const [signature, setSignature] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [history, setHistory] = useState<DevisHistoryEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  useEffect(() => {
+    setHistory(loadHistory());
+  }, []);
 
   const setClientField = (k: keyof typeof client, v: string) =>
     setClient((prev) => ({ ...prev, [k]: v }));
@@ -101,28 +119,78 @@ export function DevisGenerator() {
     return { sousTotal, remise, livraisonCents, totalHT, tvaCents, totalTTC };
   }, [lines, remisePct, livraisonEuros, tva]);
 
+  const buildData = useCallback(
+    (): DevisData => ({
+      numero,
+      date,
+      validiteJours: validite,
+      client,
+      lines: lines.filter((l) => l.designation.trim() || l.unitCents > 0),
+      remisePct,
+      livraisonCents: Math.round(livraisonEuros * 100),
+      notes,
+      tvaApplicable: tva,
+      reglement,
+      signatureSrc: signature ?? undefined,
+    }),
+    [
+      numero,
+      date,
+      validite,
+      client,
+      lines,
+      remisePct,
+      livraisonEuros,
+      notes,
+      tva,
+      reglement,
+      signature,
+    ],
+  );
+
   const handleDownload = async () => {
     setGenerating(true);
     try {
-      const data: DevisData = {
-        numero,
-        date,
-        validiteJours: validite,
-        client,
-        lines: lines.filter((l) => l.designation.trim() || l.unitCents > 0),
-        remisePct,
-        livraisonCents: Math.round(livraisonEuros * 100),
-        notes,
-        tvaApplicable: tva,
-      };
+      const data = buildData();
       const { downloadDevisPdf } = await import("@/lib/devis-pdf");
       await downloadDevisPdf(data);
+      // Historique (local, même navigateur admin)
+      setHistory(
+        saveToHistory({
+          numero: data.numero,
+          date: data.date,
+          label: data.client.etablissement || data.client.nom || "Client",
+          totalCents: totals.totalTTC,
+          savedAt: Date.now(),
+          data,
+        }),
+      );
     } catch (e) {
       console.error(e);
       alert("Erreur lors de la génération du PDF. Réessayez.");
     } finally {
       setGenerating(false);
     }
+  };
+
+  const regenerate = async (entry: DevisHistoryEntry) => {
+    const { downloadDevisPdf } = await import("@/lib/devis-pdf");
+    await downloadDevisPdf(entry.data);
+  };
+
+  const loadIntoForm = (entry: DevisHistoryEntry) => {
+    const d = entry.data;
+    setNumero(d.numero);
+    setDate(d.date);
+    setValidite(d.validiteJours);
+    setClient(d.client);
+    setLines(d.lines.length ? d.lines : [{ designation: "", qty: 1, unitCents: 0 }]);
+    setRemisePct(d.remisePct);
+    setLivraisonEuros(d.livraisonCents / 100);
+    setTva(d.tvaApplicable);
+    setNotes(d.notes);
+    setReglement(d.reglement ?? DEFAULT_REGLEMENT);
+    setShowHistory(false);
   };
 
   const hasContent = lines.some((l) => l.designation.trim() && l.unitCents > 0);
@@ -132,7 +200,76 @@ export function DevisGenerator() {
       <div className="bg-forest px-5 py-4 flex items-center gap-2">
         <FileText size={18} aria-hidden className="text-white" />
         <h2 className="font-serif text-base font-bold text-white">Générateur de devis (PDF)</h2>
+        <button
+          type="button"
+          onClick={() => setShowHistory((s) => !s)}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/25 transition-colors"
+        >
+          <History size={14} aria-hidden />
+          Historique{history.length > 0 ? ` (${history.length})` : ""}
+        </button>
       </div>
+
+      {showHistory && (
+        <div className="border-b border-lavender-100 bg-lavender-50/40 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold text-forest">Devis générés (ce navigateur)</h3>
+            <button
+              type="button"
+              onClick={() => setShowHistory(false)}
+              className="text-gray-400 hover:text-gray-700"
+              aria-label="Fermer l'historique"
+            >
+              <X size={16} aria-hidden />
+            </button>
+          </div>
+          {history.length === 0 ? (
+            <p className="text-sm text-gray-500">Aucun devis enregistré pour l&apos;instant.</p>
+          ) : (
+            <ul className="space-y-2">
+              {history.map((h) => (
+                <li
+                  key={h.numero + h.savedAt}
+                  className="flex items-center justify-between gap-3 rounded-lg bg-white border border-lavender-100 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-forest truncate">
+                      {h.numero} · {h.label}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {h.date} · {fmt(h.totalCents)}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => loadIntoForm(h)}
+                      className="rounded-lg border border-lavender-200 px-2.5 py-1.5 text-xs font-medium text-forest hover:bg-lavender-50"
+                    >
+                      Charger
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => regenerate(h)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-forest px-2.5 py-1.5 text-xs font-medium text-white hover:bg-forest-light"
+                    >
+                      <Download size={12} aria-hidden /> PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHistory(removeFromHistory(h.numero))}
+                      className="flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
+                      aria-label="Supprimer du historique"
+                    >
+                      <Trash2 size={14} aria-hidden />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="p-5 space-y-6">
         {/* Méta */}
@@ -343,6 +480,22 @@ export function DevisGenerator() {
               value={remisePct}
               onChange={(e) => setRemisePct(Number(e.target.value))}
             />
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {[0, 5, 10, 15].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setRemisePct(p)}
+                  className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                    remisePct === p
+                      ? "border-forest bg-forest text-white"
+                      : "border-lavender-200 text-forest hover:bg-lavender-50"
+                  }`}
+                >
+                  {p === 0 ? "Aucune" : `-${p}%`}
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label className={labelCls} htmlFor="dv-livr">
@@ -384,6 +537,25 @@ export function DevisGenerator() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />
+        </div>
+
+        {/* Conditions de règlement (défaut auto) */}
+        <div>
+          <label className={labelCls} htmlFor="dv-regl">
+            Conditions de règlement
+          </label>
+          <textarea
+            id="dv-regl"
+            rows={2}
+            className={inputCls}
+            value={reglement}
+            onChange={(e) => setReglement(e.target.value)}
+          />
+        </div>
+
+        {/* Signature */}
+        <div className="rounded-xl border border-lavender-100 bg-lavender-50/30 p-4">
+          <SignaturePad value={signature} onChange={setSignature} />
         </div>
 
         {/* Récap + download */}
