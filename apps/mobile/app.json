@@ -9,7 +9,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "splash": {
       "backgroundColor": "#ffffff"
     },
@@ -21,8 +20,7 @@
       }
     },
     "android": {
-      "package": "fr.linge-serein.app",
-      "usesCleartextTraffic": false,
+      "package": "fr.lingeserein.app",
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
       }
