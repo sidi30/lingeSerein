@@ -34,16 +34,21 @@ jobs:
       - name: Build vitrine
         run: npm run build --workspace=apps/vitrine
 
+      # rsync explicite (l'action ssh-deploy avalait les erreurs : run "success"
+      # alors que rsync échouait en Permission denied). Clé en base64 pour éviter
+      # toute corruption CRLF du secret ("error in libcrypto").
       - name: Deploy to server
-        uses: easingthemes/ssh-deploy@v4
-        with:
-          SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_KEY }}
-          REMOTE_HOST: ${{ secrets.DEPLOY_HOST }}
-          REMOTE_USER: ${{ secrets.DEPLOY_USER }}
-          SOURCE: apps/vitrine/out/
-          TARGET: /var/www/lingeserein.fr/
+        env:
+          SSH_KEY_B64: ${{ secrets.SERVER_SSH_KEY_B64 }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          install -m 600 /dev/null deploy_key
+          echo "$SSH_KEY_B64" | base64 -d > deploy_key
+          ssh -i deploy_key -o StrictHostKeyChecking=no "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p /var/www/lingeserein.fr'
           # -rltvz : pas de préservation owner/group (-o/-g) → évite les échecs chgrp.
           # --delete : miroir exact. DEPLOY_USER=root → peut écraser tous les fichiers.
-          ARGS: -rltvz --delete
-          SCRIPT_BEFORE: |
-            mkdir -p /var/www/lingeserein.fr
+          rsync -rltvz --delete -e "ssh -i deploy_key -o StrictHostKeyChecking=no" \
+            apps/vitrine/out/ "$DEPLOY_USER@$DEPLOY_HOST:/var/www/lingeserein.fr/"
+          rm -f deploy_key
