@@ -14,8 +14,10 @@
     "clean": "rm -rf .next"
   },
   "dependencies": {
+    "@hookform/resolvers": "^3.10.0",
     "@lingengo/shared": "*",
     "@lingengo/ui": "*",
+    "@react-pdf/renderer": "^4.5.1",
     "@tanstack/react-query": "^5.67.0",
     "@tanstack/react-table": "^8.21.0",
     "lucide-react": "^1.7.0",
@@ -23,10 +25,14 @@
     "next-intl": "^4.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "recharts": "^2.15.0"
+    "react-hook-form": "^7.54.0",
+    "recharts": "^2.15.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@lingengo/eslint-config": "*",
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",

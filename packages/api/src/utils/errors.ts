@@ -63,8 +63,22 @@ export class TooManyRequestsError extends AppError {
   }
 }
 
+/**
+ * 422 Unprocessable Entity — règle métier / état interdit.
+ * Distinct de ValidationError (400) qui est réservé aux erreurs de format Zod.
+ */
+export class UnprocessableEntityError extends AppError {
+  constructor(message: string, code = "UNPROCESSABLE_ENTITY") {
+    super(422, code, message);
+  }
+}
+
 export class AccountLockedError extends AppError {
   constructor() {
-    super(423, "ACCOUNT_LOCKED", "Compte verrouillé suite à trop de tentatives. Vérifiez votre email pour le débloquer.");
+    super(
+      423,
+      "ACCOUNT_LOCKED",
+      "Compte verrouillé suite à trop de tentatives. Vérifiez votre email pour le débloquer.",
+    );
   }
 }

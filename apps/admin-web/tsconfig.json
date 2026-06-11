@@ -16,7 +16,9 @@
     "paths": {
       "@/*": ["./src/*"],
       "@lingengo/shared": ["../../packages/shared/src"],
-      "@lingengo/ui": ["../../packages/ui/src"]
+      "@lingengo/shared/*": ["../../packages/shared/src/*"],
+      "@lingengo/ui": ["../../packages/ui/src"],
+      "@lingengo/ui/*": ["../../packages/ui/src/*"]
     },
     "noEmit": true
   },

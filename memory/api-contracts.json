@@ -1,0 +1,762 @@
+{
+  "version": "1.0",
+  "date": "2026-06-11",
+  "scope": "Admin Web F1 Devis, F2 Demandes mobiles, F3 Utilisateurs, F4 Reglages",
+  "baseUrl": "/api/v1",
+  "auth": "JWT access token (Bearer header), 15m expiry, refresh 7j. Toutes les routes ci-dessous: preHandler [app.authenticate, requireRole('ROLE_ADMIN','ROLE_SUPER_ADMIN')] sauf mention contraire.",
+  "conventions": {
+    "envelope_success": "{ success: true, data: <T> }",
+    "envelope_list": "{ success: true, data: <T[]>, pagination: { page, limit, total, totalPages }, meta?: {...} }",
+    "envelope_error": "{ success: false, error: { code: string, message: string, details?: Record<string,string[]> } }",
+    "ids": "UUID v4 (z.string().uuid()) pour tous les :id et tous les champs *Id",
+    "money": "Tous les montants en centimes, entiers (Int). remisePct en centiemes de pourcent (1000 = 10%).",
+    "dates": "ISO 8601 string en entree/sortie. Les champs Date-only (deliveryDate) acceptent 'YYYY-MM-DD'. Les timestamps sont des ISO complets.",
+    "pagination_defaults": "page default 1 (min 1), limit default 20 (min 1, max 100). Le front admin passe limit=25.",
+    "error_codes": {
+      "VALIDATION_ERROR": "400 - payload Zod invalide (details = fieldErrors)",
+      "UNAUTHORIZED": "401 - token absent/invalide",
+      "FORBIDDEN": "403 - role ou regle de permission metier",
+      "NOT_FOUND": "404 - ressource introuvable",
+      "CONFLICT": "409 - violation unicite (email, numero)",
+      "UNPROCESSABLE_ENTITY": "422 - regle metier / etat interdit (code machine specifique)",
+      "TOO_MANY_REQUESTS": "429 - rate limit"
+    }
+  },
+  "errorResponseShapes": {
+    "400": {
+      "success": false,
+      "error": {
+        "code": "VALIDATION_ERROR",
+        "message": "Donnees invalides",
+        "details": { "champ": ["message"] }
+      }
+    },
+    "401": { "success": false, "error": { "code": "UNAUTHORIZED", "message": "Non autorise" } },
+    "403": { "success": false, "error": { "code": "FORBIDDEN", "message": "..." } },
+    "404": { "success": false, "error": { "code": "NOT_FOUND", "message": "... introuvable" } },
+    "409": { "success": false, "error": { "code": "CONFLICT", "message": "..." } },
+    "422": { "success": false, "error": { "code": "<CODE_METIER>", "message": "..." } },
+    "429": {
+      "success": false,
+      "error": { "code": "TOO_MANY_REQUESTS", "message": "Trop de requetes" }
+    }
+  },
+
+  "sharedTypes": {
+    "QuoteStatus": ["BROUILLON", "ENVOYE", "ACCEPTE", "REFUSE", "EXPIRE"],
+    "OrderStatus": ["PENDING", "CONFIRMED", "IN_DELIVERY", "DELIVERED", "CANCELLED"],
+    "OrderSource": ["MOBILE", "QUOTE_CONVERSION", "MANUAL"],
+    "RoleInput": ["CLIENT", "LIVREUR", "ADMIN", "ROLE_CLIENT", "ROLE_LIVREUR", "ROLE_ADMIN"],
+    "QUOTE_TRANSITIONS": {
+      "BROUILLON": ["ENVOYE"],
+      "ENVOYE": ["ACCEPTE", "REFUSE", "EXPIRE"],
+      "ACCEPTE": [],
+      "REFUSE": [],
+      "EXPIRE": []
+    },
+    "QUOTE_EDITABLE": ["BROUILLON", "ENVOYE"],
+    "ORDER_TRANSITIONS": {
+      "PENDING": ["CONFIRMED", "CANCELLED"],
+      "CONFIRMED": ["IN_DELIVERY", "CANCELLED"],
+      "IN_DELIVERY": ["DELIVERED", "CANCELLED"],
+      "DELIVERED": [],
+      "CANCELLED": []
+    },
+    "QuoteLineDTO": {
+      "id": "uuid",
+      "designation": "string",
+      "qty": "int",
+      "unitCents": "int",
+      "position": "int"
+    },
+    "QuoteDTO": {
+      "id": "uuid",
+      "numero": "string (LSQ-YYYY-NNNN)",
+      "status": "QuoteStatus",
+      "clientNom": "string",
+      "clientEmail": "string|null",
+      "clientTel": "string|null",
+      "clientAdresse": "string|null",
+      "userId": "uuid|null",
+      "user": "{ id, name, email }|null",
+      "lignes": "QuoteLineDTO[] (triees par position asc)",
+      "remisePct": "int (centiemes de %)",
+      "livraisonCents": "int",
+      "tvaApplicable": "boolean",
+      "notes": "string|null",
+      "validiteJours": "int",
+      "dateEnvoi": "ISO|null",
+      "dateReponse": "ISO|null",
+      "convertedToOrderId": "uuid|null",
+      "createdBy": "uuid",
+      "createdAt": "ISO",
+      "updatedAt": "ISO",
+      "totals": "{ sousTotal:int, remise:int, totalHT:int, tva:int, totalTTC:int } (calcule par computeDevisTotals, inclus en lecture)"
+    },
+    "UserDTO": {
+      "id": "uuid",
+      "email": "string",
+      "name": "string",
+      "phone": "string|null",
+      "role": "ROLE_CLIENT|ROLE_LIVREUR|ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "zoneId": "uuid|null",
+      "zone": "{ id, name }|null",
+      "isActive": "boolean",
+      "isEmailVerified": "boolean",
+      "deletedAt": "ISO|null (null = actif, non-null = desactive)",
+      "createdAt": "ISO",
+      "updatedAt": "ISO",
+      "NOTE": "Ne JAMAIS inclure passwordHash, mfaSecret, mfaRecoveryCodes, deliveryPin, stripeCustomerId"
+    },
+    "OrderItemDTO": {
+      "id": "uuid",
+      "productId": "uuid",
+      "product": "{ id, name, range, category }",
+      "quantity": "int",
+      "unitCents": "int",
+      "totalCents": "int"
+    },
+    "OrderStatusHistoryEntry": {
+      "at": "ISO",
+      "by": "{ id:uuid|null, name:string|null }",
+      "from": "OrderStatus|null",
+      "to": "OrderStatus",
+      "raison": "string|null"
+    },
+    "DeliveryZoneDTO": {
+      "id": "uuid",
+      "name": "string",
+      "postalCodes": "string[] (codes 5 chiffres normalises)",
+      "deliveryFeeCents": "int",
+      "isActive": "boolean",
+      "userCount": "int (nombre de users rattaches, calcule)"
+    },
+    "OperatorDTO": {
+      "id": "uuid",
+      "name": "string",
+      "email": "string",
+      "phone": "string|null",
+      "address": "string|null",
+      "siret": "string|null",
+      "legalMentions": "string|null",
+      "isActive": "boolean"
+    },
+    "StockThresholdDTO": {
+      "productId": "uuid",
+      "name": "string",
+      "range": "CONFORT|HOTEL|PRESTIGE",
+      "category": "ProductCategory",
+      "stockAlertThreshold": "int (unites)"
+    }
+  },
+
+  "endpoints": [
+    {
+      "id": "EP-Q01",
+      "feature": "F1",
+      "method": "POST",
+      "path": "/quotes",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Creer un devis. Genere numero LSQ-YYYY-NNNN sequentiel (transaction Serializable), statut BROUILLON.",
+      "request": {
+        "body": {
+          "clientNom": "string, requis, min 1, max 200",
+          "clientEmail": "string|null, format email, max 320, optionnel",
+          "clientTel": "string|null, max 20, optionnel",
+          "clientAdresse": "string|null, optionnel",
+          "userId": "uuid|null, optionnel (client existant lie)",
+          "lignes": "array, min 1 element. Chaque ligne: { designation: string min 1 max 300, qty: int >=1, unitCents: int >=0, position: int >=0 }",
+          "remisePct": "int >=0 <=10000 (centiemes de %), default 0",
+          "livraisonCents": "int >=0, default 0",
+          "tvaApplicable": "boolean, default false",
+          "notes": "string|null, max 5000, optionnel",
+          "validiteJours": "int >=1 <=365, default 30"
+        }
+      },
+      "responses": {
+        "201": { "description": "Devis cree", "body": { "success": true, "data": "QuoteDTO" } },
+        "400": "VALIDATION_ERROR (clientNom vide -> 'Le nom du client est obligatoire'; lignes vide -> 'Le devis doit contenir au moins une ligne'; qty<1 -> 'La quantite doit etre superieure a 0'; unitCents<0 -> 'Le prix unitaire ne peut pas etre negatif')",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN",
+        "409": "CONFLICT code QUOTE_NUMBER_RACE (collision numero apres 5 retries, quasi impossible)"
+      },
+      "audit": "CREATE entity=Quote, changes={ numero, status, lineCount, totalTTC }"
+    },
+    {
+      "id": "EP-Q02",
+      "feature": "F1",
+      "method": "GET",
+      "path": "/quotes",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Liste paginee des devis (operateur courant). Applique expireOverdue avant reponse (ADR-008).",
+      "request": {
+        "query": {
+          "status": "QuoteStatus, optionnel",
+          "search": "string max 200, optionnel (match clientNom OR clientEmail OR numero, case-insensitive, debounce front 300ms)",
+          "from": "ISO date, optionnel (filtre createdAt >=)",
+          "to": "ISO date, optionnel (filtre createdAt <=)",
+          "page": "int >=1, default 1",
+          "limit": "int 1..100, default 20"
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Liste",
+          "body": {
+            "success": true,
+            "data": "QuoteDTO[] (sans lignes detaillees: { id, numero, status, clientNom, clientEmail, userId, totals.totalTTC, dateEnvoi, validiteJours, createdAt }) triee createdAt desc",
+            "pagination": { "page": "int", "limit": "int", "total": "int", "totalPages": "int" }
+          }
+        },
+        "400": "VALIDATION_ERROR",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "EP-Q03",
+      "feature": "F1",
+      "method": "GET",
+      "path": "/quotes/:id",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Detail complet d'un devis avec lignes et totals.",
+      "request": { "params": { "id": "uuid" } },
+      "responses": {
+        "200": {
+          "body": { "success": true, "data": "QuoteDTO (complet avec lignes[] et totals)" }
+        },
+        "404": "NOT_FOUND",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "EP-Q04",
+      "feature": "F1",
+      "method": "PATCH",
+      "path": "/quotes/:id",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Modifier un devis. Autorise uniquement si status in [BROUILLON, ENVOYE]. Remplace l'ensemble des lignes si fourni.",
+      "request": {
+        "params": { "id": "uuid" },
+        "body": {
+          "clientNom": "string min 1 max 200, optionnel",
+          "clientEmail": "string|null email, optionnel",
+          "clientTel": "string|null, optionnel",
+          "clientAdresse": "string|null, optionnel",
+          "userId": "uuid|null, optionnel (lier/delier un client)",
+          "lignes": "array de { designation, qty>=1, unitCents>=0, position }, optionnel (si present, remplace toutes les lignes)",
+          "remisePct": "int 0..10000, optionnel",
+          "livraisonCents": "int >=0, optionnel",
+          "tvaApplicable": "boolean, optionnel",
+          "notes": "string|null max 5000, optionnel",
+          "validiteJours": "int 1..365, optionnel"
+        }
+      },
+      "responses": {
+        "200": { "body": { "success": true, "data": "QuoteDTO complet" } },
+        "400": "VALIDATION_ERROR",
+        "404": "NOT_FOUND",
+        "422": "UNPROCESSABLE_ENTITY code QUOTE_NOT_EDITABLE message 'Ce devis ne peut plus etre modifie'",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "UPDATE entity=Quote, changes={ fields modifies, lineCount }"
+    },
+    {
+      "id": "EP-Q05",
+      "feature": "F1",
+      "method": "PATCH",
+      "path": "/quotes/:id/status",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Changer le statut. Transition validee contre QUOTE_TRANSITIONS. ENVOYE -> set dateEnvoi=now. ACCEPTE/REFUSE -> set dateReponse=now.",
+      "request": {
+        "params": { "id": "uuid" },
+        "body": { "status": "QuoteStatus, requis" }
+      },
+      "responses": {
+        "200": { "body": { "success": true, "data": "QuoteDTO" } },
+        "400": "VALIDATION_ERROR",
+        "404": "NOT_FOUND",
+        "422": "UNPROCESSABLE_ENTITY code INVALID_TRANSITION message 'Transition de statut non autorisee : {from} -> {to}'",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "UPDATE entity=Quote, changes={ previousStatus, newStatus }"
+    },
+    {
+      "id": "EP-Q06",
+      "feature": "F1",
+      "method": "POST",
+      "path": "/quotes/:id/duplicate",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Dupliquer un devis (tout statut). Nouveau devis BROUILLON, nouveau numero, lignes/remise/livraison/notes copiees, sans dateEnvoi/dateReponse/convertedToOrderId.",
+      "request": { "params": { "id": "uuid" } },
+      "responses": {
+        "201": { "body": { "success": true, "data": "QuoteDTO complet (le nouveau)" } },
+        "404": "NOT_FOUND",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "CREATE entity=Quote, changes={ numero, duplicatedFrom: <id source> }"
+    },
+    {
+      "id": "EP-Q07",
+      "feature": "F1",
+      "method": "POST",
+      "path": "/quotes/:id/convert",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Convertir un devis ACCEPTE en Order. Requiert userId lie et un mapping ligne->produit (le front presente un selecteur produit par ligne). Cree Order(source=QUOTE_CONVERSION)+OrderItem[], set Quote.convertedToOrderId.",
+      "request": {
+        "params": { "id": "uuid" },
+        "body": {
+          "deliveryDate": "string 'YYYY-MM-DD' ou ISO, requis",
+          "timeSlot": "string max 20, optionnel",
+          "lineMappings": "array, requis, un par ligne du devis: { quoteLineId: uuid, productId: uuid }. quantity et unitCents repris du devis."
+        }
+      },
+      "responses": {
+        "200": {
+          "body": { "success": true, "data": { "orderId": "uuid", "orderNumber": "string" } }
+        },
+        "400": "VALIDATION_ERROR (deliveryDate manquante; lineMappings incomplet)",
+        "404": "NOT_FOUND",
+        "422": [
+          "code QUOTE_NOT_ACCEPTED message 'Seul un devis accepte peut etre converti'",
+          "code CLIENT_REQUIRED message 'Ce devis doit etre lie a un compte client avant conversion' (front affiche modale selection/creation client)",
+          "code INVALID_PRODUCTS message 'Un ou plusieurs produits du mapping sont invalides'"
+        ],
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "CREATE entity=Order + UPDATE entity=Quote changes={ convertedToOrderId }"
+    },
+    {
+      "id": "EP-Q08",
+      "feature": "F1",
+      "method": "DELETE",
+      "path": "/quotes/:id",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Supprimer (soft-delete deletedAt) un devis. Autorise uniquement si status=BROUILLON.",
+      "request": { "params": { "id": "uuid" } },
+      "responses": {
+        "200": { "body": { "success": true, "data": { "id": "uuid", "deleted": true } } },
+        "404": "NOT_FOUND",
+        "422": "UNPROCESSABLE_ENTITY code QUOTE_NOT_DELETABLE message 'Seul un devis en brouillon peut etre supprime'",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "DELETE entity=Quote"
+    },
+
+    {
+      "id": "EP-O01",
+      "feature": "F2",
+      "method": "GET",
+      "path": "/orders",
+      "role": "EXISTANT (auth: client=ses commandes, admin=toutes). Modification: ajout filtre source + meta.newCount (admin uniquement).",
+      "description": "Liste commandes. Ajouts F2: filtre ?source, meta.newCount = count(PENDING, deletedAt null) pour le badge sidebar.",
+      "request": {
+        "query": {
+          "status": "OrderStatus, optionnel (existant)",
+          "source": "OrderSource, optionnel (NOUVEAU)",
+          "from": "ISO date, optionnel (existant, filtre deliveryDate)",
+          "to": "ISO date, optionnel (existant)",
+          "page": "int >=1 default 1",
+          "limit": "int 1..100 default 20"
+        }
+      },
+      "responses": {
+        "200": {
+          "body": {
+            "success": true,
+            "data": "OrderDTO[] (incl. items+product, user {id,name,email}, source, status, totalCents, deliveryDate, createdAt)",
+            "pagination": { "page": "int", "limit": "int", "total": "int", "totalPages": "int" },
+            "meta": { "newCount": "int (admin only: total commandes PENDING)" }
+          }
+        },
+        "400": "VALIDATION_ERROR",
+        "401": "UNAUTHORIZED"
+      }
+    },
+    {
+      "id": "EP-O02",
+      "feature": "F2",
+      "method": "GET",
+      "path": "/orders/:id",
+      "role": "EXISTANT (owner ou admin). Modification: enrichir reponse.",
+      "description": "Detail commande enrichi: items detailles, infos client completes (nom/email/phone/zone), statusHistory (depuis AuditLog).",
+      "request": { "params": { "id": "uuid" } },
+      "responses": {
+        "200": {
+          "body": {
+            "success": true,
+            "data": {
+              "id": "uuid",
+              "orderNumber": "string",
+              "status": "OrderStatus",
+              "source": "OrderSource",
+              "totalCents": "int",
+              "deliveryDate": "ISO date",
+              "timeSlot": "string|null",
+              "specialNotes": "string|null",
+              "cancelledAt": "ISO|null",
+              "cancelledReason": "string|null",
+              "createdAt": "ISO",
+              "updatedAt": "ISO",
+              "items": "OrderItemDTO[]",
+              "user": "{ id, name, email, phone, zone: { id, name }|null }",
+              "statusHistory": "OrderStatusHistoryEntry[] (chronologique asc, derive de AuditLog entity=Order action=UPDATE)",
+              "convertedFromQuote": "{ id, numero }|null (si source=QUOTE_CONVERSION)"
+            }
+          }
+        },
+        "404": "NOT_FOUND",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "EP-O03",
+      "feature": "F2",
+      "method": "PATCH",
+      "path": "/orders/:id/status",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN (existant). Modification: ajout raison + validation transition + notification.",
+      "description": "Changer statut. Transition validee (ORDER_TRANSITIONS). raison obligatoire si status=CANCELLED. CONFIRMED/CANCELLED -> notification client (best-effort).",
+      "request": {
+        "params": { "id": "uuid" },
+        "body": {
+          "status": "OrderStatus, requis",
+          "raison": "string max 500, optionnel SAUF si status=CANCELLED (requis) -> sinon 400 'La raison du refus est obligatoire'"
+        }
+      },
+      "responses": {
+        "200": { "body": { "success": true, "data": "OrderDTO" } },
+        "400": "VALIDATION_ERROR (raison manquante sur CANCELLED)",
+        "404": "NOT_FOUND",
+        "422": "UNPROCESSABLE_ENTITY code INVALID_TRANSITION (ex: deja CONFIRMED/CANCELLED -> 'Cette commande a deja ete traitee')",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "sideEffects": "Si CANCELLED: set cancelledAt=now, cancelledReason=raison. Notification NotificationsService.create(order.userId, 'GENERAL', titre, corps). CONFIRMED: 'Votre commande #{orderNumber} a ete confirmee'. CANCELLED: 'Votre commande #{orderNumber} a ete refusee : {raison}'. Echec notif ignore silencieusement.",
+      "audit": "UPDATE entity=Order, changes={ previousStatus, newStatus, raison }"
+    },
+
+    {
+      "id": "EP-U01",
+      "feature": "F3",
+      "method": "POST",
+      "path": "/users",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Creer un utilisateur. Genere mot de passe provisoire 12 car alphanumeriques (crypto.randomBytes), hash bcrypt. Le clair n'est retourne qu'ici, une seule fois.",
+      "request": {
+        "body": {
+          "name": "string requis min 1 max 200",
+          "email": "string requis format email max 320",
+          "role": "CLIENT|LIVREUR|ADMIN (ou ROLE_*), requis. ROLE_SUPER_ADMIN INTERDIT -> 403",
+          "phone": "string|null max 20, optionnel",
+          "zoneId": "uuid|null, optionnel (pertinent livreur)"
+        }
+      },
+      "responses": {
+        "201": {
+          "body": {
+            "success": true,
+            "data": {
+              "user": "UserDTO",
+              "temporaryPassword": "string 12 car (affiche une fois, NON persiste en clair, NON logge)"
+            }
+          }
+        },
+        "400": "VALIDATION_ERROR (email format -> 'Format d'email invalide'; name vide -> 'Le nom est obligatoire'; role inconnu -> 'Role invalide. Valeurs acceptees : CLIENT, LIVREUR, ADMIN')",
+        "403": "FORBIDDEN message 'Vous n'avez pas l'autorisation de creer un Super Admin' (si role=ROLE_SUPER_ADMIN)",
+        "409": "CONFLICT message 'Cet email est deja enregistre dans le systeme'",
+        "401": "UNAUTHORIZED"
+      },
+      "audit": "CREATE entity=User, changes={ role } (PII strippee: email/phone jamais loggues; password jamais transmis a l'audit)"
+    },
+    {
+      "id": "EP-U02",
+      "feature": "F3",
+      "method": "GET",
+      "path": "/users",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Liste paginee des utilisateurs (operateur courant). DTO sans champs sensibles.",
+      "request": {
+        "query": {
+          "role": "CLIENT|LIVREUR|ADMIN|SUPER_ADMIN (ou ROLE_*), optionnel",
+          "status": "'active'|'inactive', optionnel (inactive = deletedAt non null)",
+          "search": "string max 200, optionnel (name OR email, case-insensitive)",
+          "page": "int >=1 default 1",
+          "limit": "int 1..100 default 20"
+        }
+      },
+      "responses": {
+        "200": {
+          "body": {
+            "success": true,
+            "data": "UserDTO[] (sans champs sensibles)",
+            "pagination": { "page": "int", "limit": "int", "total": "int", "totalPages": "int" }
+          }
+        },
+        "400": "VALIDATION_ERROR",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "EP-U03",
+      "feature": "F3",
+      "method": "GET",
+      "path": "/users/:id",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Detail utilisateur (sans passwordHash ni secrets).",
+      "request": { "params": { "id": "uuid" } },
+      "responses": {
+        "200": { "body": { "success": true, "data": "UserDTO" } },
+        "404": "NOT_FOUND",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "EP-U04",
+      "feature": "F3",
+      "method": "PATCH",
+      "path": "/users/:id",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Modifier nom/email/telephone/zoneId/role. Interdit de cibler un ROLE_SUPER_ADMIN si acteur != SUPER_ADMIN. Interdit de promouvoir vers ROLE_SUPER_ADMIN.",
+      "request": {
+        "params": { "id": "uuid" },
+        "body": {
+          "name": "string min 1 max 200, optionnel",
+          "email": "string email max 320, optionnel (unicite verifiee)",
+          "phone": "string|null max 20, optionnel",
+          "zoneId": "uuid|null, optionnel",
+          "role": "CLIENT|LIVREUR|ADMIN (ou ROLE_*), optionnel. ROLE_SUPER_ADMIN interdit"
+        }
+      },
+      "responses": {
+        "200": { "body": { "success": true, "data": "UserDTO" } },
+        "400": "VALIDATION_ERROR",
+        "403": "FORBIDDEN (cible SUPER_ADMIN -> 'Vous ne pouvez pas modifier un Super Admin'; role=ROLE_SUPER_ADMIN demande -> interdit)",
+        "404": "NOT_FOUND",
+        "409": "CONFLICT (email deja pris)",
+        "401": "UNAUTHORIZED"
+      },
+      "audit": "UPDATE entity=User, changes={ champs non-PII (role, zoneId) }"
+    },
+    {
+      "id": "EP-U05",
+      "feature": "F3",
+      "method": "PATCH",
+      "path": "/users/:id/deactivate",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Desactiver (soft-delete: deletedAt=now). Revoque tous les RefreshToken de la cible. Interdit sur soi-meme et sur un SUPER_ADMIN (si acteur != SUPER_ADMIN).",
+      "request": { "params": { "id": "uuid" } },
+      "responses": {
+        "200": { "body": { "success": true, "data": "UserDTO (deletedAt renseigne)" } },
+        "403": "FORBIDDEN (cible == soi -> 'Vous ne pouvez pas desactiver votre propre compte'; cible SUPER_ADMIN -> interdit)",
+        "404": "NOT_FOUND",
+        "401": "UNAUTHORIZED"
+      },
+      "audit": "UPDATE entity=User, changes={ deactivated: true }"
+    },
+    {
+      "id": "EP-U06",
+      "feature": "F3",
+      "method": "PATCH",
+      "path": "/users/:id/reactivate",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Reactiver (deletedAt=null).",
+      "request": { "params": { "id": "uuid" } },
+      "responses": {
+        "200": { "body": { "success": true, "data": "UserDTO (deletedAt null)" } },
+        "404": "NOT_FOUND",
+        "403": "FORBIDDEN",
+        "401": "UNAUTHORIZED"
+      },
+      "audit": "UPDATE entity=User, changes={ reactivated: true }"
+    },
+    {
+      "id": "EP-U07",
+      "feature": "F3",
+      "method": "POST",
+      "path": "/users/:id/reset-password",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Generer un nouveau mot de passe provisoire 12 car, hash bcrypt persiste, clair retourne une seule fois. Revoque tous les RefreshToken de la cible.",
+      "request": { "params": { "id": "uuid" } },
+      "responses": {
+        "200": {
+          "body": {
+            "success": true,
+            "data": { "temporaryPassword": "string 12 car (affiche une fois, NON logge)" }
+          }
+        },
+        "403": "FORBIDDEN (cible SUPER_ADMIN si acteur != SUPER_ADMIN)",
+        "404": "NOT_FOUND",
+        "401": "UNAUTHORIZED"
+      },
+      "audit": "PASSWORD_CHANGED? -> AuditAction enum n'a que CREATE/UPDATE/DELETE/LOGIN/... -> utiliser PASSWORD_CHANGED (existe dans l'enum AuditAction). changes={ resetByAdmin: true } (jamais le mdp)"
+    },
+
+    {
+      "id": "EP-S01",
+      "feature": "F4",
+      "method": "GET",
+      "path": "/settings/zones",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Liste des zones de livraison de l'operateur, avec userCount.",
+      "responses": {
+        "200": { "body": { "success": true, "data": "DeliveryZoneDTO[]" } },
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "EP-S02",
+      "feature": "F4",
+      "method": "POST",
+      "path": "/settings/zones",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Creer une zone. postalCodes normalises (trim, regex ^\\d{5}$, dedoublonnage). Unicite des codes postaux verifiee a travers toutes les zones de l'operateur.",
+      "request": {
+        "body": {
+          "name": "string requis min 1 max 200",
+          "postalCodes": "string[] requis min 1 (chaque code: 5 chiffres apres normalisation)",
+          "deliveryFeeCents": "int >=0, requis (l'UI saisit en euros et convertit)"
+        }
+      },
+      "responses": {
+        "201": { "body": { "success": true, "data": "DeliveryZoneDTO" } },
+        "400": "VALIDATION_ERROR (code postal invalide -> 'Code postal invalide : {valeur}'; tarif negatif -> 'Le tarif ne peut pas etre negatif')",
+        "422": "UNPROCESSABLE_ENTITY code POSTAL_CODE_TAKEN message 'Le code postal {cp} est deja attribue a la zone {nom}'",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "CREATE entity=DeliveryZone, changes={ name, postalCodesCount, deliveryFeeCents }"
+    },
+    {
+      "id": "EP-S03",
+      "feature": "F4",
+      "method": "PATCH",
+      "path": "/settings/zones/:id",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Modifier nom / codes postaux / tarif. Memes normalisations et controle d'unicite (en excluant la zone courante).",
+      "request": {
+        "params": { "id": "uuid" },
+        "body": {
+          "name": "string min 1 max 200, optionnel",
+          "postalCodes": "string[] (5 chiffres), optionnel (remplace la liste)",
+          "deliveryFeeCents": "int >=0, optionnel"
+        }
+      },
+      "responses": {
+        "200": { "body": { "success": true, "data": "DeliveryZoneDTO" } },
+        "400": "VALIDATION_ERROR",
+        "404": "NOT_FOUND",
+        "422": "UNPROCESSABLE_ENTITY code POSTAL_CODE_TAKEN",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "UPDATE entity=DeliveryZone"
+    },
+    {
+      "id": "EP-S04",
+      "feature": "F4",
+      "method": "DELETE",
+      "path": "/settings/zones/:id",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Supprimer une zone. Bloque si des users y sont rattaches.",
+      "request": { "params": { "id": "uuid" } },
+      "responses": {
+        "200": { "body": { "success": true, "data": { "id": "uuid", "deleted": true } } },
+        "404": "NOT_FOUND",
+        "422": "UNPROCESSABLE_ENTITY code ZONE_HAS_USERS message 'Cette zone ne peut pas etre supprimee : {n} utilisateur(s) y sont rattaches. Reaffectez-les d'abord.'",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "DELETE entity=DeliveryZone"
+    },
+    {
+      "id": "EP-S05",
+      "feature": "F4",
+      "method": "GET",
+      "path": "/settings/operator",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Infos de l'operateur courant.",
+      "responses": {
+        "200": { "body": { "success": true, "data": "OperatorDTO" } },
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "EP-S06",
+      "feature": "F4",
+      "method": "PATCH",
+      "path": "/settings/operator",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Modifier infos operateur (alimente le PDF devis).",
+      "request": {
+        "body": {
+          "name": "string min 1 max 200, optionnel",
+          "email": "string email max 320, optionnel",
+          "phone": "string|null max 20, optionnel",
+          "address": "string|null, optionnel",
+          "siret": "string|null 14 chiffres, optionnel",
+          "legalMentions": "string|null, optionnel"
+        }
+      },
+      "responses": {
+        "200": { "body": { "success": true, "data": "OperatorDTO" } },
+        "400": "VALIDATION_ERROR",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "UPDATE entity=Operator (PII strippee)"
+    },
+    {
+      "id": "EP-S07",
+      "feature": "F4",
+      "method": "GET",
+      "path": "/settings/stock-thresholds",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Seuils d'alerte stock par produit (unites, default 3).",
+      "responses": {
+        "200": { "body": { "success": true, "data": "StockThresholdDTO[]" } },
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "EP-S08",
+      "feature": "F4",
+      "method": "PATCH",
+      "path": "/settings/stock-thresholds",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Mise a jour en masse des seuils par produit.",
+      "request": {
+        "body": {
+          "thresholds": "array requis min 1: [{ productId: uuid, stockAlertThreshold: int >=0 }]"
+        }
+      },
+      "responses": {
+        "200": { "body": { "success": true, "data": "StockThresholdDTO[] (etat apres update)" } },
+        "400": "VALIDATION_ERROR (seuil negatif -> 'Le seuil d'alerte doit etre superieur ou egal a 0')",
+        "404": "NOT_FOUND (productId inconnu)",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "UPDATE entity=Product, changes={ stockAlertThreshold } (par produit)"
+    }
+  ],
+
+  "notes_implementation": {
+    "frontend_api_client": "Ajouter api.getRaw<{data,pagination,meta?}>(endpoint, params) dans apps/admin-web/src/lib/api.ts pour les listes paginees (l'unwrap actuel ecrase pagination). Voir ADR-011.",
+    "pdf": "DevisDocument + downloadDevisPdf importes depuis @lingengo/ui; computeDevisTotals depuis @lingengo/shared. Mapper QuoteDTO -> DevisData via quoteToDevisData (shared). PDF nomme 'LS-Devis-{numero}.pdf'. Voir ADR-006.",
+    "transitions_shared": "QUOTE_TRANSITIONS / QUOTE_EDITABLE / ORDER_TRANSITIONS exportes par @lingengo/shared pour usage front (griser boutons) et back (validation).",
+    "errors": "Ajouter UnprocessableEntityError(422) dans packages/api/src/utils/errors.ts (ADR-010).",
+    "jobs": "quote-expiry.worker.ts (cron quotidien) + expireOverdue() appele dans QuotesService.list (ADR-008)."
+  }
+}

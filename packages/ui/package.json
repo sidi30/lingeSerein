@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./devis-pdf": {
+      "types": "./dist/devis-pdf.d.ts",
+      "default": "./dist/devis-pdf.js"
     }
   },
   "scripts": {
@@ -18,8 +22,17 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
+  "dependencies": {
+    "@lingengo/shared": "*",
+    "@react-pdf/renderer": "^4.5.1"
+  },
   "devDependencies": {
     "@lingengo/eslint-config": "*",
+    "@types/react": "^19.0.0",
+    "react": "^19.1.0",
     "typescript": "^5.8.0"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
   }
 }

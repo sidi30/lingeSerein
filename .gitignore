@@ -50,7 +50,12 @@ apps/mobile/.expo/
 # Next.js auto-generated
 next-env.d.ts
 **/next-env.d.ts
-/apps/vitrine/test-results/
+
+# Playwright (artefacts)
+test-results/
+playwright-report/
+memory/playwright-report.json
+memory/playwright-html/
 
 # Devis PDF generes (artefacts)
 apps/Devis_*.pdf

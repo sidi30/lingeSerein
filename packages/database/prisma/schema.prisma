@@ -69,6 +69,20 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum OrderSource {
+  MOBILE
+  QUOTE_CONVERSION
+  MANUAL
+}
+
+enum QuoteStatus {
+  BROUILLON
+  ENVOYE
+  ACCEPTE
+  REFUSE
+  EXPIRE
+}
+
 enum DeliveryRoundStatus {
   PLANNED
   IN_PROGRESS
@@ -131,34 +145,38 @@ enum AuditAction {
 
 /// Opérateur du service (permet l'expansion multi-partenaire)
 model Operator {
-  id        String    @id @default(uuid()) @db.Uuid
-  name      String    @db.VarChar(200)
-  email     String    @unique @db.VarChar(320)
-  phone     String?   @db.VarChar(20) // chiffré AES-256 en application
-  address   String?   @db.Text // chiffré AES-256 en application
-  isActive  Boolean   @default(true) @map("is_active")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String    @db.VarChar(200)
+  email         String    @unique @db.VarChar(320)
+  phone         String?   @db.VarChar(20) // chiffré AES-256 en application
+  address       String?   @db.Text // chiffré AES-256 en application
+  siret         String?   @db.VarChar(14) @map("siret") // SIRET 14 chiffres
+  legalMentions String?   @db.Text @map("legal_mentions") // mentions légales PDF devis
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
 
   zones          DeliveryZone[]
   users          User[]
   products       Product[]
   deliveryRounds DeliveryRound[]
   invoices       Invoice[]
+  quotes         Quote[]
 
   @@map("operators")
 }
 
 /// Zone de livraison géographique
 model DeliveryZone {
-  id          String   @id @default(uuid()) @db.Uuid
-  operatorId  String   @map("operator_id") @db.Uuid
-  name        String   @db.VarChar(200) // ex: "Vaucluse Nord", "Luberon"
-  postalCodes String[] @map("postal_codes") // codes postaux couverts
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(uuid()) @db.Uuid
+  operatorId       String   @map("operator_id") @db.Uuid
+  name             String   @db.VarChar(200) // ex: "Vaucluse Nord", "Luberon"
+  postalCodes      String[] @map("postal_codes") // codes postaux couverts
+  deliveryFeeCents Int      @default(0) @map("delivery_fee_cents") // tarif livraison en centimes
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   operator       Operator        @relation(fields: [operatorId], references: [id])
   users          User[]
@@ -214,6 +232,8 @@ model User {
   deliveryRounds       DeliveryRound[]       @relation("DriverRounds")
   invoices             Invoice[]
   auditLogs            AuditLog[]
+  quotesAsClient       Quote[]               @relation("QuoteClient")
+  quotesCreated        Quote[]               @relation("QuoteCreator")
 
   @@index([email])
   @@index([role])
@@ -275,20 +295,21 @@ model ServiceType {
 
 /// Produit (serviette, drap, tapis, etc.)
 model Product {
-  id            String          @id @default(uuid()) @db.Uuid
-  operatorId    String          @map("operator_id") @db.Uuid
-  serviceTypeId String          @map("service_type_id") @db.Uuid
-  category      ProductCategory
-  range         ProductRange
-  name          String          @db.VarChar(200) // ex: "Set serviettes Confort"
-  description   String?         @db.Text
-  priceCents    Int             @map("price_cents") // prix unitaire en centimes
-  attributes    Json            @default("{}") @db.JsonB // grammage, dimensions, matière, etc.
-  imageUrl      String?         @map("image_url") @db.VarChar(500)
-  isActive      Boolean         @default(true) @map("is_active")
-  createdAt     DateTime        @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
-  deletedAt     DateTime?       @map("deleted_at")
+  id                   String          @id @default(uuid()) @db.Uuid
+  operatorId           String          @map("operator_id") @db.Uuid
+  serviceTypeId        String          @map("service_type_id") @db.Uuid
+  category             ProductCategory
+  range                ProductRange
+  name                 String          @db.VarChar(200) // ex: "Set serviettes Confort"
+  description          String?         @db.Text
+  priceCents           Int             @map("price_cents") // prix unitaire en centimes
+  attributes           Json            @default("{}") @db.JsonB // grammage, dimensions, matière, etc.
+  imageUrl             String?         @map("image_url") @db.VarChar(500)
+  stockAlertThreshold  Int             @default(3) @map("stock_alert_threshold") // seuil alerte stock (unités)
+  isActive             Boolean         @default(true) @map("is_active")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+  deletedAt            DateTime?       @map("deleted_at")
 
   operator             Operator              @relation(fields: [operatorId], references: [id])
   serviceType          ServiceType           @relation(fields: [serviceTypeId], references: [id])
@@ -377,6 +398,7 @@ model Order {
   userId          String      @map("user_id") @db.Uuid
   orderNumber     String      @unique @map("order_number") @db.VarChar(30) // ex: LNG-2026-000001
   status          OrderStatus @default(PENDING)
+  source          OrderSource @default(MOBILE) @map("source") // origine de la commande
   isRecurring     Boolean     @default(false) @map("is_recurring") // commande auto via abonnement
   totalCents      Int         @map("total_cents")
   deliveryDate    DateTime    @map("delivery_date") @db.Date
@@ -391,9 +413,11 @@ model Order {
   user         User          @relation(fields: [userId], references: [id])
   items        OrderItem[]
   deliveryStop DeliveryStop?
+  quote        Quote?        @relation("QuoteOrder")
 
   @@index([userId])
   @@index([status])
+  @@index([source])
   @@index([deliveryDate])
   @@index([orderNumber])
   @@map("orders")
@@ -412,6 +436,63 @@ model OrderItem {
   product Product @relation(fields: [productId], references: [id])
 
   @@map("order_items")
+}
+
+// ============================================================================
+// DEVIS
+// ============================================================================
+
+/// Devis commercial (F1)
+model Quote {
+  id                 String      @id @default(uuid()) @db.Uuid
+  numero             String      @unique @db.VarChar(20) // format LSQ-YYYY-NNNN
+  operatorId         String      @map("operator_id") @db.Uuid
+  status             QuoteStatus @default(BROUILLON)
+  clientNom          String      @map("client_nom") @db.VarChar(200)
+  clientEmail        String?     @map("client_email") @db.VarChar(320)
+  clientTel          String?     @map("client_tel") @db.VarChar(20)
+  clientAdresse      String?     @map("client_adresse") @db.Text
+  userId             String?     @map("user_id") @db.Uuid // client lié optionnel
+  remisePct          Int         @default(0) @map("remise_pct") // centièmes de % : 1000 = 10%
+  livraisonCents     Int         @default(0) @map("livraison_cents")
+  tvaApplicable      Boolean     @default(false) @map("tva_applicable")
+  notes              String?     @db.Text
+  validiteJours      Int         @default(30) @map("validite_jours")
+  dateEnvoi          DateTime?   @map("date_envoi")
+  dateReponse        DateTime?   @map("date_reponse")
+  convertedToOrderId String?     @unique @map("converted_to_order_id") @db.Uuid // lien si converti
+  createdBy          String      @map("created_by") @db.Uuid // userId admin créateur
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+  deletedAt          DateTime?   @map("deleted_at")
+
+  operator Operator   @relation(fields: [operatorId], references: [id])
+  user     User?      @relation("QuoteClient", fields: [userId], references: [id])
+  creator  User       @relation("QuoteCreator", fields: [createdBy], references: [id])
+  order    Order?     @relation("QuoteOrder", fields: [convertedToOrderId], references: [id])
+  lignes   QuoteLine[]
+
+  @@index([operatorId])
+  @@index([status])
+  @@index([userId])
+  @@index([numero])
+  @@index([createdAt])
+  @@map("quotes")
+}
+
+/// Ligne de devis
+model QuoteLine {
+  id          String @id @default(uuid()) @db.Uuid
+  quoteId     String @map("quote_id") @db.Uuid
+  designation String @db.VarChar(300)
+  qty         Int
+  unitCents   Int    @map("unit_cents") // prix unitaire en centimes
+  position    Int // ordre d'affichage 0..n
+
+  quote Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+  @@map("quote_lines")
 }
 
 // ============================================================================

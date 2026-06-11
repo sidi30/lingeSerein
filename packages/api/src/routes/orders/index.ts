@@ -14,22 +14,18 @@ export default async function orderRoutes(app: FastifyInstance): Promise<void> {
   const service = new OrdersService(app.prisma);
 
   // ---- GET /orders (client: own, admin: all) ----
-  app.get(
-    "/",
-    { preHandler: [app.authenticate] },
-    async (request, reply) => {
-      const parsed = listOrdersQuerySchema.safeParse(request.query);
-      if (!parsed.success) {
-        throw new ValidationError(parsed.error.flatten().fieldErrors as Record<string, string[]>);
-      }
+  app.get("/", { preHandler: [app.authenticate] }, async (request, reply) => {
+    const parsed = listOrdersQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.flatten().fieldErrors as Record<string, string[]>);
+    }
 
-      const isAdmin = request.user.role === ROLES.ADMIN || request.user.role === ROLES.SUPER_ADMIN;
-      const userId = isAdmin ? undefined : request.user.sub;
+    const isAdmin = request.user.role === ROLES.ADMIN || request.user.role === ROLES.SUPER_ADMIN;
+    const userId = isAdmin ? undefined : request.user.sub;
 
-      const result = await service.list(parsed.data, userId);
-      return reply.send({ success: true, ...result });
-    },
-  );
+    const result = await service.list(parsed.data, userId, isAdmin);
+    return reply.send({ success: true, ...result });
+  });
 
   // ---- GET /orders/:id (owner or admin) ----
   app.get<{ Params: { id: string } }>(
@@ -38,7 +34,9 @@ export default async function orderRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const paramsParsed = idParamSchema.safeParse(request.params);
       if (!paramsParsed.success) {
-        throw new ValidationError(paramsParsed.error.flatten().fieldErrors as Record<string, string[]>);
+        throw new ValidationError(
+          paramsParsed.error.flatten().fieldErrors as Record<string, string[]>,
+        );
       }
 
       const isAdmin = request.user.role === ROLES.ADMIN || request.user.role === ROLES.SUPER_ADMIN;
@@ -77,12 +75,16 @@ export default async function orderRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const paramsParsed = idParamSchema.safeParse(request.params);
       if (!paramsParsed.success) {
-        throw new ValidationError(paramsParsed.error.flatten().fieldErrors as Record<string, string[]>);
+        throw new ValidationError(
+          paramsParsed.error.flatten().fieldErrors as Record<string, string[]>,
+        );
       }
 
       const bodyParsed = cancelOrderSchema.safeParse(request.body ?? {});
       if (!bodyParsed.success) {
-        throw new ValidationError(bodyParsed.error.flatten().fieldErrors as Record<string, string[]>);
+        throw new ValidationError(
+          bodyParsed.error.flatten().fieldErrors as Record<string, string[]>,
+        );
       }
 
       const order = await service.cancel(
@@ -104,7 +106,9 @@ export default async function orderRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const paramsParsed = idParamSchema.safeParse(request.params);
       if (!paramsParsed.success) {
-        throw new ValidationError(paramsParsed.error.flatten().fieldErrors as Record<string, string[]>);
+        throw new ValidationError(
+          paramsParsed.error.flatten().fieldErrors as Record<string, string[]>,
+        );
       }
 
       const parsed = updateOrderStatusSchema.safeParse(request.body);
@@ -114,7 +118,7 @@ export default async function orderRoutes(app: FastifyInstance): Promise<void> {
 
       const order = await service.updateStatus(
         paramsParsed.data.id,
-        parsed.data.status,
+        parsed.data,
         request.user.sub,
         request.ip,
         request.headers["user-agent"],

@@ -1,8 +1,6 @@
 "use client";
 
-import { useAuth } from "@/lib/auth";
-import { useRouter } from "next/navigation";
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   FileText,
   Minus,
@@ -81,13 +79,6 @@ function formatEuro(n: number): string {
 /* ─── Composant principal ─── */
 
 export default function DevisPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [user, loading, router]);
-
   // Quantités par gamme
   const [quantities, setQuantities] = useState<Record<string, number>>({
     confort: 0,
@@ -105,7 +96,7 @@ export default function DevisPage() {
   const [clientName, setClientName] = useState("");
 
   const updateQty = useCallback((key: string, delta: number) => {
-    setQuantities((prev) => ({ ...prev, [key]: Math.max(0, prev[key] + delta) }));
+    setQuantities((prev) => ({ ...prev, [key]: Math.max(0, (prev[key] ?? 0) + delta) }));
   }, []);
 
   const setQty = useCallback((key: string, value: number) => {
@@ -136,9 +127,9 @@ export default function DevisPage() {
     }[] = [];
 
     for (const gamme of GAMMES) {
-      const qty = quantities[gamme.key];
+      const qty = quantities[gamme.key] ?? 0;
       if (qty === 0) continue;
-      const prixUnit = gamme.paliers[palierIdx];
+      const prixUnit = gamme.paliers[palierIdx] ?? 0;
       const totalLigne = prixUnit * qty;
       const coutLigne = gamme.cout * qty;
       totalHTBrut += totalLigne;
@@ -186,16 +177,6 @@ export default function DevisPage() {
       margeAnnuelle,
     };
   }, [quantities, frequence, ristourne]);
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
-      </div>
-    );
-  }
-
-  if (!user) return null;
 
   const margeColor =
     calculs.margePct >= 40
@@ -267,9 +248,11 @@ export default function DevisPage() {
               </div>
               <div className="divide-y divide-gray-100">
                 {GAMMES.map((gamme) => {
-                  const qty = quantities[gamme.key];
+                  const qty = quantities[gamme.key] ?? 0;
                   const prixUnit =
-                    calculs.totalSets > 0 ? gamme.paliers[calculs.palierIdx] : gamme.paliers[0];
+                    calculs.totalSets > 0
+                      ? (gamme.paliers[calculs.palierIdx] ?? gamme.paliers[0] ?? 0)
+                      : (gamme.paliers[0] ?? 0);
 
                   return (
                     <div key={gamme.key} className="flex items-center gap-6 px-6 py-5">
@@ -601,7 +584,7 @@ export default function DevisPage() {
       </div>
 
       {/* ─── Print styles ─── */}
-      <style jsx global>{`
+      <style>{`
         @media print {
           header {
             position: static !important;

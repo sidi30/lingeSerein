@@ -5,6 +5,7 @@ import { createQueue, QUEUE_NAMES } from "../jobs/queue.js";
 import { createStockAlertWorker } from "../jobs/stock-alert.worker.js";
 import { createNotificationWorker } from "../jobs/notification.worker.js";
 import { createInvoiceWorker } from "../jobs/invoice.worker.js";
+import { createQuoteExpiryWorker } from "../jobs/quote-expiry.worker.js";
 
 /**
  * Plugin Fastify — BullMQ queues and workers.
@@ -24,6 +25,7 @@ export default fp(async (app: FastifyInstance) => {
   const notificationsQueue = createQueue(QUEUE_NAMES.NOTIFICATIONS, connection);
   const stockAlertsQueue = createQueue(QUEUE_NAMES.STOCK_ALERTS, connection);
   const invoicesQueue = createQueue(QUEUE_NAMES.INVOICES, connection);
+  const quoteExpiryQueue = createQueue(QUEUE_NAMES.QUOTE_EXPIRY, connection);
 
   // ---- Workers ----
   const workers: Worker[] = [];
@@ -31,6 +33,7 @@ export default fp(async (app: FastifyInstance) => {
   workers.push(createStockAlertWorker(connection, app.prisma));
   workers.push(createNotificationWorker(connection, app.prisma));
   workers.push(createInvoiceWorker(connection, app.prisma));
+  workers.push(createQuoteExpiryWorker(connection, app.prisma));
 
   // ---- CRON Schedules ----
 
@@ -45,6 +48,17 @@ export default fp(async (app: FastifyInstance) => {
     },
   );
 
+  // Quote expiry check — every day at 03:00
+  await quoteExpiryQueue.upsertJobScheduler(
+    "quote-expiry-cron",
+    { pattern: "0 3 * * *" },
+    {
+      name: "quote-expiry-check",
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: { count: 100 } },
+    },
+  );
+
   app.log.info("BullMQ workers and CRON schedules registered");
 
   // ---- Expose queues on app for route handlers ----
@@ -52,6 +66,7 @@ export default fp(async (app: FastifyInstance) => {
     notifications: notificationsQueue,
     stockAlerts: stockAlertsQueue,
     invoices: invoicesQueue,
+    quoteExpiry: quoteExpiryQueue,
   });
 
   // ---- Graceful shutdown ----
@@ -66,6 +81,7 @@ export default fp(async (app: FastifyInstance) => {
       notificationsQueue.close(),
       stockAlertsQueue.close(),
       invoicesQueue.close(),
+      quoteExpiryQueue.close(),
     ]);
 
     app.log.info("BullMQ workers shut down");
@@ -79,6 +95,7 @@ declare module "fastify" {
       notifications: ReturnType<typeof createQueue>;
       stockAlerts: ReturnType<typeof createQueue>;
       invoices: ReturnType<typeof createQueue>;
+      quoteExpiry: ReturnType<typeof createQueue>;
     };
   }
 }

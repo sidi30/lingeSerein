@@ -79,17 +79,20 @@ async function request<T = unknown>(endpoint: string, options: RequestOptions = 
   }
 
   if (!response.ok) {
-    let errorData: { error?: { message?: string } } = {};
+    let errorData: { error?: { message?: string; code?: string }; success?: boolean } = {};
     try {
       errorData = (await response.json()) as typeof errorData;
     } catch {
       // ignore
     }
-    throw new ApiError(
+    const err = new ApiError(
       response.status,
       errorData.error?.message ?? `Erreur ${response.status}`,
       errorData,
     );
+    // Expose le code métier pour discrimination côté front
+    (err as ApiError & { code?: string }).code = errorData.error?.code;
+    throw err;
   }
 
   if (response.status === 204) return undefined as T;
@@ -99,10 +102,79 @@ async function request<T = unknown>(endpoint: string, options: RequestOptions = 
   return json.data !== undefined ? json.data : (json as unknown as T);
 }
 
+/**
+ * Variante de request qui retourne l'enveloppe complète sans unwrap.
+ * Nécessaire pour les listes paginées (ADR-011) afin de préserver `pagination` et `meta`.
+ */
+async function requestRaw<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  const { body, params, headers: customHeaders, ...rest } = options;
+
+  let url = `${BASE_URL}${endpoint}`;
+  if (params) {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) search.set(key, String(value));
+    }
+    const qs = search.toString();
+    if (qs) url += `?${qs}`;
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(customHeaders as Record<string, string>),
+  };
+
+  const token = getToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(url, {
+    ...rest,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (response.status === 401) {
+    setToken(null);
+    if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
+      window.location.href = "/login";
+    }
+    throw new ApiError(401, "Non autorisé");
+  }
+
+  if (!response.ok) {
+    let errorData: { error?: { message?: string; code?: string } } = {};
+    try {
+      errorData = (await response.json()) as typeof errorData;
+    } catch {
+      // ignore
+    }
+    const err = new ApiError(
+      response.status,
+      errorData.error?.message ?? `Erreur ${response.status}`,
+      errorData,
+    );
+    (err as ApiError & { code?: string }).code = errorData.error?.code;
+    throw err;
+  }
+
+  if (response.status === 204) return undefined as T;
+
+  return (await response.json()) as T;
+}
+
 // Convenience methods — toutes les méthodes sur un objet `api`
 export const api = {
   get: <T>(endpoint: string, params?: Record<string, string | number | boolean | undefined>) =>
     request<T>(endpoint, { method: "GET", params }),
+
+  /**
+   * Retourne l'enveloppe brute { success, data, pagination?, meta? } sans unwrap.
+   * À utiliser pour les listes paginées (ADR-011).
+   */
+  getRaw: <T>(endpoint: string, params?: Record<string, string | number | boolean | undefined>) =>
+    requestRaw<T>(endpoint, { method: "GET", params }),
 
   post: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, { method: "POST", body }),
 

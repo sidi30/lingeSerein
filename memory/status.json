@@ -1,18 +1,17 @@
 {
-  "current": "BUGS_FOUND",
-  "updated_at": "2026-06-09T00:00:00+02:00",
-  "agent": "qa-engineer",
-  "summary": {
-    "tests_run": 105,
-    "tests_passed": 86,
-    "tests_failed": 7,
-    "bugs_total": 5,
-    "by_severity": {
-      "critical": 0,
-      "high": 1,
-      "medium": 3,
-      "low": 1
-    }
+  "current": "READY_FOR_QA",
+  "updated_by": "frontend",
+  "updated_at": "2026-06-11T18:00:00+02:00",
+  "previous": "READY_FOR_DEV",
+  "checkpoints": {
+    "architecture_approved": true,
+    "backend_done": true,
+    "frontend_done": true
   },
-  "next_agent": "debugger"
+  "agents": {
+    "backend": "DONE",
+    "frontend": "DONE"
+  },
+  "note": "Frontend livré: admin-web pages devis/commandes/utilisateurs/reglages, packages/ui devis-pdf, tsconfig paths corrigés, build Next.js vert. docker-compose.dev.yml généré. Prêt pour QA.",
+  "next_agent": "qa"
 }

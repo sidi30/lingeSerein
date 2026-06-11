@@ -19,6 +19,9 @@ import subscriptionRoutes from "./routes/subscriptions/index.js";
 import notificationRoutes from "./routes/notifications/index.js";
 import clientRoutes from "./routes/clients/index.js";
 import dashboardRoutes from "./routes/dashboard/index.js";
+import quoteRoutes from "./routes/quotes/index.js";
+import userRoutes from "./routes/users/index.js";
+import settingsRoutes from "./routes/settings/index.js";
 import { AppError } from "./utils/errors.js";
 
 /**
@@ -81,9 +84,7 @@ export async function buildApp() {
         description: "API REST du service de location de linge hôtelier Linge Serein",
         version: "1.0.0",
       },
-      servers: [
-        { url: process.env["API_URL"] ?? "http://localhost:3001" },
-      ],
+      servers: [{ url: process.env["API_URL"] ?? "http://localhost:3001" }],
       components: {
         securitySchemes: {
           bearerAuth: {
@@ -134,9 +135,7 @@ export async function buildApp() {
       error: {
         code: "INTERNAL_SERVER_ERROR",
         message:
-          process.env["NODE_ENV"] === "production"
-            ? "Erreur interne du serveur"
-            : error.message,
+          process.env["NODE_ENV"] === "production" ? "Erreur interne du serveur" : error.message,
       },
     });
   });
@@ -156,6 +155,9 @@ export async function buildApp() {
   await app.register(notificationRoutes, { prefix: "/api/v1/notifications" });
   await app.register(clientRoutes, { prefix: "/api/v1/clients" });
   await app.register(dashboardRoutes, { prefix: "/api/v1/dashboard" });
+  await app.register(quoteRoutes, { prefix: "/api/v1/quotes" });
+  await app.register(userRoutes, { prefix: "/api/v1/users" });
+  await app.register(settingsRoutes, { prefix: "/api/v1/settings" });
 
   return app;
 }
