@@ -19,6 +19,9 @@ COPY --from=pruner /app/out/json/ ./
 RUN npm ci
 # Sources élaguées (inclut packages/database/prisma/**)
 COPY --from=pruner /app/out/full/ ./
+# tsconfig racine : les tsconfig.build.json des packages font `extends ../../tsconfig.base.json`,
+# que `turbo prune` ne copie pas (fichier hors workspace). On le récupère du repo complet.
+COPY --from=pruner /app/tsconfig.base.json /app/tsconfig.json ./
 # Client Prisma puis build (shared → database → api, ordre géré par turbo)
 RUN npx prisma generate --schema packages/database/prisma/schema.prisma \
  && npx turbo run build --filter=@lingengo/api
