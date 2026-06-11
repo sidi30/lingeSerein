@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { loginSchema, registerSchema, refreshTokenSchema } from "@lingengo/shared";
 import { AuthService } from "../../services/auth.service.js";
 import { AppError, ValidationError } from "../../utils/errors.js";
+import { changePasswordSchema } from "../../schemas/users.schema.js";
 
 /**
  * Routes d'authentification — /api/v1/auth/*
@@ -176,4 +177,63 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({ success: true, data: user });
   });
+
+  // ---- PATCH /me/password ----
+  // Accessible à tout utilisateur authentifié (quel que soit son rôle).
+  // Rate-limit dédié : 5 tentatives par minute pour limiter le brute-force.
+  app.patch(
+    "/me/password",
+    {
+      preHandler: [app.authenticate],
+      config: { rateLimit: { max: 5, timeWindow: "1m" } },
+      schema: {
+        tags: ["Authentification"],
+        summary: "Changer son mot de passe",
+        description:
+          "Vérifie le mot de passe actuel, applique la même politique que l'inscription, " +
+          "révoque tous les refresh tokens. L'access token en cours (15 min) reste valide.",
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: "object",
+          required: ["currentPassword", "newPassword"],
+          properties: {
+            currentPassword: { type: "string", minLength: 1 },
+            newPassword: { type: "string", minLength: 8, maxLength: 72 },
+          },
+        },
+        response: {
+          200: {
+            description: "Mot de passe modifié avec succès",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: { message: { type: "string" } },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const parsed = changePasswordSchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.flatten().fieldErrors as Record<string, string[]>);
+      }
+
+      await authService.changePassword(
+        request.user.sub,
+        parsed.data.currentPassword,
+        parsed.data.newPassword,
+        request.ip,
+        request.headers["user-agent"],
+      );
+
+      return reply.send({
+        success: true,
+        data: { message: "Mot de passe modifié" },
+      });
+    },
+  );
 }

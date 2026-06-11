@@ -25,6 +25,12 @@ interface AuthState {
   logout: () => Promise<void>;
 }
 
+const ADMIN_ROLES = ["ROLE_ADMIN", "ROLE_SUPER_ADMIN"] as const;
+
+function isAdminRole(role: string): boolean {
+  return (ADMIN_ROLES as readonly string[]).includes(role);
+}
+
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -41,6 +47,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       // GET /auth/me renvoie directement { id, email, name, role, ... }
       const data = await api.get<User>("/auth/me");
+      // Garde-fou défensif : si le rôle n'est pas admin → logout immédiat
+      if (!isAdminRole(data.role)) {
+        setToken(null);
+        setUser(null);
+        if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
+          window.location.href = "/login?error=acces-refuse";
+        }
+        return;
+      }
       setUser(data);
     } catch {
       setToken(null);
@@ -59,6 +74,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       // POST /auth/login renvoie { accessToken, refreshToken, userId, role }
       const data = await api.post<LoginResponse>("/auth/login", { email, password });
+
+      // Vérification du rôle AVANT de stocker le token
+      if (!isAdminRole(data.role)) {
+        throw new Error("Accès réservé aux administrateurs.");
+      }
+
       setToken(data.accessToken);
 
       // Fetch le profil complet

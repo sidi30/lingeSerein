@@ -236,6 +236,60 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // ---- DELETE /users/:id ----
+  app.delete<{ Params: { id: string } }>(
+    "/:id",
+    {
+      preHandler: adminMiddleware,
+      schema: {
+        tags: ["Utilisateurs"],
+        summary: "Supprimer un utilisateur (soft-delete)",
+        description:
+          "Suppression douce : deletedAt=now, isActive=false, révocation de tous les refresh tokens. " +
+          "Interdit sur soi-même (422 CANNOT_DELETE_SELF) et sur un SUPER_ADMIN si acteur != SUPER_ADMIN (403).",
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+        response: {
+          200: {
+            description: "Utilisateur supprimé",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: { id: { type: "string", format: "uuid" } },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const paramsParsed = idParamSchema.safeParse(request.params);
+      if (!paramsParsed.success) {
+        throw new ValidationError(
+          paramsParsed.error.flatten().fieldErrors as Record<string, string[]>,
+        );
+      }
+
+      const operatorId = await getOperatorId(request.user.sub);
+      const result = await service.softDelete(
+        paramsParsed.data.id,
+        operatorId,
+        request.user.sub,
+        request.user.role,
+        request.ip,
+        request.headers["user-agent"],
+      );
+
+      return reply.send({ success: true, data: result });
+    },
+  );
+
   // ---- POST /users/:id/reset-password ----
   app.post<{ Params: { id: string } }>(
     "/:id/reset-password",

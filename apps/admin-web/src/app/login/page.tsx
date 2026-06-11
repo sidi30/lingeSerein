@@ -1,12 +1,40 @@
 "use client";
 
+import { Suspense } from "react";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { ClipboardList, Truck, AlertCircle } from "lucide-react";
+import { ClipboardList, Truck, AlertCircle, CheckCircle2 } from "lucide-react";
+
+/** Lit les query params — doit être sous <Suspense> en Next.js 15 */
+function LoginBanners({ error }: { error: string | null }) {
+  const searchParams = useSearchParams();
+  const accessDenied = searchParams.get("error") === "acces-refuse";
+  const passwordChanged = searchParams.get("message") === "mdp-change";
+
+  if (passwordChanged && !error) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-success-50 px-4 py-3 text-sm text-success-700">
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-success-600" aria-hidden="true" />
+        Mot de passe modifié. Reconnectez-vous avec votre nouveau mot de passe.
+      </div>
+    );
+  }
+
+  if (accessDenied && !error) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-danger-50 px-4 py-3 text-sm text-danger-600">
+        <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+        Accès réservé aux administrateurs.
+      </div>
+    );
+  }
+
+  return null;
+}
 
 export default function LoginPage() {
   const { login, user, loading, error } = useAuth();
@@ -47,7 +75,13 @@ export default function LoginPage() {
       {/* Left panel — branding */}
       <div className="hidden w-1/2 flex-col justify-between bg-primary-600 p-12 lg:flex">
         <div>
-          <Image src="/logo-dark.png" alt="Linge Serein" width={200} height={80} className="h-16 w-auto" />
+          <Image
+            src="/logo-dark.png"
+            alt="Linge Serein"
+            width={200}
+            height={80}
+            className="h-16 w-auto"
+          />
           <p className="mt-2 text-primary-200">Votre linge, notre sérénité</p>
         </div>
 
@@ -77,18 +111,31 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="text-xs text-primary-300">&copy; {new Date().getFullYear()} Linge Serein — Vaucluse, France</p>
+        <p className="text-xs text-primary-300">
+          &copy; {new Date().getFullYear()} Linge Serein — Vaucluse, France
+        </p>
       </div>
 
       {/* Right panel — form */}
       <div className="flex flex-1 items-center justify-center bg-gray-50 px-4">
         <div className="w-full max-w-sm">
           <div className="mb-8 text-center">
-            <Image src="/logo.png" alt="Linge Serein" width={160} height={64} className="mx-auto h-14 w-auto" />
-            <p className="mt-3 text-sm text-gray-500">Connectez-vous à votre espace administrateur</p>
+            <Image
+              src="/logo.png"
+              alt="Linge Serein"
+              width={160}
+              height={64}
+              className="mx-auto h-14 w-auto"
+            />
+            <p className="mt-3 text-sm text-gray-500">
+              Connectez-vous à votre espace administrateur
+            </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <form
+            onSubmit={handleSubmit}
+            className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+          >
             <div className="flex flex-col gap-4">
               <Input
                 label="Adresse email"
@@ -111,15 +158,23 @@ export default function LoginPage() {
                   required
                 />
                 <div className="mt-1.5 text-right">
-                  <button type="button" className="text-xs text-primary-600 hover:text-primary-700 hover:underline">
+                  <button
+                    type="button"
+                    className="text-xs text-primary-600 hover:text-primary-700 hover:underline"
+                  >
                     Mot de passe oublié ?
                   </button>
                 </div>
               </div>
 
+              {/* Query-param banners (access denied / password changed) */}
+              <Suspense fallback={null}>
+                <LoginBanners error={error} />
+              </Suspense>
+
               {error && (
                 <div className="flex items-center gap-2 rounded-lg bg-danger-50 px-4 py-3 text-sm text-danger-600">
-                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
                   {error}
                 </div>
               )}

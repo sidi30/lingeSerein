@@ -4,7 +4,13 @@ import type { PrismaClient } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { MAX_LOGIN_ATTEMPTS, JWT_REFRESH_TOKEN_EXPIRY } from "@lingengo/shared";
-import { UnauthorizedError, AccountLockedError, NotFoundError } from "../utils/errors.js";
+import {
+  AppError,
+  UnauthorizedError,
+  AccountLockedError,
+  NotFoundError,
+  UnprocessableEntityError,
+} from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
 import { encrypt } from "../utils/crypto.js";
 
@@ -274,6 +280,74 @@ export class AuthService {
       entity: "User",
       entityId: verification.userId,
       changes: { isEmailVerified: true },
+      ipAddress,
+      userAgent,
+    });
+  }
+
+  /**
+   * Changement de mot de passe par l'utilisateur courant.
+   *
+   * Règles :
+   * - currentPassword doit correspondre au hash stocké → sinon 401 INVALID_CURRENT_PASSWORD
+   * - newPassword doit être différent de currentPassword → sinon 422 SAME_PASSWORD
+   * - Hash bcrypt avec BCRYPT_ROUNDS, mise à jour du passwordHash
+   * - Révocation de TOUS les refresh tokens (l'access token 15min reste valide côté client)
+   * - Audit action UPDATE entity User, changes={passwordChanged:true} — jamais les mots de passe
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+      select: { id: true, passwordHash: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedError("Compte introuvable");
+    }
+
+    // Vérifier le mot de passe actuel — message volontairement générique (anti-énumération)
+    const isCurrentValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isCurrentValid) {
+      // Code machine spécifique requis par le contrat : INVALID_CURRENT_PASSWORD
+      throw new AppError(401, "INVALID_CURRENT_PASSWORD", "Mot de passe actuel incorrect");
+    }
+
+    // Interdire de réutiliser le même mot de passe
+    const isSamePassword = await bcrypt.compare(newPassword, user.passwordHash);
+    if (isSamePassword) {
+      throw new UnprocessableEntityError(
+        "Le nouveau mot de passe doit être différent du mot de passe actuel",
+        "SAME_PASSWORD",
+      );
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+
+    // Révoquer tous les refresh tokens (on ne peut pas distinguer la session courante)
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newPasswordHash },
+    });
+
+    await createAuditLog({
+      prisma: this.prisma,
+      userId,
+      action: "UPDATE",
+      entity: "User",
+      entityId: userId,
+      // Ne jamais inclure les mots de passe dans l'audit
+      changes: { passwordChanged: true },
       ipAddress,
       userAgent,
     });

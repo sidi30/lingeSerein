@@ -2,9 +2,18 @@ import bcrypt from "bcrypt";
 import { randomBytes } from "node:crypto";
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { ROLES } from "@lingengo/shared";
-import { NotFoundError, ConflictError, ForbiddenError } from "../utils/errors.js";
+import {
+  NotFoundError,
+  ConflictError,
+  ForbiddenError,
+  UnprocessableEntityError,
+} from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
 import type { CreateUserInput, UpdateUserInput, ListUsersQuery } from "../schemas/users.schema.js";
+
+// NOTE: softDelete est distinct de deactivate.
+// - deactivate : deletedAt=now (isActive reste true en DB, c'est le champ deletedAt qui conduit le filtre)
+// - softDelete  : deletedAt=now + isActive=false + révocation tokens (suppression "définitive" côté admin)
 
 const BCRYPT_ROUNDS = 12;
 
@@ -511,5 +520,70 @@ export class UsersService {
     });
 
     return { temporaryPassword };
+  }
+
+  // ---- Suppression douce (soft-delete) ----
+
+  /**
+   * Suppression douce d'un utilisateur (client, livreur ou admin).
+   * - Interdit de se supprimer soi-même → 422 CANNOT_DELETE_SELF
+   * - Un ADMIN ne peut pas supprimer un SUPER_ADMIN → 403
+   * - Cible déjà supprimée ou introuvable → 404
+   * - Effets : deletedAt=now, isActive=false, révocation de tous les refresh tokens.
+   */
+  async softDelete(
+    id: string,
+    operatorId: string,
+    actorId: string,
+    actorRole: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<{ id: string }> {
+    // Interdire l'auto-suppression
+    if (id === actorId) {
+      throw new UnprocessableEntityError(
+        "Vous ne pouvez pas supprimer votre propre compte",
+        "CANNOT_DELETE_SELF",
+      );
+    }
+
+    // Chercher la cible uniquement parmi les utilisateurs actifs (non supprimés)
+    const target = await this.prisma.user.findFirst({
+      where: { id, operatorId, deletedAt: null },
+    });
+
+    if (!target) {
+      throw new NotFoundError("Utilisateur", id);
+    }
+
+    // Un ADMIN ne peut pas supprimer un SUPER_ADMIN
+    if (target.role === ROLES.SUPER_ADMIN && actorRole !== ROLES.SUPER_ADMIN) {
+      throw new ForbiddenError("Vous ne pouvez pas supprimer un Super Admin");
+    }
+
+    // Révoquer tous les refresh tokens de la cible
+    await this.prisma.refreshToken.updateMany({
+      where: { userId: id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    // Soft-delete : deletedAt=now + isActive=false
+    await this.prisma.user.update({
+      where: { id },
+      data: { deletedAt: new Date(), isActive: false },
+    });
+
+    await createAuditLog({
+      prisma: this.prisma,
+      userId: actorId,
+      action: "DELETE",
+      entity: "User",
+      entityId: id,
+      changes: { softDeleted: true },
+      ipAddress,
+      userAgent,
+    });
+
+    return { id };
   }
 }

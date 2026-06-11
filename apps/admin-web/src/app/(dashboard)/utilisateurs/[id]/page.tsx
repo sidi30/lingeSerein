@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,9 +15,10 @@ import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/lib/toast";
+import { useAuth } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import type { UserDTO, UserRole, DeliveryZoneDTO } from "@/lib/types";
-import { Copy, CheckCircle2, UserX, UserCheck, KeyRound } from "lucide-react";
+import { Copy, CheckCircle2, UserX, UserCheck, KeyRound, Trash2 } from "lucide-react";
 
 type BadgeVariant = "default" | "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -97,15 +98,29 @@ function PasswordModal({
   );
 }
 
+function deleteErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    const code = (err as ApiError & { code?: string }).code;
+    if (code === "CANNOT_DELETE_SELF") return "Vous ne pouvez pas supprimer votre propre compte.";
+    if (err.status === 403)
+      return "Vous n'avez pas les droits pour supprimer un Super Administrateur.";
+    if (err.status === 404) return "Utilisateur introuvable.";
+  }
+  return err instanceof Error ? err.message : "Erreur lors de la suppression.";
+}
+
 export default function UtilisateurDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const { user: currentUser } = useAuth();
 
   const [editMode, setEditMode] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const [confirmReactivate, setConfirmReactivate] = useState(false);
   const [confirmResetPwd, setConfirmResetPwd] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [newPassword, setNewPassword] = useState<string | null>(null);
 
   const { data: user, isLoading } = useQuery({
@@ -200,6 +215,20 @@ export default function UtilisateurDetailPage() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => api.delete<{ id: string }>(`/users/${id}`),
+    onSuccess: () => {
+      setConfirmDelete(false);
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast("Compte supprimé définitivement");
+      router.push("/utilisateurs");
+    },
+    onError: (err: unknown) => {
+      setConfirmDelete(false);
+      toast(deleteErrorMessage(err), "error");
+    },
+  });
+
   if (isLoading) {
     return (
       <>
@@ -226,6 +255,10 @@ export default function UtilisateurDetailPage() {
   const rc = roleConfig[user.role] ?? { label: user.role, variant: "neutral" as BadgeVariant };
   const isActive = !user.deletedAt;
   const isSuperAdmin = user.role === "ROLE_SUPER_ADMIN";
+  const isSelf = currentUser?.id === user.id;
+  const currentIsSuperAdmin = currentUser?.role === "ROLE_SUPER_ADMIN";
+  // Peut supprimer : ni soi-même, ni un SUPER_ADMIN si on est juste ADMIN
+  const canDelete = !isSelf && (currentIsSuperAdmin || !isSuperAdmin);
 
   return (
     <>
@@ -269,6 +302,14 @@ export default function UtilisateurDetailPage() {
                 <UserCheck className="h-4 w-4" aria-hidden="true" />
                 Réactiver
               </Button>
+            )}
+            {canDelete && (
+              <div className="ml-2 border-l border-gray-200 pl-2">
+                <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  Supprimer
+                </Button>
+              </div>
             )}
           </div>
         }
@@ -396,6 +437,17 @@ export default function UtilisateurDetailPage() {
         open={!!newPassword}
         password={newPassword}
         onClose={() => setNewPassword(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => deleteMutation.mutate()}
+        loading={deleteMutation.isPending}
+        variant="danger"
+        title="Supprimer définitivement ce compte ?"
+        description={`Supprimer définitivement ${user.name} ? Cette action désactive le compte et révoque ses accès.`}
+        confirmLabel="Supprimer définitivement"
       />
     </>
   );

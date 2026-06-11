@@ -5,15 +5,25 @@ import { Sidebar } from "@/components/sidebar";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+const ADMIN_ROLES = ["ROLE_ADMIN", "ROLE_SUPER_ADMIN"];
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (loading) return;
+    if (!user) {
       router.replace("/login");
+      return;
     }
-  }, [user, loading, router]);
+    // Garde-fou défensif : token déjà en localStorage d'un rôle non-admin
+    if (!ADMIN_ROLES.includes(user.role)) {
+      logout().finally(() => {
+        router.replace("/login?error=acces-refuse");
+      });
+    }
+  }, [user, loading, router, logout]);
 
   if (loading) {
     return (
