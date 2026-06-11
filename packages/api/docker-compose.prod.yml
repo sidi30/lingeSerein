@@ -1,0 +1,72 @@
+# Déploiement prod de l'API mobile Linge Serein.
+# Postgres + Redis dédiés (isolés des autres apps du VPS) + l'API derrière Traefik.
+# Co-habite avec le mailer sur api.lingeserein.fr via routage par chemin :
+#   /api/v1/* et /api/docs  -> cette API
+#   /api/contact, /admin/devis, /health -> mailer (router Host sans chemin, priorité plus basse)
+services:
+  ls-postgres:
+    image: postgres:16-alpine
+    container_name: ls-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lingeserein
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: lingeserein
+    volumes:
+      - ls_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lingeserein -d lingeserein"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - ls-internal
+
+  ls-redis:
+    image: redis:7-alpine
+    container_name: ls-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - ls-internal
+
+  ls-api:
+    build:
+      context: ../..
+      dockerfile: packages/api/Dockerfile
+    image: lingeserein-api:latest
+    container_name: ls-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      ls-postgres:
+        condition: service_healthy
+      ls-redis:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.lsapi.rule=Host(`api.lingeserein.fr`) && (PathPrefix(`/api/v1`) || PathPrefix(`/api/docs`))"
+      - "traefik.http.routers.lsapi.entrypoints=https"
+      - "traefik.http.routers.lsapi.tls=true"
+      - "traefik.http.routers.lsapi.tls.certresolver=letsencrypt-dns"
+      # Priorité > router Host nu du mailer pour capter /api/v1 et /api/docs.
+      - "traefik.http.routers.lsapi.priority=100"
+      - "traefik.http.services.lsapi.loadbalancer.server.port=3001"
+    networks:
+      - ls-internal
+      - traefik-public
+
+volumes:
+  ls_pgdata:
+
+networks:
+  ls-internal:
+  traefik-public:
+    external: true

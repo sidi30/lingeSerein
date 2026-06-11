@@ -1,0 +1,15 @@
+# Contexte de build Docker (racine du repo). Exclut tout ce qui est régénéré
+# dans l'image pour réduire la taille du contexte et éviter d'embarquer des
+# node_modules host (incompatibles alpine) ou des secrets locaux.
+**/node_modules
+**/dist
+**/.next
+**/.expo
+**/.turbo
+**/coverage
+.git
+**/.env
+**/.env.*
+*.log
+**/play-service-account.json
+**/google-services.json
