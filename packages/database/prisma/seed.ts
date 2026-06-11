@@ -262,19 +262,20 @@ async function main() {
   console.log("  Delivery Schedules: Mon+Thu (zone 1), Tue+Fri (zone 2)");
 
   // ---- Users ----
-  const adminHash = await bcrypt.hash("Admin123!", BCRYPT_ROUNDS);
-  const driverHash = await bcrypt.hash("Livreur123!", BCRYPT_ROUNDS);
-  const clientHash = await bcrypt.hash("Client123!", BCRYPT_ROUNDS);
+  // Comptes réels : mot de passe commun "@Rayana2"
+  // client2/client3 = fixtures démo inactives (login impossible)
+  const realUserHash = await bcrypt.hash("@Rayana2", BCRYPT_ROUNDS);
+  const demoHash = realUserHash;
   const driverPinHash = await bcrypt.hash("123456", BCRYPT_ROUNDS);
 
   const adminUser = await prisma.user.upsert({
-    where: { email: "admin@lingengo.fr" },
+    where: { email: "sirtecnologie@gmail.com" },
     update: {},
     create: {
       operatorId: operator.id,
-      email: "admin@lingengo.fr",
-      passwordHash: adminHash,
-      name: "Sophie Martin",
+      email: "sirtecnologie@gmail.com",
+      passwordHash: realUserHash,
+      name: "Admin Linge Serein",
       phone: "+33600000001",
       role: "ROLE_ADMIN",
       isActive: true,
@@ -284,14 +285,14 @@ async function main() {
   });
 
   const driverUser = await prisma.user.upsert({
-    where: { email: "livreur@lingengo.fr" },
+    where: { email: "sidi@gmail.com" },
     update: {},
     create: {
       operatorId: operator.id,
       zoneId: zone1.id,
-      email: "livreur@lingengo.fr",
-      passwordHash: driverHash,
-      name: "Marc Dupont",
+      email: "sidi@gmail.com",
+      passwordHash: realUserHash,
+      name: "Livreur Linge Serein",
       phone: "+33600000002",
       role: "ROLE_LIVREUR",
       isActive: true,
@@ -302,14 +303,14 @@ async function main() {
   });
 
   const client1 = await prisma.user.upsert({
-    where: { email: "client1@example.com" },
+    where: { email: "autressir@gmail.com" },
     update: {},
     create: {
       operatorId: operator.id,
       zoneId: zone1.id,
-      email: "client1@example.com",
-      passwordHash: clientHash,
-      name: "Pierre Leclerc",
+      email: "autressir@gmail.com",
+      passwordHash: realUserHash,
+      name: "Client Linge Serein",
       phone: "+33600000003",
       address: "45 rue de la Balance, 84000 Avignon",
       accommodationType: "HOTEL",
@@ -330,13 +331,13 @@ async function main() {
       operatorId: operator.id,
       zoneId: zone1.id,
       email: "client2@example.com",
-      passwordHash: clientHash,
+      passwordHash: demoHash,
       name: "Marie Bonnet",
       phone: "+33600000004",
       address: "8 chemin des Oliviers, 84100 Orange",
       accommodationType: "GITE",
       role: "ROLE_CLIENT",
-      isActive: true,
+      isActive: false, // fixture démo — login désactivé
       isEmailVerified: true,
       emailVerifiedAt: new Date(),
       stockAlertThreshold: 25,
@@ -352,13 +353,13 @@ async function main() {
       operatorId: operator.id,
       zoneId: zone2.id,
       email: "client3@example.com",
-      passwordHash: clientHash,
+      passwordHash: demoHash,
       name: "Jean-Luc Rousseau",
       phone: "+33600000005",
       address: "22 route de Bonnieux, 84400 Apt",
       accommodationType: "AIRBNB",
       role: "ROLE_CLIENT",
-      isActive: true,
+      isActive: false, // fixture démo — login désactivé
       isEmailVerified: true,
       emailVerifiedAt: new Date(),
       stockAlertThreshold: 30,
