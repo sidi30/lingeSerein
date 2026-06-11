@@ -165,12 +165,13 @@ export interface OperatorDTO {
 export interface StockThresholdDTO {
   productId: string;
   name: string;
-  range: "CONFORT" | "HOTEL" | "PRESTIGE";
-  category: string;
+  // V2 : les produits KITS ont range/category null (ADR-V2-001).
+  range: string | null;
+  category: string | null;
   stockAlertThreshold: number;
 }
 
-/* ─── Produits (pour le sélecteur de conversion) ─── */
+/* ─── Produits (pour le sélecteur de conversion, legacy) ─── */
 
 export interface ProductDTO {
   id: string;
@@ -178,4 +179,42 @@ export interface ProductDTO {
   range: "CONFORT" | "HOTEL" | "PRESTIGE";
   category: string;
   pricePerSetCents: number;
+}
+
+/* ─── Produits V2 (F5 — catalogue KITS) ─── */
+
+export type ProductKind = "KIT" | "ARTICLE";
+
+export interface ProductV2DTO {
+  id: string;
+  slug: string | null;
+  kind: ProductKind;
+  category: string | null;
+  range: string | null;
+  name: string;
+  description: string | null;
+  priceCents: number;
+  attributes: Record<string, unknown>;
+  imageUrl: string | null;
+  isActive: boolean;
+  serviceType: { kind: string; name: string };
+}
+
+/* ─── Config abonnement Pack Sérénité (F6) ─── */
+
+export interface SubscriptionConfigPublicDTO {
+  planName: string;
+  priceCents: number;
+  kitBainQty: number;
+  kitLitQty: number;
+  minEngagementMonths: number;
+  noticePeriodDays: number;
+}
+
+export interface SubscriptionConfigDTO extends SubscriptionConfigPublicDTO {
+  id: string;
+  operatorId: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }

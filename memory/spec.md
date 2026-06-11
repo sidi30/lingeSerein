@@ -406,6 +406,356 @@ QuoteStatus: BROUILLON | ENVOYE | ACCEPTE | REFUSE | EXPIRE
 
 ---
 
+### F5 — Refonte catalogue produits (alignement KITS)
+
+**Priorité :** Must Have
+**Persona concerné :** Admin opérateur + Client mobile
+**Job-to-be-done :** Quand je gère le catalogue, je veux que les produits en base correspondent exactement aux kits et articles unitaires affichés sur la vitrine, avec les prix corrects, pour que l'app mobile et les devis reflètent la réalité commerciale.
+
+#### Contexte et contrainte structurelle
+
+Le modèle actuel `Product` a une contrainte d'unicité `unique([operatorId, category, range])` qui correspond à l'ancien barème CONFORT/HOTEL/PRESTIGE. Le nouveau modèle commercial distingue des **kits** (Kit Bain, Kit Lit, Kit Complet) et des **articles unitaires** (6 types). Cette rupture conceptuelle impose une décision architecturale que l'architecte devra trancher (voir section Décisions ouvertes pour l'architecte).
+
+#### Catalogue cible (source de vérité : apps/vitrine)
+
+**Kits (prix par rotation) :**
+
+| Référence interne | Nom commercial           | Composition                                         | Prix centimes                              |
+| ----------------- | ------------------------ | --------------------------------------------------- | ------------------------------------------ |
+| KIT_BAIN          | Kit Bain                 | Drap de bain 70×150 + Serviette 50×90 + Tapis 50×70 | 750                                        |
+| KIT_LIT           | Kit Lit                  | Housse de couette + Drap housse + Taies             | 1650                                       |
+| KIT_COMPLET       | Kit Complet (Bain + Lit) | Kit Bain + Kit Lit groupés                          | 2200 (= 750+1650−200, remise groupage −2€) |
+
+**Articles unitaires (prix par pièce) :**
+
+| Référence interne | Nom commercial        | Dimensions            | Prix centimes |
+| ----------------- | --------------------- | --------------------- | ------------- |
+| SERVIETTE         | Serviette de toilette | 50×90 cm              | 450           |
+| DRAP_BAIN         | Grand drap de bain    | 70×150 cm             | 650           |
+| TAPIS_BAIN        | Tapis de bain         | 50×70 cm              | 400           |
+| PETITE_SERVIETTE  | Petite serviette      | 30×50 cm              | 250           |
+| DRAP_HOUSSE       | Drap housse           | 90×200 ou 160×200 cm  | 750           |
+| HOUSSE_COUETTE    | Housse de couette     | 160×200 ou 240×220 cm | 900           |
+
+#### CRUD produits admin (nouveaux endpoints)
+
+- `GET    /api/v1/products` — liste tous les produits (admin + mobile)
+- `POST   /api/v1/products` — créer un produit (ROLE_ADMIN/SUPER_ADMIN uniquement)
+- `PATCH  /api/v1/products/:id` — modifier nom, prix, description (ROLE_ADMIN/SUPER_ADMIN)
+- `PATCH  /api/v1/products/:id/price` — modifier le prix uniquement (raccourci rapide)
+- `DELETE /api/v1/products/:id` — désactiver (soft-delete, ROLE_ADMIN/SUPER_ADMIN)
+
+#### Nouvelles pages admin
+
+- `/produits` — liste des produits avec prix actuels, bouton "Modifier le prix"
+- `/produits/:id/modifier` — formulaire édition prix + nom + description
+
+#### Critères d'acceptation
+
+**AC-F5-01 — Le catalogue mobile affiche les kits vitrine**
+
+- **Given** le reseed a été appliqué (9 produits : 3 kits + 6 articles unitaires avec prix vitrine)
+- **When** l'utilisateur mobile ouvre l'écran "Passer une commande"
+- **Then** il voit au minimum Kit Bain à 7,50 €, Kit Lit à 16,50 €, Kit Complet à 22,00 €, et les 6 articles unitaires avec leurs prix corrects — toutes les valeurs provenant de l'API `/products` (aucune valeur codée en dur dans le mobile)
+
+**AC-F5-02 — Modification du prix d'un produit par l'admin**
+
+- **Given** l'admin est sur la page /produits et voit "Kit Bain — 7,50 €"
+- **When** il clique "Modifier", change le prix à 8,00 € et valide
+- **Then** `Product.priceCents` est mis à jour à 800 en base, la liste admin affiche "Kit Bain — 8,00 €", et la prochaine requête mobile sur `/products` retourne 800 centimes pour ce produit
+
+**AC-F5-03 — Prix du produit visible dans une commande existante**
+
+- **Given** une commande `OrderItem` a `unitCents = 750` (snapshot au moment de la commande)
+- **When** le prix du Kit Bain est modifié à 800 centimes
+- **Then** la commande existante conserve `unitCents = 750` (le snapshot historique est préservé) ; seules les nouvelles commandes utilisent le nouveau prix
+
+**AC-F5-04 — Désactivation d'un produit**
+
+- **Given** un produit existe et l'admin clique "Désactiver"
+- **When** il confirme
+- **Then** `Product.isActive = false` et `deletedAt` est renseigné, le produit disparaît de la liste mobile (`GET /products` ne retourne que `isActive=true`), mais les commandes/abonnements existants référençant ce produit restent intacts (référence par UUID)
+
+**Règles métier :**
+
+- Les prix sont en centimes (Int) — jamais de flottants
+- La modification de prix n'affecte pas les `OrderItem.unitCents` existants (snapshot immuable)
+- Un produit désactivé ne peut plus être commandé mais ses données historiques sont conservées
+- Le catalogue est paramétrable par l'admin : les noms et prix peuvent évoluer sans redéploiement
+- L'architecte doit décider du sort de l'enum `ProductCategory` et de la contrainte `unique([operatorId, category, range])` — voir section Décisions ouvertes
+
+**Cas d'erreur à gérer :**
+
+- Prix négatif → "Le prix doit être supérieur ou égal à 0"
+- Nom vide → "Le nom du produit est obligatoire"
+- Tentative de commander un produit désactivé → HTTP 422 "Ce produit n'est plus disponible"
+
+---
+
+### F6 — Abonnement Pack Sérénité avec engagement 3 mois
+
+**Priorité :** Must Have
+**Persona concerné :** Client mobile + Admin opérateur
+**Job-to-be-done :** Quand un hôte veut s'abonner, je veux qu'il souscrive au Pack Sérénité (89 €/mois, 8 kits bain + 4 kits lit), qu'il comprenne l'engagement de 3 mois minimum avant de confirmer, et que l'API empêche toute résiliation avant la fin de cet engagement.
+
+#### Modèle cible
+
+Un seul plan public : **Pack Sérénité**
+
+| Paramètre             | Valeur                    | Paramétrable admin           |
+| --------------------- | ------------------------- | ---------------------------- |
+| Nom                   | Pack Sérénité             | Non (nom commercial fixe V1) |
+| Prix mensuel          | 89 €/mois (8900 centimes) | Oui                          |
+| Kits bain inclus/mois | 8                         | Oui                          |
+| Kits lit inclus/mois  | 4                         | Oui                          |
+| Engagement minimum    | 3 mois                    | Oui                          |
+| Préavis résiliation   | 30 jours                  | Oui (existant)               |
+| Livraisons incluses   | Oui                       | Non                          |
+
+#### Stockage de la configuration abonnement
+
+Nouvelle table (ou extension `Operator`) `SubscriptionConfig` portée par l'opérateur :
+
+```
+SubscriptionConfig {
+  id                    String  @id
+  operatorId            String  @unique
+  planName              String  @default("Pack Sérénité")
+  priceCents            Int     @default(8900)
+  kitBainQty            Int     @default(8)
+  kitLitQty             Int     @default(4)
+  minEngagementMonths   Int     @default(3)
+  noticePeriodDays      Int     @default(30)
+  isActive              Boolean @default(true)
+  updatedAt             DateTime @updatedAt
+}
+```
+
+L'architecte tranchera entre une table dédiée, une extension `Operator`, ou un stockage JSON dans `Operator.metadata` — la contrainte fonctionnelle est que ces valeurs sont paramétrables sans redéploiement.
+
+#### Endpoints impactés
+
+**Nouveaux :**
+
+- `GET  /api/v1/subscriptions/config` — retourne la config publique du plan (priceCents, kitBainQty, kitLitQty, minEngagementMonths) — accessible aux clients authentifiés
+- `GET  /api/v1/admin/subscriptions/config` — même chose pour l'admin
+- `PATCH /api/v1/admin/subscriptions/config` — modifier la configuration (ROLE_ADMIN/SUPER_ADMIN)
+
+**Modifiés :**
+
+- `POST /api/v1/subscriptions` — souscrire. Enregistre `minEngagementMonths` au moment de la souscription (snapshot) dans `Subscription.minEngagementMonths`. Retourne la config complète dans la réponse.
+- `DELETE /api/v1/subscriptions/:id` ou `POST /api/v1/subscriptions/:id/cancel` — résiliation. Bloquée si `now() < startDate + minEngagementMonths mois`. Retourne 422 avec date de résiliation autorisée la plus proche.
+
+**Champs à ajouter sur `Subscription` :**
+
+- `priceCents Int` — prix mensuel au moment de la souscription (snapshot, immuable)
+- `minEngagementMonths Int @default(3)` — durée d'engagement minimale (snapshot)
+- `committedUntil DateTime` — date jusqu'à laquelle la résiliation est bloquée (calculée à la souscription : `startDate + minEngagementMonths mois`)
+- `kitBainQty Int @default(8)` — composition incluse (snapshot)
+- `kitLitQty Int @default(4)` — composition incluse (snapshot)
+
+#### Critères d'acceptation
+
+**AC-F6-01 — Affichage de l'engagement avant souscription**
+
+- **Given** l'utilisateur mobile est sur l'écran "Abonnement"
+- **When** il consulte les détails du Pack Sérénité
+- **Then** il voit clairement : "89 €/mois", "8 kits bain + 4 kits lit inclus", "Engagement minimum : 3 mois", "Résiliation possible après le [date J+3mois] avec 30 jours de préavis" — toutes ces valeurs provenant de `GET /subscriptions/config` (non codées en dur)
+
+**AC-F6-02 — Souscription enregistre un snapshot**
+
+- **Given** l'utilisateur confirme la souscription sur l'app mobile
+- **When** `POST /subscriptions` est appelé
+- **Then** une `Subscription` est créée avec `priceCents=8900`, `minEngagementMonths=3`, `committedUntil=startDate+3mois`, `kitBainQty=8`, `kitLitQty=4`, statut ACTIVE
+
+**AC-F6-03 — Résiliation bloquée pendant l'engagement**
+
+- **Given** un abonnement actif avec `committedUntil` dans 45 jours
+- **When** l'utilisateur tente de résilier depuis l'app mobile
+- **Then** l'API retourne HTTP 422 avec message "Résiliation non autorisée : votre engagement de 3 mois court jusqu'au [date committedUntil]. Vous pourrez résilier à partir du [date committedUntil]."
+
+**AC-F6-04 — Résiliation autorisée après l'engagement**
+
+- **Given** un abonnement actif avec `committedUntil` dépassée
+- **When** l'utilisateur demande la résiliation depuis l'app mobile
+- **Then** `Subscription.cancelledAt = now()`, `cancelEffectiveAt = now() + 30 jours` (préavis), statut reste ACTIVE jusqu'à `cancelEffectiveAt`, puis passe à CANCELLED
+
+**AC-F6-05 — Affichage mobile du statut d'engagement**
+
+- **Given** l'utilisateur a souscrit il y a 1 mois (engagement non terminé)
+- **When** il consulte son espace abonnement
+- **Then** il voit : "Engagement en cours jusqu'au [committedUntil]", le bouton "Résilier" est présent mais affiche "Résiliation indisponible jusqu'au [committedUntil]" si cliqué avant la date, sans appel API bloquant inutile
+
+**AC-F6-06 — Modification de la config par l'admin**
+
+- **Given** l'admin modifie `priceCents` à 9500 via `PATCH /admin/subscriptions/config`
+- **When** un nouvel utilisateur souscrit ensuite
+- **Then** son abonnement a `priceCents=9500` ; les abonnements existants conservent leur `priceCents` d'origine (snapshot immuable)
+
+**AC-F6-07 — La vitrine affiche l'engagement 3 mois**
+
+- **Given** la vitrine est mise à jour (hors scope technique de cette spec, mais exigence fonctionnelle notée)
+- **When** un visiteur consulte la section tarifs
+- **Then** le texte "Sans engagement · résiliable à tout moment" est remplacé par "Engagement 3 mois · résiliable ensuite avec 30 j de préavis" — cette mise à jour vitrine est incluse dans le scope de livraison
+
+**Règles métier :**
+
+- `committedUntil` est calculé à la souscription et stocké : `committedUntil = currentPeriodStart + minEngagementMonths mois` (calcul calendaire, pas 90 jours fixes)
+- La modification de la config n'affecte pas les abonnements en cours (snapshots immuables)
+- L'abonnement actuel PRESTIGE du client réel doit être migré (voir F8)
+- Le plan `SubscriptionPlan` enum (ESSENTIELLE/CONFORT/PRESTIGE) n'est plus utilisé publiquement mais reste en base pour la migration ; l'architecte tranchera sur la dépréciation ou l'extension
+
+**Cas d'erreur à gérer :**
+
+- Souscription alors qu'un abonnement ACTIVE existe déjà → HTTP 409 "Vous avez déjà un abonnement actif"
+- `minEngagementMonths < 0` dans la config admin → "La durée d'engagement minimale doit être supérieure ou égale à 0"
+- `priceCents < 0` → "Le prix ne peut pas être négatif"
+
+---
+
+### F7 — Source de vérité partagée (@lingengo/shared)
+
+**Priorité :** Must Have
+**Persona concerné :** Développeur (qualité du code, cohérence)
+**Job-to-be-done :** Quand les prix ou la composition des kits changent dans la config admin, je veux que la vitrine, le mobile et l'API utilisent les mêmes constantes, pour éviter les désynchronisations entre canaux.
+
+#### État actuel à corriger
+
+Dans `packages/shared/src/constants.ts` :
+
+- `PRICE_PER_SET_CENTS` (barème CONFORT/HOTEL/PRESTIGE) → **à supprimer** ou déprécier (marqué `@deprecated`)
+- `SUBSCRIPTION_PLANS` (ESSENTIELLE/CONFORT/PRESTIGE sans prix) → **à remplacer** par les constantes du nouveau modèle
+
+#### Constantes cibles dans `@lingengo/shared`
+
+```typescript
+// Catalogue produits — valeurs par défaut (source de vérité pour seeding)
+export const CATALOG_DEFAULTS = {
+  KIT_BAIN_CENTS: 750,
+  KIT_LIT_CENTS: 1650,
+  KIT_COMPLET_CENTS: 2200, // 750 + 1650 - 200
+  KIT_COMPLET_DISCOUNT_CENTS: 200, // remise groupage bain+lit
+  SERVIETTE_CENTS: 450,
+  DRAP_BAIN_CENTS: 650,
+  TAPIS_BAIN_CENTS: 400,
+  PETITE_SERVIETTE_CENTS: 250,
+  DRAP_HOUSSE_CENTS: 750,
+  HOUSSE_COUETTE_CENTS: 900,
+} as const;
+
+// Abonnement — valeurs par défaut (source de vérité pour seeding)
+export const SUBSCRIPTION_DEFAULTS = {
+  PRICE_CENTS: 8900, // 89 €/mois
+  KIT_BAIN_QTY: 8,
+  KIT_LIT_QTY: 4,
+  MIN_ENGAGEMENT_MONTHS: 3,
+  NOTICE_PERIOD_DAYS: 30,
+} as const;
+
+// Livraison — seuils par défaut
+export const DELIVERY_DEFAULTS = {
+  FREE_THRESHOLD_CENTS: 12000, // offerte dès 120 €
+  FREE_MIN_KITS_ORANGE: 4, // offerte dès 4 kits à Orange
+} as const;
+```
+
+#### Utilisation dans la vitrine
+
+**Option A (recommandée par le PM) :** La vitrine importe `CATALOG_DEFAULTS` et `SUBSCRIPTION_DEFAULTS` depuis `@lingengo/shared` — les valeurs affichées dans `tarifs.tsx` et `devis/page.tsx` sont ainsi toujours synchronisées avec le seed. Si les prix changent en prod (via admin), la vitrine reste désynchronisée (les prix vitrine = valeurs de départ, pas les valeurs courantes de la DB) — ce comportement est acceptable en V1 avec une note d'avertissement dans le code.
+
+**Option B :** La vitrine appelle l'API publique pour afficher les prix temps réel — scope élargi, V2.
+
+L'architecte tranche entre A et B.
+
+#### Critères d'acceptation
+
+**AC-F7-01 — Suppression des constantes périmées**
+
+- **Given** `packages/shared/src/constants.ts` a été mis à jour
+- **When** `tsc --noEmit` est lancé sur le monorepo
+- **Then** aucune référence à `PRICE_PER_SET_CENTS` ou `SUBSCRIPTION_PLANS` ne persiste dans le code (ou elles sont marquées `@deprecated` avec un commentaire explicite et aucun nouveau code ne les utilise)
+
+**AC-F7-02 — Le seed utilise les constantes partagées**
+
+- **Given** le fichier de seed de la DB (`packages/database/prisma/seed.ts` ou équivalent) est mis à jour
+- **When** `prisma db seed` est exécuté sur une base vide
+- **Then** 9 produits sont créés avec les prix de `CATALOG_DEFAULTS` et un `SubscriptionConfig` est créé avec les valeurs de `SUBSCRIPTION_DEFAULTS`
+
+**AC-F7-03 — La vitrine affiche les prix corrects**
+
+- **Given** `tarifs.tsx` et `devis/page.tsx` ont été mis à jour pour utiliser `CATALOG_DEFAULTS`
+- **When** la vitrine est déployée
+- **Then** Kit Bain affiché = 7,50 € (750 centimes), Kit Lit = 16,50 €, Kit Complet = 22,00 €, Pack Sérénité = 89 €/mois
+
+**Règles métier :**
+
+- Les constantes partagées servent uniquement de **valeurs par défaut** pour le seeding ; les prix en production sont ceux de la DB (paramétrables via admin)
+- `@lingengo/shared` reste sans dépendance React (pas de composants, pas de PDF)
+- Les nouvelles constantes ont des noms explicites en français pour les prix métier (non en anglais technique)
+
+---
+
+### F8 — Migration des données existantes
+
+**Priorité :** Must Have (bloquant pour la mise en production)
+**Persona concerné :** Admin opérateur (intégrité des données prod)
+**Job-to-be-done :** Quand je déploie la refonte catalogue, je veux que le client réel existant (abonnement PRESTIGE) soit migré proprement, sans perte de données et sans rupture de service sur l'app mobile.
+
+#### État prod connu
+
+- 1 client réel avec `Subscription.plan = PRESTIGE`, statut ACTIVE
+- Des commandes de démonstration (`Order`) avec `OrderItem` référençant les anciens produits
+- Des `ClientStock` et `OperatorStock` par `ProductRange` (CONFORT/HOTEL/PRESTIGE)
+- Des `StockMovement` par `productRange`
+
+#### Stratégie de migration (à valider par l'architecte)
+
+**Phase 1 — Migration Prisma additive (sans rupture) :**
+
+1. Ajouter les nouvelles colonnes sur `Subscription` : `priceCents`, `minEngagementMonths`, `committedUntil`, `kitBainQty`, `kitLitQty`
+2. Ajouter la table `SubscriptionConfig`
+3. Créer les nouveaux produits (Kit Bain, Kit Lit, etc.) en DB sans supprimer les anciens
+
+**Phase 2 — Migration des données :**
+
+1. Script de migration : mapper le client PRESTIGE → Pack Sérénité (priceCents=8900, kitBainQty=8, kitLitQty=4)
+2. Calculer `committedUntil` pour le client existant : soit `now() + 3 mois` (engagement imposé rétroactivement), soit exempter le client existant de l'engagement minimum (décision propriétaire)
+3. Les commandes de démo existantes gardent leurs `OrderItem.productId` — si les anciens produits sont désactivés (pas supprimés), les références restent valides
+
+**Phase 3 — Nettoyage (post-validation) :**
+
+1. Désactiver (soft-delete) les anciens produits CONFORT/HOTEL/PRESTIGE
+2. Déprécier l'enum `SubscriptionPlan` (ou le conserver pour compatibilité)
+
+#### Critères d'acceptation
+
+**AC-F8-01 — Migration sans perte sur le client réel**
+
+- **Given** le script de migration est exécuté en production
+- **When** le client réel se connecte à l'app mobile après migration
+- **Then** il voit son abonnement actif avec les nouvelles informations (Pack Sérénité, prix, composition), ses commandes historiques sont toujours accessibles, et son stock actuel est inchangé
+
+**AC-F8-02 — Rollback possible**
+
+- **Given** la migration Phase 1 a été appliquée (colonnes additives)
+- **When** un problème est détecté et la migration Phase 2 n'a pas encore tourné
+- **Then** un rollback Prisma est possible sans perte de données (colonnes nullable avec défaut)
+
+**AC-F8-03 — Décision engagement client existant documentée**
+
+- **Given** le script de migration est écrit
+- **When** il traite le client PRESTIGE existant
+- **Then** le comportement est explicite dans le script : soit `committedUntil = null` (exempté, résiliation libre), soit `committedUntil = now() + 3 mois` (engagement imposé) — le propriétaire doit valider ce choix avant exécution en prod
+
+**Règles métier :**
+
+- Aucune donnée de commande historique ne doit être supprimée
+- Le client réel ne doit pas subir d'interruption de service pendant la migration
+- Les `StockMovement` et `ClientStock` existants (par `productRange`) restent valides — la refonte catalogue n'oblige pas à migrer le stock si l'architecte maintient la compatibilité des modèles de stock
+- Le propriétaire doit valider manuellement le choix d'engagement du client existant (AC-F8-03)
+
+---
+
 ## Navigation & structure des pages admin
 
 ### Nouvelles entrées sidebar (à ajouter à src/components/sidebar.tsx)
@@ -416,6 +766,7 @@ QuoteStatus: BROUILLON | ENVOYE | ACCEPTE | REFUSE | EXPIRE
 | Commandes    | /commandes    | ShoppingCart | newCount PENDING | ROLE_ADMIN   |
 | Utilisateurs | /utilisateurs | Users        | -                | ROLE_ADMIN   |
 | Réglages     | /reglages     | Settings     | -                | ROLE_ADMIN   |
+| Produits     | /produits     | Package      | -                | ROLE_ADMIN   |
 
 ### Nouvelles routes (app/(dashboard)/)
 
@@ -428,24 +779,41 @@ QuoteStatus: BROUILLON | ENVOYE | ACCEPTE | REFUSE | EXPIRE
 /utilisateurs/nouveau     → formulaire création
 /utilisateurs/[id]        → fiche utilisateur + actions désactiver/reset-password
 /reglages                 → page tabbed : Zones | Opérateur | Alertes stock
+/produits                 → liste produits avec prix + bouton "Modifier"
+/produits/[id]/modifier   → formulaire édition prix/nom/description
 ```
+
+---
+
+## Écrans mobiles impactés
+
+| Écran actuel                      | Changement requis                                                                                        |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Écran catalogue / passer commande | Afficher kits (Kit Bain, Kit Lit, Kit Complet) + articles unitaires avec prix depuis `/products`         |
+| Écran abonnement                  | Afficher Pack Sérénité (89 €/mois), composition (8+4), engagement 3 mois, `committedUntil`               |
+| Écran stock                       | Compatible avec les nouveaux produits UUID — à vérifier si `ClientStock` par `productRange` reste valide |
+| Écran commandes (historique)      | Afficher `product.name` depuis `OrderItem.product` — pas de changement de logique, juste les données     |
+| Écran résiliation                 | Bloquer UI si `committedUntil` non atteinte, afficher date de résiliation autorisée                      |
 
 ---
 
 ## Exigences non-fonctionnelles
 
-| Catégorie         | Exigence                                                                                | Mesure                  |
-| ----------------- | --------------------------------------------------------------------------------------- | ----------------------- |
-| Performance       | Listes paginées (max 25 items/page), chargement page < 3s                               | LCP Lighthouse > 90     |
-| Performance PDF   | Génération PDF côté client en < 5s pour un devis de 20 lignes                           | Mesure manuelle         |
-| Sécurité          | Tous les endpoints /admin/\* requièrent ROLE_ADMIN ou ROLE_SUPER_ADMIN                  | Tests Fastify injection |
-| Sécurité          | Mot de passe provisoire jamais loggué, affiché une seule fois                           | Review code + audit     |
-| Sécurité          | AuditLog sur toutes les mutations admin/quotes, admin/users, admin/settings             | Vérification en base    |
-| Accessibilité     | WCAG 2.1 AA — formulaires avec labels, focus visible, messages d'erreur liés            | Audit axe-core          |
-| Mobile            | Interface admin responsive sur 768px minimum (tablette, usage terrain)                  | Tests visuels 768px     |
-| Intégrité données | Prix en centimes (Int), jamais en flottants                                             | Review code TypeScript  |
-| RGPD              | Mot de passe provisoire non persisté en clair, logs sans données personnelles sensibles | Audit code              |
-| TypeScript        | Strict mode, zéro `any` explicite, Zod sur tous les inputs API                          | tsc --noEmit            |
+| Catégorie         | Exigence                                                                                          | Mesure                  |
+| ----------------- | ------------------------------------------------------------------------------------------------- | ----------------------- |
+| Performance       | Listes paginées (max 25 items/page), chargement page < 3s                                         | LCP Lighthouse > 90     |
+| Performance PDF   | Génération PDF côté client en < 5s pour un devis de 20 lignes                                     | Mesure manuelle         |
+| Sécurité          | Tous les endpoints /admin/\* requièrent ROLE_ADMIN ou ROLE_SUPER_ADMIN                            | Tests Fastify injection |
+| Sécurité          | Mot de passe provisoire jamais loggué, affiché une seule fois                                     | Review code + audit     |
+| Sécurité          | AuditLog sur toutes les mutations admin (quotes, users, settings, products, subscriptions/config) | Vérification en base    |
+| Sécurité          | Blocage résiliation avant `committedUntil` côté API (pas seulement côté mobile)                   | Test automatisé         |
+| Accessibilité     | WCAG 2.1 AA — formulaires avec labels, focus visible, messages d'erreur liés                      | Audit axe-core          |
+| Mobile            | Interface admin responsive sur 768px minimum (tablette, usage terrain)                            | Tests visuels 768px     |
+| Mobile app        | Écrans mobiles impactés utilisent l'API pour tous les prix (zéro valeur en dur)                   | Review code mobile      |
+| Intégrité données | Prix en centimes (Int), jamais en flottants                                                       | Review code TypeScript  |
+| RGPD              | Mot de passe provisoire non persisté en clair, logs sans données personnelles sensibles           | Audit code              |
+| TypeScript        | Strict mode, zéro `any` explicite, Zod sur tous les inputs API                                    | tsc --noEmit            |
+| Migration         | Phase 1 additive uniquement (nullable/default), rollback Prisma possible                          | Test sur staging        |
 
 ---
 
@@ -454,33 +822,52 @@ QuoteStatus: BROUILLON | ENVOYE | ACCEPTE | REFUSE | EXPIRE
 - Temps moyen de création d'un devis (du clic "Nouveau" à l'enregistrement) < 3 minutes
 - Taux de commandes PENDING traitées (confirmées ou refusées) dans les 24h > 90%
 - Zéro création de compte utilisateur nécessitant un accès direct BDD après mise en production
-- Nombre de devis convertis en commandes / total devis acceptés > 80% (mesure de l'adoption du workflow)
+- Nombre de devis convertis en commandes / total devis acceptés > 80%
 - Page /devis charge en < 3s avec 200 devis en base
+- Zéro désynchronisation entre prix vitrine et prix mobile au lancement (validated par QA)
+- Zéro appel de résiliation bloqué par un bug (doit l'être uniquement par la règle métier engagement 3 mois)
 
 ---
 
 ## Hypothèses
 
-- On assume que l'opérateur Linge Serein est une micro-entreprise (TVA non applicable par défaut, art. 293 B CGI) — le toggle TVA permet de passer en régime normal si statut change
-- On assume que l'envoi du devis par email se fait manuellement (l'admin télécharge le PDF et l'envoie depuis son client mail) en V1
-- On assume que le modèle Operator existe déjà en base avec au moins un enregistrement (l'app est mono-opérateur en V1)
-- On assume que la table DeliveryZone existe déjà avec le champ postalCodes (tableau de strings) — à vérifier au moment du schéma Prisma
-- On assume que le champ `source` n'existe pas encore sur le modèle Order et devra être ajouté (enum: MOBILE | QUOTE_CONVERSION | MANUAL)
-- On assume que le badge "nouvelles demandes" peut être implémenté via un comptage simple côté API sans système de "marque-lu" complexe en V1 (simple count des PENDING)
-- On assume que les livreurs n'ont pas accès à l'interface admin-web (apps/admin-web) — leur interface est apps/mobile
-- On assume que react-pdf (@react-pdf/renderer) est déjà disponible dans le workspace (utilisé dans apps/vitrine) et sera partagé via le package @lingengo/ui ou importé directement dans apps/admin-web
-- On assume un volume max de 500 devis et 2000 utilisateurs en V1 (pas de besoin de sharding ou index complexes)
-- market.md absent — analyse marché non disponible ; les priorités sont basées sur les besoins opérationnels exprimés
+- On assume que l'opérateur Linge Serein est une micro-entreprise (TVA non applicable par défaut, art. 293 B CGI)
+- On assume que l'envoi du devis par email se fait manuellement en V1
+- On assume que le modèle Operator a au moins un enregistrement en production
+- La contrainte `unique([operatorId, category, range])` sur `Product` devra être levée ou adaptée pour accueillir les nouveaux types de produits (KITS) — décision architecturale
+- On assume que les `StockMovement` et `ClientStock` continuent d'opérer par `ProductRange` en V1 (modèle stock non refactorisé dans cette spec) — si l'architecte juge une refonte nécessaire pour la cohérence, c'est hors scope V1
+- On assume que le client réel avec abonnement PRESTIGE acceptera d'être migré vers Pack Sérénité — le propriétaire doit le confirmer avant exécution du script
+- On assume que la décision d'engagement pour le client existant (exempté ou 3 mois imposés rétroactivement) sera validée par le propriétaire avant la migration prod
+- On assume que `apps/vitrine` peut importer depuis `@lingengo/shared` (Turborepo, Next.js) — à vérifier par l'architecte si le build vitrine inclut déjà `@lingengo/shared` dans ses deps
+- market.md absent — analyse marché non disponible
+
+---
+
+## Décisions ouvertes pour l'architecte
+
+Ces points ont un impact fort sur le schéma Prisma et l'app mobile — le PM pose les contraintes fonctionnelles, l'architecte tranche :
+
+1. **Sort de `ProductCategory` et `ProductRange`** : Le nouveau catalogue KITS ne correspond pas aux valeurs actuelles (SERVIETTES/DRAPS/etc. × CONFORT/HOTEL/PRESTIGE). Options : (a) étendre les enums avec KIT_BAIN/KIT_LIT/KIT_COMPLET/ARTICLE_UNITAIRE dans `ProductCategory` et supprimer `ProductRange` comme discriminant principal, (b) abandonner la contrainte `unique([operatorId, category, range])` et utiliser un simple `slug` unique, (c) refonte complète du modèle `Product` avec un champ `type: ProductType` (KIT | ARTICLE). Contrainte fonctionnelle : le mobile doit pouvoir distinguer kits et articles unitaires pour l'affichage.
+
+2. **Stockage `SubscriptionConfig`** : Table dédiée, extension `Operator`, ou JSON dans `Operator`. Contrainte : paramétrable sans redéploiement, versionnable (snapshot à la souscription).
+
+3. **`SubscriptionPlan` enum** : Déprécier ou conserver ? Le client réel a `plan = PRESTIGE` aujourd'hui. Si on conserve l'enum, la migration du client vers le nouveau modèle est plus simple (pas de suppression de valeur enum Postgres).
+
+4. **Modèles de stock** (`ClientStock`, `OperatorStock` par `ProductRange`, `StockMovement` par `productRange`) : Sont-ils à migrer vers un modèle par `productId` ? Fonctionnellement, le stock en V1 reste agrégé par gamme (pas par article individuel). Si les kits ne correspondent à aucune `ProductRange` existante, il faudra soit étendre l'enum `ProductRange`, soit adapter le modèle stock.
+
+5. **Vitrine et prix temps réel** : Option A (constantes partagées, désynchronisation acceptée) vs Option B (appel API, prix temps réel). Le PM recommande Option A pour la V1.
 
 ---
 
 ## Risques identifiés
 
-| Risque                                                                       | Probabilité | Impact | Mitigation                                                                            |
-| ---------------------------------------------------------------------------- | ----------- | ------ | ------------------------------------------------------------------------------------- |
-| Génération PDF lente côté client pour gros devis                             | Faible      | Moyen  | Limiter à 50 lignes par devis V1, ajouter loading state                               |
-| Migration Prisma bloquante (ajout Quote, modification Order)                 | Moyen       | Haut   | Migration additive uniquement (nouveaux champs nullable), tester sur base de staging  |
-| Réutilisation de logique devis depuis apps/vitrine (composants non packagés) | Moyen       | Moyen  | Extraire computeDevisTotals dans @lingengo/ui ou packages/shared avant implémentation |
-| Scope creep sur F4 Réglages (demandes d'ajout de configs)                    | Haut        | Moyen  | Spec signée, V2 explicitement documentée pour toute config non listée                 |
-| Sécurité : endpoint /admin/users exposant des données sensibles              | Faible      | Haut   | Jamais retourner passwordHash, audit du DTO de réponse, test unitaire dédié           |
-| Conflit de nommage routes /admin/\* avec routes existantes                   | Faible      | Moyen  | Vérifier le router Fastify existant avant implémentation                              |
+| Risque                                                                                 | Probabilité | Impact | Mitigation                                                                                              |
+| -------------------------------------------------------------------------------------- | ----------- | ------ | ------------------------------------------------------------------------------------------------------- |
+| Contrainte `unique([operatorId, category, range])` incompatible avec le catalogue KITS | Haut        | Haut   | L'architecte doit trancher l'approche avant tout développement (voir Décisions ouvertes n°1)            |
+| Migration prod du client réel introduit une rupture de service mobile                  | Moyen       | Haut   | Migration en phase (additive d'abord), test sur staging avec dump prod, rollback Prisma disponible      |
+| Désynchronisation prix vitrine vs DB prod si l'Option B n'est pas choisie              | Moyen       | Moyen  | Option A avec avertissement visible dans le code + process de mise à jour synchronisée                  |
+| Client réel refuse ou ignore le passage à l'engagement 3 mois imposé rétroactivement   | Faible      | Moyen  | Prévoir les deux cas dans le script de migration (exempté ou engagement imposé) — choix du propriétaire |
+| `StockMovement` par `productRange` devient incohérent si les enums changent            | Moyen       | Moyen  | Ne pas modifier les enums de stock en V1 — extension additive uniquement                                |
+| Scope creep sur la refonte stock (tentant de tout aligner sur les nouveaux produits)   | Haut        | Moyen  | Stock V1 = modèle conservé, seul le catalogue produit/abonnement est refactorisé                        |
+| Génération PDF lente côté client pour gros devis                                       | Faible      | Moyen  | Limiter à 50 lignes par devis V1                                                                        |
+| Sécurité : endpoint /admin/users exposant des données sensibles                        | Faible      | Haut   | Jamais retourner passwordHash, audit du DTO de réponse                                                  |

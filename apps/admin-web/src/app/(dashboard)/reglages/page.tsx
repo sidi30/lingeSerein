@@ -14,9 +14,10 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/lib/toast";
 import { centsToEuros, eurosToCents } from "@/lib/format";
 import type { DeliveryZoneDTO, OperatorDTO, StockThresholdDTO } from "@/lib/types";
-import { Plus, Edit, Trash2, MapPin, Building2, Package } from "lucide-react";
+import { Plus, Edit, Trash2, MapPin, Building2, Package, RefreshCw } from "lucide-react";
+import type { SubscriptionConfigDTO } from "@/lib/types";
 
-type Tab = "zones" | "operateur" | "stock";
+type Tab = "zones" | "operateur" | "stock" | "abonnement";
 
 const inputCls =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500";
@@ -472,9 +473,11 @@ function StockTab() {
         >
           <div>
             <p className="text-sm font-medium text-gray-900">{p.name}</p>
-            <p className="text-xs text-gray-500">
-              {p.range} · {p.category}
-            </p>
+            {[p.range, p.category].filter(Boolean).length > 0 && (
+              <p className="text-xs text-gray-500">
+                {[p.range, p.category].filter(Boolean).join(" · ")}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <input
@@ -504,12 +507,237 @@ function StockTab() {
   );
 }
 
+/* ─── Abonnement Pack Sérénité ─── */
+
+const subscriptionConfigSchema = z.object({
+  priceCents: z.coerce
+    .number({ invalid_type_error: "Valeur requise" })
+    .min(0, "Le prix ne peut pas être négatif"),
+  kitBainQty: z.coerce
+    .number({ invalid_type_error: "Valeur requise" })
+    .int()
+    .min(0, "La valeur doit être supérieure ou égale à 0"),
+  kitLitQty: z.coerce
+    .number({ invalid_type_error: "Valeur requise" })
+    .int()
+    .min(0, "La valeur doit être supérieure ou égale à 0"),
+  minEngagementMonths: z.coerce
+    .number({ invalid_type_error: "Valeur requise" })
+    .int()
+    .min(0, "La durée d'engagement minimale doit être supérieure ou égale à 0"),
+  noticePeriodDays: z.coerce
+    .number({ invalid_type_error: "Valeur requise" })
+    .int()
+    .min(0, "La valeur doit être supérieure ou égale à 0"),
+});
+type SubscriptionConfigValues = z.infer<typeof subscriptionConfigSchema>;
+
+function AbonnementTab() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: config, isLoading } = useQuery({
+    queryKey: ["subscription-config-admin"],
+    queryFn: () => api.get<SubscriptionConfigDTO>("/subscriptions/config/admin"),
+  });
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<SubscriptionConfigValues>({
+    resolver: zodResolver(subscriptionConfigSchema),
+    values: config
+      ? {
+          priceCents: config.priceCents,
+          kitBainQty: config.kitBainQty,
+          kitLitQty: config.kitLitQty,
+          minEngagementMonths: config.minEngagementMonths,
+          noticePeriodDays: config.noticePeriodDays,
+        }
+      : undefined,
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (values: SubscriptionConfigValues) =>
+      api.patch<SubscriptionConfigDTO>("/subscriptions/config/admin", {
+        priceCents: values.priceCents,
+        kitBainQty: values.kitBainQty,
+        kitLitQty: values.kitLitQty,
+        minEngagementMonths: values.minEngagementMonths,
+        noticePeriodDays: values.noticePeriodDays,
+      }),
+    onSuccess: () => {
+      toast("Configuration abonnement enregistrée");
+      queryClient.invalidateQueries({ queryKey: ["subscription-config-admin"] });
+    },
+    onError: (err: unknown) => {
+      toast(err instanceof Error ? err.message : "Erreur lors de l'enregistrement", "error");
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="animate-pulse space-y-4 max-w-xl">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="h-10 rounded-lg bg-gray-100" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-xl space-y-6">
+      {/* Info */}
+      <div className="rounded-xl border border-primary-100 bg-primary-50 p-4">
+        <p className="text-sm font-medium text-primary-800">Pack Sérénité</p>
+        <p className="mt-1 text-xs text-primary-700">
+          Ces paramètres s&apos;appliquent aux <strong>nouvelles souscriptions</strong> uniquement.
+          Les abonnements en cours conservent leurs valeurs d&apos;origine (snapshots immuables).
+        </p>
+        {config && (
+          <p className="mt-2 text-xs text-primary-600">
+            Dernière modification :{" "}
+            {new Date(config.updatedAt).toLocaleDateString("fr-FR", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </p>
+        )}
+      </div>
+
+      <form
+        onSubmit={handleSubmit((v: SubscriptionConfigValues) => updateMutation.mutate(v))}
+        className="space-y-5"
+      >
+        {/* Prix */}
+        <div>
+          <label className={labelCls} htmlFor="sub-price">
+            Prix mensuel (centimes) *
+          </label>
+          <input
+            id="sub-price"
+            type="number"
+            min={0}
+            className={inputCls}
+            placeholder="8900"
+            {...register("priceCents")}
+          />
+          {errors.priceCents && <p className={errorCls}>{errors.priceCents.message}</p>}
+          {!errors.priceCents && config && (
+            <p className="mt-1 text-xs text-gray-400">
+              Affiché :{" "}
+              {(config.priceCents / 100).toLocaleString("fr-FR", {
+                style: "currency",
+                currency: "EUR",
+              })}
+              /mois
+            </p>
+          )}
+        </div>
+
+        {/* Composition */}
+        <fieldset className="space-y-4">
+          <legend className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Composition mensuelle incluse
+          </legend>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls} htmlFor="sub-kit-bain">
+                Kits Bain / mois *
+              </label>
+              <input
+                id="sub-kit-bain"
+                type="number"
+                min={0}
+                className={inputCls}
+                placeholder="8"
+                {...register("kitBainQty")}
+              />
+              {errors.kitBainQty && <p className={errorCls}>{errors.kitBainQty.message}</p>}
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="sub-kit-lit">
+                Kits Lit / mois *
+              </label>
+              <input
+                id="sub-kit-lit"
+                type="number"
+                min={0}
+                className={inputCls}
+                placeholder="4"
+                {...register("kitLitQty")}
+              />
+              {errors.kitLitQty && <p className={errorCls}>{errors.kitLitQty.message}</p>}
+            </div>
+          </div>
+        </fieldset>
+
+        {/* Engagement */}
+        <fieldset className="space-y-4">
+          <legend className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Conditions d&apos;engagement
+          </legend>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls} htmlFor="sub-engagement">
+                Engagement minimum (mois) *
+              </label>
+              <input
+                id="sub-engagement"
+                type="number"
+                min={0}
+                className={inputCls}
+                placeholder="3"
+                {...register("minEngagementMonths")}
+              />
+              {errors.minEngagementMonths && (
+                <p className={errorCls}>{errors.minEngagementMonths.message}</p>
+              )}
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="sub-notice">
+                Préavis résiliation (jours) *
+              </label>
+              <input
+                id="sub-notice"
+                type="number"
+                min={0}
+                className={inputCls}
+                placeholder="30"
+                {...register("noticePeriodDays")}
+              />
+              {errors.noticePeriodDays && (
+                <p className={errorCls}>{errors.noticePeriodDays.message}</p>
+              )}
+            </div>
+          </div>
+        </fieldset>
+
+        <div className="flex justify-end">
+          <Button type="submit" loading={isSubmitting || updateMutation.isPending}>
+            Enregistrer la configuration
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 /* ─── Page principale ─── */
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "zones", label: "Zones de livraison", icon: <MapPin className="h-4 w-4" /> },
   { id: "operateur", label: "Informations opérateur", icon: <Building2 className="h-4 w-4" /> },
   { id: "stock", label: "Alertes stock", icon: <Package className="h-4 w-4" /> },
+  {
+    id: "abonnement",
+    label: "Pack Sérénité",
+    icon: <RefreshCw className="h-4 w-4" />,
+  },
 ];
 
 export default function ReglagesPage() {
@@ -557,6 +785,7 @@ export default function ReglagesPage() {
           {activeTab === "zones" && <ZonesTab />}
           {activeTab === "operateur" && <OperateurTab />}
           {activeTab === "stock" && <StockTab />}
+          {activeTab === "abonnement" && <AbonnementTab />}
         </div>
       </div>
     </>

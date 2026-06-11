@@ -1,14 +1,38 @@
+/**
+ * Seed V2 — Linge Serein
+ * -----------------------
+ * Ce seed est idempotent (upsert sur toutes les entités à clé stable).
+ * Il reflète le nouveau modèle commercial V2 :
+ *   - 9 produits canoniques (3 kits + 6 articles unitaires) depuis CATALOG_PRODUCTS
+ *   - SubscriptionConfig Pack Sérénité (SUBSCRIPTION_DEFAULTS)
+ *   - Abonnement démo client réel = Pack Sérénité (priceCents 8900, minEngagementMonths 3)
+ *   - ClientStock / OperatorStock conservés par ProductRange (ADR-V2-004)
+ *   - Orders démo adaptées aux nouveaux produits KIT_*
+ *
+ * Prérequis : SEED_USERS_PASSWORD doit être défini dans l'environnement.
+ * Comptes réels (jamais modifier) :
+ *   sirtecnologie@gmail.com (admin), sidi@gmail.com (livreur), autressir@gmail.com (client)
+ */
+
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
+import { CATALOG_PRODUCTS, SUBSCRIPTION_DEFAULTS, addMonths } from "@lingengo/shared";
 
 const prisma = new PrismaClient();
-
 const BCRYPT_ROUNDS = 12;
 
 async function main() {
-  console.log("Seeding database...");
+  console.log("Seeding database (V2)...");
 
-  // ---- Operator ----
+  // ---- Mot de passe seed -----------------------------------------------------
+  const seedPassword = process.env["SEED_USERS_PASSWORD"];
+  if (!seedPassword) {
+    throw new Error("SEED_USERS_PASSWORD manquant — export la variable avant de lancer le seed.");
+  }
+  const realUserHash = await bcrypt.hash(seedPassword, BCRYPT_ROUNDS);
+  const driverPinHash = await bcrypt.hash("123456", BCRYPT_ROUNDS);
+
+  // ---- Operator ---------------------------------------------------------------
   const operator = await prisma.operator.upsert({
     where: { email: "contact@lingengo-vaucluse.fr" },
     update: {},
@@ -23,8 +47,7 @@ async function main() {
 
   console.log(`  Operator: ${operator.name}`);
 
-  // ---- Delivery Zones ----
-  // No unique field beyond id, so we use findFirst + conditional create
+  // ---- Delivery Zones ---------------------------------------------------------
   let zone1 = await prisma.deliveryZone.findFirst({
     where: { operatorId: operator.id, name: "Avignon & environs" },
   });
@@ -55,7 +78,7 @@ async function main() {
 
   console.log(`  Delivery Zones: ${zone1.name}, ${zone2.name}`);
 
-  // ---- Service Types ----
+  // ---- Service Types ----------------------------------------------------------
   const serviceLocation = await prisma.serviceType.upsert({
     where: { kind: "LOCATION" },
     update: {},
@@ -67,7 +90,7 @@ async function main() {
     },
   });
 
-  const serviceVente = await prisma.serviceType.upsert({
+  await prisma.serviceType.upsert({
     where: { kind: "VENTE" },
     update: {},
     create: {
@@ -78,7 +101,7 @@ async function main() {
     },
   });
 
-  const serviceEntretien = await prisma.serviceType.upsert({
+  await prisma.serviceType.upsert({
     where: { kind: "ENTRETIEN" },
     update: {},
     create: {
@@ -91,145 +114,81 @@ async function main() {
 
   console.log("  Service Types: LOCATION, VENTE, ENTRETIEN");
 
-  // ---- Products ----
-  // Unique constraint: @@unique([operatorId, category, range])
-  // 6 products: SERVIETTES x 3 ranges + TAPIS_BAIN x 3 ranges
-  const confortServiettes = await prisma.product.upsert({
-    where: {
-      operatorId_category_range: {
-        operatorId: operator.id,
-        category: "SERVIETTES",
-        range: "CONFORT",
-      },
-    },
-    update: {},
-    create: {
-      operatorId: operator.id,
-      serviceTypeId: serviceLocation.id,
-      category: "SERVIETTES",
-      range: "CONFORT",
-      name: "Set serviettes Confort - Coton 500g",
-      description: "Set de serviettes gamme Confort, coton 500g/m2",
-      priceCents: 600,
-      attributes: { grammage: 500, matiere: "Coton", dimensions: "50x100cm + 70x140cm" },
-      isActive: true,
-    },
+  // ---- Products V2 : 9 produits canoniques ------------------------------------
+  // Clé d'upsert : slug (unique, ignoré par Postgres pour les NULL — les anciens
+  // produits sans slug restent intacts et peuvent être soft-deletés par migrate-v2-data.ts).
+  const productMap: Record<string, string> = {}; // slug -> id
+
+  for (const def of CATALOG_PRODUCTS) {
+    // L'upsert Prisma sur slug nullable nécessite findFirst + create/update
+    // car Prisma ne supporte pas upsert sur un champ nullable unique.
+    let product = await prisma.product.findFirst({
+      where: { slug: def.slug },
+    });
+
+    if (product) {
+      product = await prisma.product.update({
+        where: { id: product.id },
+        data: {
+          kind: def.kind as "KIT" | "ARTICLE",
+          name: def.name,
+          description: def.description,
+          priceCents: def.priceCents,
+          category: def.category ?? null,
+          range: null,
+          isActive: true,
+          deletedAt: null,
+          serviceTypeId: serviceLocation.id,
+          operatorId: operator.id,
+        },
+      });
+    } else {
+      product = await prisma.product.create({
+        data: {
+          operatorId: operator.id,
+          serviceTypeId: serviceLocation.id,
+          slug: def.slug,
+          kind: def.kind as "KIT" | "ARTICLE",
+          name: def.name,
+          description: def.description,
+          priceCents: def.priceCents,
+          category: def.category ?? null,
+          range: null,
+          isActive: true,
+          attributes: {},
+        },
+      });
+    }
+
+    productMap[def.slug] = product.id;
+  }
+
+  console.log("  Products: 9 canoniques (3 kits + 6 articles)");
+
+  // ---- SubscriptionConfig Pack Sérénité ---------------------------------------
+  const existingConfig = await prisma.subscriptionConfig.findUnique({
+    where: { operatorId: operator.id },
   });
 
-  const hotelServiettes = await prisma.product.upsert({
-    where: {
-      operatorId_category_range: {
+  if (!existingConfig) {
+    await prisma.subscriptionConfig.create({
+      data: {
         operatorId: operator.id,
-        category: "SERVIETTES",
-        range: "HOTEL",
+        planName: SUBSCRIPTION_DEFAULTS.PLAN_NAME,
+        priceCents: SUBSCRIPTION_DEFAULTS.PRICE_CENTS,
+        kitBainQty: SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY,
+        kitLitQty: SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY,
+        minEngagementMonths: SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS,
+        noticePeriodDays: SUBSCRIPTION_DEFAULTS.NOTICE_PERIOD_DAYS,
+        isActive: true,
       },
-    },
-    update: {},
-    create: {
-      operatorId: operator.id,
-      serviceTypeId: serviceLocation.id,
-      category: "SERVIETTES",
-      range: "HOTEL",
-      name: "Set serviettes Hotel - Coton peigne 550g",
-      description: "Set de serviettes gamme Hotel, coton peigne 550g/m2",
-      priceCents: 900,
-      attributes: { grammage: 550, matiere: "Coton peigne", dimensions: "50x100cm + 70x140cm" },
-      isActive: true,
-    },
-  });
+    });
+    console.log("  SubscriptionConfig: Pack Sérénité créée");
+  } else {
+    console.log("  SubscriptionConfig: déjà existante");
+  }
 
-  const prestigeServiettes = await prisma.product.upsert({
-    where: {
-      operatorId_category_range: {
-        operatorId: operator.id,
-        category: "SERVIETTES",
-        range: "PRESTIGE",
-      },
-    },
-    update: {},
-    create: {
-      operatorId: operator.id,
-      serviceTypeId: serviceLocation.id,
-      category: "SERVIETTES",
-      range: "PRESTIGE",
-      name: "Set serviettes Prestige - Coton egyptien 600g",
-      description: "Set de serviettes gamme Prestige, coton egyptien 600g/m2",
-      priceCents: 1400,
-      attributes: { grammage: 600, matiere: "Coton egyptien", dimensions: "50x100cm + 70x140cm" },
-      isActive: true,
-    },
-  });
-
-  const _confortTapis = await prisma.product.upsert({
-    where: {
-      operatorId_category_range: {
-        operatorId: operator.id,
-        category: "TAPIS_BAIN",
-        range: "CONFORT",
-      },
-    },
-    update: {},
-    create: {
-      operatorId: operator.id,
-      serviceTypeId: serviceVente.id,
-      category: "TAPIS_BAIN",
-      range: "CONFORT",
-      name: "Tapis de bain Confort - Coton 500g",
-      description: "Tapis de bain gamme Confort, coton 500g/m2",
-      priceCents: 600,
-      attributes: { grammage: 500, matiere: "Coton", dimensions: "50x80cm" },
-      isActive: true,
-    },
-  });
-
-  const _hotelTapis = await prisma.product.upsert({
-    where: {
-      operatorId_category_range: {
-        operatorId: operator.id,
-        category: "TAPIS_BAIN",
-        range: "HOTEL",
-      },
-    },
-    update: {},
-    create: {
-      operatorId: operator.id,
-      serviceTypeId: serviceVente.id,
-      category: "TAPIS_BAIN",
-      range: "HOTEL",
-      name: "Tapis de bain Hotel - Coton peigne 550g",
-      description: "Tapis de bain gamme Hotel, coton peigne 550g/m2",
-      priceCents: 900,
-      attributes: { grammage: 550, matiere: "Coton peigne", dimensions: "50x80cm" },
-      isActive: true,
-    },
-  });
-
-  const _prestigeTapis = await prisma.product.upsert({
-    where: {
-      operatorId_category_range: {
-        operatorId: operator.id,
-        category: "TAPIS_BAIN",
-        range: "PRESTIGE",
-      },
-    },
-    update: {},
-    create: {
-      operatorId: operator.id,
-      serviceTypeId: serviceEntretien.id,
-      category: "TAPIS_BAIN",
-      range: "PRESTIGE",
-      name: "Tapis de bain Prestige - Coton egyptien 600g",
-      description: "Tapis de bain gamme Prestige, coton egyptien 600g/m2",
-      priceCents: 1400,
-      attributes: { grammage: 600, matiere: "Coton egyptien", dimensions: "50x80cm" },
-      isActive: true,
-    },
-  });
-
-  console.log("  Products: 6 (SERVIETTES x3 + TAPIS_BAIN x3)");
-
-  // ---- Delivery Schedules ----
-  // Zone 1: Monday (1) + Thursday (4)
+  // ---- Delivery Schedules -----------------------------------------------------
   for (const day of [1, 4]) {
     await prisma.deliverySchedule.upsert({
       where: { zoneId_dayOfWeek: { zoneId: zone1.id, dayOfWeek: day } },
@@ -243,8 +202,6 @@ async function main() {
       },
     });
   }
-
-  // Zone 2: Tuesday (2) + Friday (5)
   for (const day of [2, 5]) {
     await prisma.deliverySchedule.upsert({
       where: { zoneId_dayOfWeek: { zoneId: zone2.id, dayOfWeek: day } },
@@ -261,17 +218,7 @@ async function main() {
 
   console.log("  Delivery Schedules: Mon+Thu (zone 1), Tue+Fri (zone 2)");
 
-  // ---- Users ----
-  // Comptes réels : mot de passe commun lu depuis SEED_USERS_PASSWORD (jamais en dur)
-  // client2/client3 = fixtures démo inactives (login impossible)
-  const seedPassword = process.env.SEED_USERS_PASSWORD;
-  if (!seedPassword) {
-    throw new Error("SEED_USERS_PASSWORD manquant — export la variable avant de lancer le seed.");
-  }
-  const realUserHash = await bcrypt.hash(seedPassword, BCRYPT_ROUNDS);
-  const demoHash = realUserHash;
-  const driverPinHash = await bcrypt.hash("123456", BCRYPT_ROUNDS);
-
+  // ---- Users ------------------------------------------------------------------
   const adminUser = await prisma.user.upsert({
     where: { email: "sirtecnologie@gmail.com" },
     update: {},
@@ -335,13 +282,13 @@ async function main() {
       operatorId: operator.id,
       zoneId: zone1.id,
       email: "client2@example.com",
-      passwordHash: demoHash,
+      passwordHash: realUserHash,
       name: "Marie Bonnet",
       phone: "+33600000004",
       address: "8 chemin des Oliviers, 84100 Orange",
       accommodationType: "GITE",
       role: "ROLE_CLIENT",
-      isActive: false, // fixture démo — login désactivé
+      isActive: false,
       isEmailVerified: true,
       emailVerifiedAt: new Date(),
       stockAlertThreshold: 25,
@@ -357,13 +304,13 @@ async function main() {
       operatorId: operator.id,
       zoneId: zone2.id,
       email: "client3@example.com",
-      passwordHash: demoHash,
+      passwordHash: realUserHash,
       name: "Jean-Luc Rousseau",
       phone: "+33600000005",
       address: "22 route de Bonnieux, 84400 Apt",
       accommodationType: "AIRBNB",
       role: "ROLE_CLIENT",
-      isActive: false, // fixture démo — login désactivé
+      isActive: false,
       isEmailVerified: true,
       emailVerifiedAt: new Date(),
       stockAlertThreshold: 30,
@@ -374,32 +321,46 @@ async function main() {
 
   console.log("  Users: admin, livreur, 3 clients");
 
-  // ---- Subscriptions ----
+  // ---- Subscriptions V2 — Pack Sérénité ---------------------------------------
   const now = new Date();
   const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  // committedUntil = currentPeriodStart + 3 mois (calendaire avec clamp fin de mois — ADR-V2-006)
+  const committedUntil = addMonths(periodStart, SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS);
 
+  // Client réel : abonnement Pack Sérénité avec snapshots complets
   const sub1 = await prisma.subscription.upsert({
     where: { userId: client1.id },
     update: {},
     create: {
       userId: client1.id,
-      plan: "PRESTIGE",
+      plan: null, // ADR-V2-003 : null pour Pack Sérénité
       status: "ACTIVE",
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
+      priceCents: SUBSCRIPTION_DEFAULTS.PRICE_CENTS,
+      minEngagementMonths: SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS,
+      committedUntil,
+      kitBainQty: SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY,
+      kitLitQty: SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY,
     },
   });
 
+  // Fixtures démo — Pack Sérénité aussi pour la cohérence
   const sub2 = await prisma.subscription.upsert({
     where: { userId: client2.id },
     update: {},
     create: {
       userId: client2.id,
-      plan: "CONFORT",
+      plan: null,
       status: "ACTIVE",
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
+      priceCents: SUBSCRIPTION_DEFAULTS.PRICE_CENTS,
+      minEngagementMonths: SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS,
+      committedUntil,
+      kitBainQty: SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY,
+      kitLitQty: SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY,
     },
   });
 
@@ -408,59 +369,72 @@ async function main() {
     update: {},
     create: {
       userId: client3.id,
-      plan: "ESSENTIELLE",
+      plan: null,
       status: "ACTIVE",
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
+      priceCents: SUBSCRIPTION_DEFAULTS.PRICE_CENTS,
+      minEngagementMonths: SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS,
+      committedUntil,
+      kitBainQty: SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY,
+      kitLitQty: SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY,
     },
   });
 
-  console.log("  Subscriptions: PRESTIGE, CONFORT, ESSENTIELLE");
+  console.log("  Subscriptions: Pack Sérénité (x3) avec snapshots engagement");
 
-  // ---- Subscription Products ----
-  await prisma.subscriptionProduct.upsert({
-    where: {
-      subscriptionId_productId: { subscriptionId: sub1.id, productId: prestigeServiettes.id },
-    },
-    update: {},
-    create: { subscriptionId: sub1.id, productId: prestigeServiettes.id, quantity: 60 },
-  });
+  // ---- Subscription Products V2 — Kit Bain + Kit Lit --------------------------
+  const kitBainId = productMap["kit-bain"];
+  const kitLitId = productMap["kit-lit"];
 
-  await prisma.subscriptionProduct.upsert({
-    where: { subscriptionId_productId: { subscriptionId: sub2.id, productId: hotelServiettes.id } },
-    update: {},
-    create: { subscriptionId: sub2.id, productId: hotelServiettes.id, quantity: 40 },
-  });
+  if (!kitBainId || !kitLitId) {
+    throw new Error("Produits kit-bain ou kit-lit introuvables après le seed.");
+  }
 
-  await prisma.subscriptionProduct.upsert({
-    where: {
-      subscriptionId_productId: { subscriptionId: sub3.id, productId: confortServiettes.id },
-    },
-    update: {},
-    create: { subscriptionId: sub3.id, productId: confortServiettes.id, quantity: 20 },
-  });
+  for (const [subId, bainQty, litQty] of [
+    [sub1.id, SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY, SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY],
+    [sub2.id, SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY, SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY],
+    [sub3.id, SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY, SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY],
+  ] as [string, number, number][]) {
+    await prisma.subscriptionProduct.upsert({
+      where: { subscriptionId_productId: { subscriptionId: subId, productId: kitBainId } },
+      update: { quantity: bainQty },
+      create: { subscriptionId: subId, productId: kitBainId, quantity: bainQty },
+    });
+    await prisma.subscriptionProduct.upsert({
+      where: { subscriptionId_productId: { subscriptionId: subId, productId: kitLitId } },
+      update: { quantity: litQty },
+      create: { subscriptionId: subId, productId: kitLitId, quantity: litQty },
+    });
+  }
 
-  console.log("  Subscription Products linked");
+  console.log("  Subscription Products: Kit Bain (x8) + Kit Lit (x4) par abonnement");
 
-  // ---- Client Stock ----
-  const clientStockData = [
+  // ---- Client Stock (par ProductRange, ADR-V2-004 — inchangé) -----------------
+  const clientStockData: Array<{
+    userId: string;
+    productRange: "PRESTIGE" | "HOTEL" | "CONFORT";
+    cleanSets: number;
+    dirtySets: number;
+    totalInCirculation: number;
+  }> = [
     {
       userId: client1.id,
-      productRange: "PRESTIGE" as const,
+      productRange: "PRESTIGE",
       cleanSets: 40,
       dirtySets: 15,
       totalInCirculation: 60,
     },
     {
       userId: client2.id,
-      productRange: "HOTEL" as const,
+      productRange: "HOTEL",
       cleanSets: 25,
       dirtySets: 10,
       totalInCirculation: 40,
     },
     {
       userId: client3.id,
-      productRange: "CONFORT" as const,
+      productRange: "CONFORT",
       cleanSets: 5,
       dirtySets: 12,
       totalInCirculation: 20,
@@ -475,13 +449,20 @@ async function main() {
     });
   }
 
-  console.log("  Client Stock entries");
+  console.log("  Client Stock entries (PRESTIGE / HOTEL / CONFORT — ADR-V2-004)");
 
-  // ---- Operator Stock ----
-  const opStockData = [
+  // ---- Operator Stock ----------------------------------------------------------
+  const opStockData: Array<{
+    operatorId: string;
+    productRange: "CONFORT" | "HOTEL" | "PRESTIGE";
+    cleanAvailable: number;
+    dirtyPending: number;
+    inCirculation: number;
+    retired: number;
+  }> = [
     {
       operatorId: operator.id,
-      productRange: "CONFORT" as const,
+      productRange: "CONFORT",
       cleanAvailable: 200,
       dirtyPending: 50,
       inCirculation: 120,
@@ -489,7 +470,7 @@ async function main() {
     },
     {
       operatorId: operator.id,
-      productRange: "HOTEL" as const,
+      productRange: "HOTEL",
       cleanAvailable: 150,
       dirtyPending: 30,
       inCirculation: 80,
@@ -497,7 +478,7 @@ async function main() {
     },
     {
       operatorId: operator.id,
-      productRange: "PRESTIGE" as const,
+      productRange: "PRESTIGE",
       cleanAvailable: 100,
       dirtyPending: 20,
       inCirculation: 60,
@@ -517,7 +498,12 @@ async function main() {
 
   console.log("  Operator Stock entries");
 
-  // ---- Sample Orders ----
+  // ---- Sample Orders (adaptées aux nouveaux produits KIT_*) -------------------
+  const kitCompletId = productMap["kit-complet"];
+  if (!kitCompletId) {
+    throw new Error("Produit kit-complet introuvable après le seed.");
+  }
+
   const deliveryDate1 = new Date();
   deliveryDate1.setDate(deliveryDate1.getDate() + 3);
 
@@ -529,16 +515,22 @@ async function main() {
       orderNumber: "LNG-2026-000001",
       status: "CONFIRMED",
       isRecurring: true,
-      totalCents: 1400 * 10,
+      totalCents: SUBSCRIPTION_DEFAULTS.PRICE_CENTS, // 8900 centimes (1 mois)
       deliveryDate: deliveryDate1,
       timeSlot: "08:00-10:00",
       items: {
         create: [
           {
-            productId: prestigeServiettes.id,
-            quantity: 10,
-            unitCents: 1400,
-            totalCents: 1400 * 10,
+            productId: kitBainId,
+            quantity: SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY, // 8
+            unitCents: 750,
+            totalCents: 750 * SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY,
+          },
+          {
+            productId: kitLitId,
+            quantity: SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY, // 4
+            unitCents: 1650,
+            totalCents: 1650 * SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY,
           },
         ],
       },
@@ -555,13 +547,18 @@ async function main() {
       userId: client2.id,
       orderNumber: "LNG-2026-000002",
       status: "PENDING",
-      isRecurring: true,
-      totalCents: 900 * 8,
+      isRecurring: false,
+      totalCents: 2200 * 2, // 2 Kit Complet
       deliveryDate: deliveryDate2,
       timeSlot: "10:00-12:00",
       items: {
         create: [
-          { productId: hotelServiettes.id, quantity: 8, unitCents: 900, totalCents: 900 * 8 },
+          {
+            productId: kitCompletId,
+            quantity: 2,
+            unitCents: 2200,
+            totalCents: 2200 * 2,
+          },
         ],
       },
     },
@@ -575,12 +572,17 @@ async function main() {
       orderNumber: "LNG-2026-000003",
       status: "DELIVERED",
       isRecurring: false,
-      totalCents: 600 * 5,
+      totalCents: 750 * 3, // 3 Kit Bain
       deliveryDate: new Date(),
       timeSlot: "08:00-10:00",
       items: {
         create: [
-          { productId: confortServiettes.id, quantity: 5, unitCents: 600, totalCents: 600 * 5 },
+          {
+            productId: kitBainId,
+            quantity: 3,
+            unitCents: 750,
+            totalCents: 750 * 3,
+          },
         ],
       },
     },
@@ -588,8 +590,7 @@ async function main() {
 
   console.log(`  Orders: ${order1.orderNumber}, ${order2.orderNumber}, ${order3.orderNumber}`);
 
-  // ---- Sample Notifications ----
-  // Notifications have no unique constraint, so check if any exist for idempotency
+  // ---- Notifications ----------------------------------------------------------
   const existingNotifCount = await prisma.notification.count();
   if (existingNotifCount === 0) {
     await prisma.notification.createMany({
@@ -599,7 +600,7 @@ async function main() {
           type: "DELIVERY_REMINDER",
           channel: "BOTH",
           title: "Livraison prevue demain",
-          body: "Votre livraison de 10 sets Prestige est prevue demain entre 08h00 et 10h00.",
+          body: "Votre livraison Pack Serénité est prévue demain entre 08h00 et 10h00.",
           sentAt: new Date(),
         },
         {
@@ -607,7 +608,7 @@ async function main() {
           type: "STOCK_LOW",
           channel: "PUSH",
           title: "Stock bas",
-          body: "Votre stock de sets Confort est bas (25%). Pensez a planifier une livraison.",
+          body: "Votre stock de kits est bas. Pensez a planifier une livraison.",
           sentAt: new Date(),
         },
         {
@@ -615,7 +616,7 @@ async function main() {
           type: "SUBSCRIPTION_RENEWED",
           channel: "EMAIL",
           title: "Abonnement renouvele",
-          body: "Votre abonnement Confort a ete renouvele avec succes pour le mois en cours.",
+          body: "Votre abonnement Pack Sérénité a été renouvelé avec succès pour le mois en cours.",
           sentAt: new Date(),
         },
         {
@@ -623,17 +624,16 @@ async function main() {
           type: "GENERAL",
           channel: "EMAIL",
           title: "Nouveau client inscrit",
-          body: "Jean-Luc Rousseau vient de s'inscrire avec un abonnement Essentielle.",
+          body: "Jean-Luc Rousseau vient de s'inscrire au Pack Sérénité.",
           sentAt: new Date(),
         },
       ],
     });
   }
 
-  console.log("  Notifications: 4 created");
+  console.log("  Notifications: 4");
 
-  // ---- Delivery Rounds & Stops ----
-  // Create rounds for today and next days so the driver always has data
+  // ---- Delivery Rounds --------------------------------------------------------
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -643,19 +643,15 @@ async function main() {
   const dayAfter = new Date(today);
   dayAfter.setDate(today.getDate() + 2);
 
-  // Helper to get a date N days ago
-  const daysAgo = (n: number) => {
-    const d = new Date(today);
-    d.setDate(today.getDate() - n);
-    return d;
-  };
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
 
-  // Round 1: Today — IN_PROGRESS, 3 stops (1 completed, 2 pending)
+  // Round 1 : Aujourd'hui — IN_PROGRESS
   const existingRound1 = await prisma.deliveryRound.findFirst({
     where: { driverId: driverUser.id, date: today },
   });
   if (!existingRound1) {
-    const round1 = await prisma.deliveryRound.create({
+    await prisma.deliveryRound.create({
       data: {
         operatorId: operator.id,
         zoneId: zone1.id,
@@ -672,8 +668,8 @@ async function main() {
               orderId: order1.id,
               stopOrder: 1,
               status: "COMPLETED",
-              setsToDeliver: 10,
-              setsDelivered: 10,
+              setsToDeliver: 12,
+              setsDelivered: 12,
               dirtyPickedUp: 8,
               qrCodeScanned: true,
               completedAt: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 8, 45),
@@ -684,7 +680,7 @@ async function main() {
               driverId: driverUser.id,
               stopOrder: 2,
               status: "PENDING",
-              setsToDeliver: 8,
+              setsToDeliver: 2,
               specialInstructions: "Portail code 4521 — déposer dans le local linge à gauche",
             },
             {
@@ -692,24 +688,21 @@ async function main() {
               driverId: driverUser.id,
               stopOrder: 3,
               status: "PENDING",
-              setsToDeliver: 5,
+              setsToDeliver: 3,
               specialInstructions: "Appeler 10 min avant arrivée",
             },
           ],
         },
       },
     });
-    console.log(`  Delivery Round today: ${round1.id} (IN_PROGRESS, 3 stops)`);
-  } else {
-    console.log("  Delivery Round today: already exists");
   }
 
-  // Round 2: Tomorrow — PLANNED, 2 stops
+  // Round 2 : Demain — PLANNED
   const existingRound2 = await prisma.deliveryRound.findFirst({
     where: { driverId: driverUser.id, date: tomorrow },
   });
   if (!existingRound2) {
-    const round2 = await prisma.deliveryRound.create({
+    await prisma.deliveryRound.create({
       data: {
         operatorId: operator.id,
         zoneId: zone1.id,
@@ -724,7 +717,7 @@ async function main() {
               driverId: driverUser.id,
               stopOrder: 1,
               status: "PENDING",
-              setsToDeliver: 8,
+              setsToDeliver: 2,
               specialInstructions: "Portail code 4521",
             },
             {
@@ -732,24 +725,21 @@ async function main() {
               driverId: driverUser.id,
               stopOrder: 2,
               status: "PENDING",
-              setsToDeliver: 15,
+              setsToDeliver: 12,
               specialInstructions: "Livraison exceptionnelle — événement weekend",
             },
           ],
         },
       },
     });
-    console.log(`  Delivery Round tomorrow: ${round2.id} (PLANNED, 2 stops)`);
-  } else {
-    console.log("  Delivery Round tomorrow: already exists");
   }
 
-  // Round 3: Day after tomorrow — PLANNED, 1 stop (Luberon)
+  // Round 3 : J+2 — PLANNED (Luberon)
   const existingRound3 = await prisma.deliveryRound.findFirst({
     where: { driverId: driverUser.id, date: dayAfter },
   });
   if (!existingRound3) {
-    const round3 = await prisma.deliveryRound.create({
+    await prisma.deliveryRound.create({
       data: {
         operatorId: operator.id,
         zoneId: zone2.id,
@@ -764,25 +754,21 @@ async function main() {
               driverId: driverUser.id,
               stopOrder: 1,
               status: "PENDING",
-              setsToDeliver: 5,
-              specialInstructions: "2 logements — répartir 3 + 2 sets",
+              setsToDeliver: 3,
+              specialInstructions: "2 logements — répartir 2 + 1 kits",
             },
           ],
         },
       },
     });
-    console.log(`  Delivery Round J+2: ${round3.id} (PLANNED, 1 stop)`);
-  } else {
-    console.log("  Delivery Round J+2: already exists");
   }
 
-  // Round 4: Yesterday — COMPLETED (historical data)
-  const yesterday = daysAgo(1);
+  // Round 4 : Hier — COMPLETED (historique)
   const existingRound4 = await prisma.deliveryRound.findFirst({
     where: { driverId: driverUser.id, date: yesterday },
   });
   if (!existingRound4) {
-    const round4 = await prisma.deliveryRound.create({
+    await prisma.deliveryRound.create({
       data: {
         operatorId: operator.id,
         zoneId: zone1.id,
@@ -811,8 +797,8 @@ async function main() {
               driverId: driverUser.id,
               stopOrder: 1,
               status: "COMPLETED",
-              setsToDeliver: 10,
-              setsDelivered: 10,
+              setsToDeliver: 12,
+              setsDelivered: 12,
               dirtyPickedUp: 10,
               qrCodeScanned: true,
               completedAt: new Date(
@@ -828,9 +814,9 @@ async function main() {
               driverId: driverUser.id,
               stopOrder: 2,
               status: "COMPLETED",
-              setsToDeliver: 6,
-              setsDelivered: 6,
-              dirtyPickedUp: 5,
+              setsToDeliver: 2,
+              setsDelivered: 2,
+              dirtyPickedUp: 2,
               qrCodeScanned: true,
               completedAt: new Date(
                 yesterday.getFullYear(),
@@ -844,12 +830,13 @@ async function main() {
         },
       },
     });
-    console.log(`  Delivery Round yesterday: ${round4.id} (COMPLETED, 2 stops)`);
-  } else {
-    console.log("  Delivery Round yesterday: already exists");
   }
 
-  // ---- Stock Movements (for client mobile history) ----
+  console.log(
+    "  Delivery Rounds: today (IN_PROGRESS), tomorrow (PLANNED), J+2 (PLANNED), yesterday (COMPLETED)",
+  );
+
+  // ---- Stock Movements --------------------------------------------------------
   const existingMovements = await prisma.stockMovement.count();
   if (existingMovements === 0) {
     await prisma.stockMovement.createMany({
@@ -858,7 +845,7 @@ async function main() {
           userId: client1.id,
           productRange: "PRESTIGE",
           type: "DELIVERY",
-          quantity: 10,
+          quantity: 12,
           reason: "Livraison #LNG-2026-000001",
         },
         {
@@ -901,11 +888,11 @@ async function main() {
     console.log("  Stock Movements: 6 entries");
   }
 
-  console.log("\nSeed completed successfully!");
+  console.log("\nSeed V2 completed successfully!");
 }
 
 main()
-  .catch((e) => {
+  .catch((e: unknown) => {
     console.error("Seed failed:", e);
     process.exit(1);
   })

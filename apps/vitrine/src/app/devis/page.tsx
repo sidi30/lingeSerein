@@ -15,8 +15,13 @@ import {
 } from "lucide-react";
 import { DevisGenerator } from "@/components/devis-generator";
 import { DevisRequest } from "@/components/devis-request";
+import { CATALOG_DEFAULTS, SUBSCRIPTION_DEFAULTS, DELIVERY_DEFAULTS } from "@lingengo/shared";
 
-/* ─── Catalogue (source de vérité : page Tarifs) ─── */
+// NOTE (Option A, ADR-V2-005) : tous les prix proviennent de @lingengo/shared (source de vérité
+// de seed). Si les prix sont modifiés via l'admin en production, le simulateur restera sur les
+// valeurs de départ — désynchro assumée en V1.
+
+/* ─── Catalogue dérivé de @lingengo/shared ─── */
 
 interface Item {
   id: string;
@@ -26,43 +31,81 @@ interface Item {
   costCents: number;
 }
 
-// Kits = offre principale (prix par rotation)
+// Kits = offre principale (prix par rotation). Coûts internes estimés — à ajuster.
 const kits: Item[] = [
   {
     id: "bain",
     name: "Kit Bain",
     desc: "Drap de bain + serviette + tapis",
-    priceCents: 750,
+    priceCents: CATALOG_DEFAULTS.KIT_BAIN_CENTS,
     costCents: 290,
   },
   {
     id: "lit",
     name: "Kit Lit",
     desc: "Housse de couette + drap housse + taies",
-    priceCents: 1650,
+    priceCents: CATALOG_DEFAULTS.KIT_LIT_CENTS,
     costCents: 520,
   },
 ];
 
-// Articles à l'unité (extras, hors livraison). Coûts lit estimés — à ajuster.
+// Articles à l'unité (extras, hors livraison). Coûts estimés — à ajuster.
 const extras: Item[] = [
-  { id: "serviette", name: "Serviette 50×90", priceCents: 450, costCents: 80 },
-  { id: "drapbain", name: "Drap de bain 70×150", priceCents: 650, costCents: 120 },
-  { id: "tapis", name: "Tapis de bain 50×70", priceCents: 400, costCents: 90 },
-  { id: "petite", name: "Petite serviette 30×50", priceCents: 250, costCents: 30 },
-  { id: "draphousse", name: "Drap housse", priceCents: 750, costCents: 200 },
-  { id: "houssecouette", name: "Housse de couette", priceCents: 900, costCents: 280 },
+  {
+    id: "serviette",
+    name: "Serviette 50×90",
+    priceCents: CATALOG_DEFAULTS.SERVIETTE_CENTS,
+    costCents: 80,
+  },
+  {
+    id: "drapbain",
+    name: "Drap de bain 70×150",
+    priceCents: CATALOG_DEFAULTS.DRAP_BAIN_CENTS,
+    costCents: 120,
+  },
+  {
+    id: "tapis",
+    name: "Tapis de bain 50×70",
+    priceCents: CATALOG_DEFAULTS.TAPIS_BAIN_CENTS,
+    costCents: 90,
+  },
+  {
+    id: "petite",
+    name: "Petite serviette 30×50",
+    priceCents: CATALOG_DEFAULTS.PETITE_SERVIETTE_CENTS,
+    costCents: 30,
+  },
+  {
+    id: "draphousse",
+    name: "Drap housse",
+    priceCents: CATALOG_DEFAULTS.DRAP_HOUSSE_CENTS,
+    costCents: 200,
+  },
+  {
+    id: "houssecouette",
+    name: "Housse de couette",
+    priceCents: CATALOG_DEFAULTS.HOUSSE_COUETTE_CENTS,
+    costCents: 280,
+  },
 ];
 
 const zones = [
-  { id: "orange", name: "Orange", fraisCents: 0, note: "Offerte dès 4 kits" },
+  {
+    id: "orange",
+    name: "Orange",
+    fraisCents: 0,
+    note: `Offerte dès ${DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits`,
+  },
   { id: "proche", name: "Zone proche", fraisCents: 1200, note: "Carpentras, Vaison…" },
   { id: "elargie", name: "Zone élargie", fraisCents: 1500, note: "Avignon, Apt…" },
 ];
 
-const GROUP_DISCOUNT = 200; // Kit Complet : -2 € par paire bain+lit groupée
-const ABO_PRICE = 8900; // Pack Sérénité 89 €/mois
-const FREE_DELIVERY_THRESHOLD = 12000; // livraison offerte dès 120 €
+// Kit Complet : remise groupage bain+lit (−2 € par paire)
+const GROUP_DISCOUNT = CATALOG_DEFAULTS.KIT_COMPLET_DISCOUNT_CENTS;
+// Pack Sérénité — prix depuis SUBSCRIPTION_DEFAULTS (source de vérité @lingengo/shared)
+const ABO_PRICE = SUBSCRIPTION_DEFAULTS.PRICE_CENTS;
+// Livraison offerte dès 120 €
+const FREE_DELIVERY_THRESHOLD = DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS;
 
 function fmt(cents: number): string {
   return (
@@ -315,7 +358,12 @@ function DevisPageInner() {
                   <span className="font-semibold text-forest">
                     Grouper Bain + Lit (Kit Complet)
                   </span>{" "}
-                  — 22 € au lieu de 24 €, soit <strong>−2 € par paire</strong> livrée ensemble.
+                  — {fmtShort(CATALOG_DEFAULTS.KIT_COMPLET_CENTS)} au lieu de{" "}
+                  {fmtShort(CATALOG_DEFAULTS.KIT_BAIN_CENTS + CATALOG_DEFAULTS.KIT_LIT_CENTS)}, soit{" "}
+                  <strong>
+                    −{fmtShort(CATALOG_DEFAULTS.KIT_COMPLET_DISCOUNT_CENTS)} par paire
+                  </strong>{" "}
+                  livrée ensemble.
                 </span>
               </label>
             </div>
@@ -523,13 +571,19 @@ function DevisPageInner() {
                   <div className="flex items-center gap-2 mb-2">
                     <Sparkles size={16} aria-hidden className="text-lavender-700" />
                     <h3 className="font-serif text-sm font-bold text-forest">
-                      Pack Sérénité — 89 € / mois
+                      Pack Sérénité — {fmt(ABO_PRICE)} / mois
                     </h3>
                   </div>
                   <p className="text-xs text-gray-700 leading-relaxed">
-                    8 kits bain + 4 kits lit + livraisons inclus. À votre volume estimé (
-                    {fmt(calc.venteMois)}/mois), l&apos;abonnement pourrait vous faire économiser{" "}
+                    {SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} kits bain +{" "}
+                    {SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY} kits lit + livraisons inclus. À votre volume
+                    estimé ({fmt(calc.venteMois)}/mois), l&apos;abonnement pourrait vous faire
+                    économiser{" "}
                     <strong className="text-lavender-700">~{fmt(calc.ecoAbo)} / mois</strong>.
+                  </p>
+                  <p className="text-[10px] text-gray-500 mt-2">
+                    Engagement {SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS} mois · résiliable
+                    ensuite avec {SUBSCRIPTION_DEFAULTS.NOTICE_PERIOD_DAYS} j de préavis.
                   </p>
                 </div>
               )}

@@ -1,8 +1,12 @@
 import { View, Text, StyleSheet } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { colors, font, spacing } from "@/lib/theme";
 
+type IoniconName = keyof typeof Ionicons.glyphMap;
+
 interface Props {
-  icon: string;
+  /** Ionicons icon name (e.g. "cube-outline") */
+  icon: IoniconName;
   title: string;
   description?: string;
 }
@@ -10,7 +14,9 @@ interface Props {
 export function EmptyState({ icon, title, description }: Props) {
   return (
     <View style={styles.container} accessibilityRole="text">
-      <Text style={styles.icon}>{icon}</Text>
+      <View style={styles.iconWrap}>
+        <Ionicons name={icon} size={48} color={colors.textTertiary} />
+      </View>
       <Text style={styles.title}>{title}</Text>
       {description && <Text style={styles.description}>{description}</Text>}
     </View>
@@ -24,9 +30,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: spacing.xxxl,
   },
-  icon: {
-    fontSize: 48,
+  iconWrap: {
     marginBottom: spacing.lg,
+    opacity: 0.5,
   },
   title: {
     fontSize: font.sizes.lg,

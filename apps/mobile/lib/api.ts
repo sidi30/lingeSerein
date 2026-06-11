@@ -143,6 +143,15 @@ interface NotifListRes {
 
 // ─── Types ───────────────────────────────────────────────────────
 
+// Miroir de orders.service.ts:getById → statusHistory (dérivé de l'AuditLog).
+export interface StatusHistoryEntry {
+  at: string;
+  by: { id: string | null; name: string | null };
+  from: string | null;
+  to: string | null;
+  raison: string | null;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -155,7 +164,8 @@ export interface Order {
   cancelledReason: string | null;
   createdAt: string;
   items: OrderItem[];
-  user?: { id: string; name: string; email: string };
+  user?: { id: string; name: string; email: string; phone?: string; zone?: { name: string } };
+  statusHistory?: StatusHistoryEntry[];
 }
 
 export interface OrderItem {
@@ -164,18 +174,31 @@ export interface OrderItem {
   quantity: number;
   unitCents: number;
   totalCents: number;
-  product: { name: string; range: string; category: string };
+  product: {
+    id: string;
+    name: string;
+    range: string | null;
+    category: string | null;
+    kind?: ProductKind;
+  };
 }
+
+/** Type de produit — miroir de l'enum Prisma ProductKind (ADR-V2-001) */
+export type ProductKind = "KIT" | "ARTICLE";
 
 export interface Product {
   id: string;
-  category: string;
-  range: string;
+  slug: string | null;
+  kind: ProductKind;
+  category: string | null;
+  range: string | null;
   name: string;
   description: string | null;
   priceCents: number;
   attributes: Record<string, unknown>;
   imageUrl: string | null;
+  isActive: boolean;
+  serviceType?: { kind: string; name: string };
 }
 
 export interface ClientStock {
@@ -194,12 +217,33 @@ export interface StockMovement {
   createdAt: string;
 }
 
+/** Configuration publique du Pack Sérénité (EP-SUB-CFG01, SubscriptionConfigPublicDTO) */
+export interface SubscriptionConfig {
+  planName: string;
+  priceCents: number;
+  kitBainQty: number;
+  kitLitQty: number;
+  minEngagementMonths: number;
+  noticePeriodDays: number;
+}
+
 export interface Subscription {
   id: string;
-  plan: string;
+  /** Legacy plan field (ESSENTIELLE/CONFORT/PRESTIGE) — null pour les nouvelles souscriptions Pack Sérénité */
+  plan: string | null;
   status: string;
   currentPeriodStart: string;
   currentPeriodEnd: string;
+  /** Prix mensuel snapshot au moment de la souscription (centimes) — null si abonnement legacy non migré */
+  priceCents: number | null;
+  /** Durée d'engagement minimale snapshot (mois) */
+  minEngagementMonths: number;
+  /** Date jusqu'à laquelle la résiliation est bloquée — null si exempté ou non calculé */
+  committedUntil: string | null;
+  /** Nombre de kits bain inclus/mois snapshot */
+  kitBainQty: number;
+  /** Nombre de kits lit inclus/mois snapshot */
+  kitLitQty: number;
   pauseMonthsUsed: number;
   cancelledAt: string | null;
   cancelEffectiveAt: string | null;
@@ -239,6 +283,92 @@ export interface UserProfile {
   isEmailVerified: boolean;
   stockAlertThreshold: number;
   preferredTimeSlot: string | null;
+  createdAt: string;
+}
+
+// ─── GET /clients list item (no stockSummary, no zone object) ────
+export interface ClientListItem {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  accommodationType: string | null;
+  isActive: boolean;
+  zoneId: string | null;
+  stockAlertThreshold: number;
+  notes: string | null;
+  createdAt: string;
+  subscription: { plan: string | null; status: string } | null;
+  /** stocks array from joined ClientStock rows */
+  stocks: ClientStock[];
+}
+
+// ─── GET /clients/:id detail ──────────────────────────────────────
+export interface ClientDetail {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  accommodationType: string | null;
+  isActive: boolean;
+  isEmailVerified: boolean;
+  zoneId: string | null;
+  stockAlertThreshold: number;
+  preferredTimeSlot: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Single subscription with products */
+  subscription: {
+    plan: string | null;
+    status: string;
+    products: Array<{
+      id: string;
+      quantity: number;
+      product: { id: string; name: string; range: string | null; priceCents: number };
+    }>;
+  } | null;
+  /** Last 10 orders */
+  orders: Array<{
+    id: string;
+    orderNumber: string;
+    status: string;
+    totalCents: number;
+    deliveryDate: string;
+    createdAt: string;
+  }>;
+  stocks: ClientStock[];
+}
+
+// ─── GET /stock/operator — rows per gamme ────────────────────────
+export interface OperatorStock {
+  id: string;
+  operatorId: string;
+  productRange: string;
+  cleanAvailable: number;
+  dirtyPending: number;
+  inCirculation: number;
+  retired: number;
+}
+
+// ─── GET /stock/clients — user row with embedded stocks ──────────
+export interface ClientStockRow {
+  id: string;
+  name: string;
+  email: string;
+  accommodationType: string | null;
+  zoneId: string | null;
+  stockAlertThreshold: number;
+  stocks: ClientStock[];
+}
+
+// ─── GET /dashboard/alerts — severity is lowercase string ────────
+export interface DashboardAlert {
+  type: string;
+  severity: string; // "warning" | "error" | "info"
+  message: string;
+  entityId?: string;
   createdAt: string;
 }
 
@@ -364,6 +494,45 @@ export function useMySubscription() {
       }
     },
     enabled: !!token && isClient,
+  });
+}
+
+/**
+ * Config publique du Pack Sérénité (EP-SUB-CFG01).
+ * Le mobile affiche prix/composition/engagement depuis cette réponse — zéro valeur en dur (AC-F6-01).
+ */
+export function useSubscriptionConfig() {
+  const token = useAuthStore((s) => s.accessToken);
+  const isClient = useIsClient();
+  return useQuery<SubscriptionConfig>({
+    queryKey: ["subscription-config"],
+    queryFn: async () => {
+      const res = await apiFetch<ApiRes<SubscriptionConfig>>("/subscriptions/config");
+      return res.data;
+    },
+    enabled: !!token && isClient,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Souscrire au Pack Sérénité (EP-SUB01).
+ * Le body est optionnel (le serveur dérive la composition depuis SubscriptionConfig).
+ */
+export function useSubscribeToPackSerenite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch<ApiRes<Subscription>>("/subscriptions", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["subscription-me"] });
+      qc.invalidateQueries({ queryKey: ["subscription-config"] });
+    },
   });
 }
 
@@ -513,6 +682,108 @@ export function useCompleteRound() {
       return res.data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["today-round"] }),
+  });
+}
+
+// ─── Hooks: Admin order status ───────────────────────────────────
+
+export function useUpdateOrderStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status, reason }: { id: string; status: string; reason?: string }) => {
+      // Le schéma /orders/:id/status attend `raison` (français), pas `reason`.
+      // NB: /orders/:id/cancel attend bien `reason` (cf. useCancelOrder).
+      const res = await apiFetch<ApiRes<Order>>(`/orders/${id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status, raison: reason }),
+      });
+      return res.data;
+    },
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["order", id] });
+      qc.invalidateQueries({ queryKey: ["dashboard-kpis"] });
+    },
+  });
+}
+
+// ─── Hooks: Clients (admin only) ─────────────────────────────────
+
+export function useClients(search?: string) {
+  const token = useAuthStore((s) => s.accessToken);
+  const role = useAuthStore((s) => s.user?.role);
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  params.set("limit", "50");
+  return useQuery<ClientListItem[]>({
+    queryKey: ["clients", search],
+    queryFn: async () => {
+      const res = await apiFetch<ApiListRes<ClientListItem>>(`/clients?${params.toString()}`);
+      return res.data;
+    },
+    enabled: !!token && (role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN"),
+  });
+}
+
+export function useClient(id: string) {
+  const token = useAuthStore((s) => s.accessToken);
+  const role = useAuthStore((s) => s.user?.role);
+  return useQuery<ClientDetail>({
+    queryKey: ["client", id],
+    queryFn: async () => {
+      const res = await apiFetch<ApiRes<ClientDetail>>(`/clients/${id}`);
+      return res.data;
+    },
+    enabled: !!token && !!id && (role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN"),
+  });
+}
+
+// ─── Hooks: Stock operator (admin only) ──────────────────────────
+
+export function useOperatorStock() {
+  const token = useAuthStore((s) => s.accessToken);
+  const role = useAuthStore((s) => s.user?.role);
+  return useQuery<OperatorStock[]>({
+    queryKey: ["stock-operator"],
+    queryFn: async () => {
+      const res = await apiFetch<ApiRes<OperatorStock[]>>("/stock/operator");
+      return res.data;
+    },
+    enabled: !!token && (role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN"),
+  });
+}
+
+// ─── Hooks: Stock clients (admin only) ───────────────────────────
+
+export function useClientStocks(search?: string) {
+  const token = useAuthStore((s) => s.accessToken);
+  const role = useAuthStore((s) => s.user?.role);
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  params.set("limit", "100");
+  return useQuery<ClientStockRow[]>({
+    queryKey: ["stock-clients", search],
+    queryFn: async () => {
+      const res = await apiFetch<ApiListRes<ClientStockRow>>(`/stock/clients?${params.toString()}`);
+      return res.data;
+    },
+    enabled: !!token && (role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN"),
+  });
+}
+
+// ─── Hooks: Dashboard alerts (admin only) ────────────────────────
+
+export function useDashboardAlerts() {
+  const token = useAuthStore((s) => s.accessToken);
+  const role = useAuthStore((s) => s.user?.role);
+  return useQuery<DashboardAlert[]>({
+    queryKey: ["dashboard-alerts"],
+    queryFn: async () => {
+      const res = await apiFetch<ApiRes<DashboardAlert[]>>("/dashboard/alerts");
+      return res.data;
+    },
+    enabled: !!token && (role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN"),
+    staleTime: 5 * 60 * 1000,
   });
 }
 

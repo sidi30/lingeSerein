@@ -2,7 +2,15 @@ import type { Metadata } from "next";
 import { Playfair_Display, Inter } from "next/font/google";
 import { ScrollProgress } from "@/components/scroll-progress";
 import { SectionDots } from "@/components/section-dots";
+import { CATALOG_DEFAULTS, SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
 import "./globals.css";
+
+// NOTE (Option A, ADR-V2-005) : les prix du JSON-LD sont dérivés de @lingengo/shared
+// (source de vérité de seed). Désynchro possible avec la DB en production — assumée en V1.
+
+function centimes(c: number): string {
+  return (c / 100).toFixed(2);
+}
 
 const siteUrl = "https://lingeserein.fr";
 
@@ -84,24 +92,23 @@ const offerCatalog = {
   itemListElement: [
     {
       "@type": "Offer",
-      name: "Set de linge de bain",
-      description: "Drap de bain, serviette et tapis de bain entretenus.",
-      price: "7.50",
+      name: "Kit Bain",
+      description: "Drap de bain 70×150 + Serviette 50×90 + Tapis 50×70.",
+      price: centimes(CATALOG_DEFAULTS.KIT_BAIN_CENTS),
       priceCurrency: "EUR",
     },
     {
       "@type": "Offer",
-      name: "Set de linge de lit",
-      description: "Drap housse et housse de couette entretenus.",
-      price: "16.50",
+      name: "Kit Lit",
+      description: "Housse de couette + Drap housse + Taies.",
+      price: centimes(CATALOG_DEFAULTS.KIT_LIT_CENTS),
       priceCurrency: "EUR",
     },
     {
       "@type": "Offer",
-      name: "Pack Sérénité — abonnement mensuel sans engagement",
-      description:
-        "Formule mensuelle de location et entretien de linge, livraison incluse, modifiable selon la saison.",
-      price: "89.00",
+      name: `Pack Sérénité — abonnement mensuel (engagement ${SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS} mois)`,
+      description: `Formule mensuelle de location et entretien de linge, ${SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} kits bain + ${SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY} kits lit, livraison incluse. Engagement minimum ${SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS} mois, résiliable ensuite avec ${SUBSCRIPTION_DEFAULTS.NOTICE_PERIOD_DAYS} jours de préavis.`,
+      price: centimes(SUBSCRIPTION_DEFAULTS.PRICE_CENTS),
       priceCurrency: "EUR",
     },
   ],
@@ -113,8 +120,7 @@ const localBusinessSchema = {
   "@id": `${siteUrl}/#business`,
   name: "Linge Serein",
   slogan: "Votre linge, notre sérénité.",
-  description:
-    "Linge Serein loue, livre et entretient le linge hôtelier (draps, serviettes, linge de bain et de lit) des hôtels, gîtes, chambres d'hôtes et locations saisonnières du Vaucluse. Qualité hôtelière, démarche éco-responsable (Ecolabel, méthode RABC), sans engagement, livraison en 48 h depuis Orange.",
+  description: `Linge Serein loue, livre et entretient le linge hôtelier (draps, serviettes, linge de bain et de lit) des hôtels, gîtes, chambres d'hôtes et locations saisonnières du Vaucluse. Qualité hôtelière, démarche éco-responsable (Ecolabel, méthode RABC), engagement ${SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS} mois, livraison en 48 h depuis Orange.`,
   image: `${siteUrl}/images/og_image_1200x630.png`,
   logo: `${siteUrl}/images/logo_full_512.png`,
   url: siteUrl,
@@ -280,8 +286,7 @@ const serviceSchema = {
   "@id": `${siteUrl}/#service`,
   serviceType: "Location et entretien de linge hôtelier",
   name: "Location et entretien de linge hôtelier en Vaucluse",
-  description:
-    "Location, livraison et blanchisserie professionnelle de linge hôtelier (draps, serviettes, linge de bain et de lit) pour hôtels, gîtes, chambres d'hôtes et locations saisonnières du Vaucluse. Démarche éco-responsable (Ecolabel, RABC), sans engagement, livraison en 48 h.",
+  description: `Location, livraison et blanchisserie professionnelle de linge hôtelier (draps, serviettes, linge de bain et de lit) pour hôtels, gîtes, chambres d'hôtes et locations saisonnières du Vaucluse. Démarche éco-responsable (Ecolabel, RABC), engagement ${SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS} mois, livraison en 48 h.`,
   provider: { "@id": `${siteUrl}/#organization` },
   areaServed: [
     { "@type": "City", name: "Orange" },
@@ -296,16 +301,46 @@ const serviceSchema = {
   offers: [
     {
       "@type": "Offer",
-      name: "Pack Sérénité — abonnement mensuel",
-      price: "89.00",
+      name: `Pack Sérénité — abonnement mensuel (engagement ${SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS} mois)`,
+      price: centimes(SUBSCRIPTION_DEFAULTS.PRICE_CENTS),
       priceCurrency: "EUR",
     },
-    { "@type": "Offer", name: "Serviette 50×90", price: "4.50", priceCurrency: "EUR" },
-    { "@type": "Offer", name: "Drap de bain 70×150", price: "6.50", priceCurrency: "EUR" },
-    { "@type": "Offer", name: "Tapis de bain 50×70", price: "4.00", priceCurrency: "EUR" },
-    { "@type": "Offer", name: "Petite serviette 30×50", price: "2.50", priceCurrency: "EUR" },
-    { "@type": "Offer", name: "Drap housse", price: "7.50", priceCurrency: "EUR" },
-    { "@type": "Offer", name: "Housse de couette", price: "9.00", priceCurrency: "EUR" },
+    {
+      "@type": "Offer",
+      name: "Serviette 50×90",
+      price: centimes(CATALOG_DEFAULTS.SERVIETTE_CENTS),
+      priceCurrency: "EUR",
+    },
+    {
+      "@type": "Offer",
+      name: "Drap de bain 70×150",
+      price: centimes(CATALOG_DEFAULTS.DRAP_BAIN_CENTS),
+      priceCurrency: "EUR",
+    },
+    {
+      "@type": "Offer",
+      name: "Tapis de bain 50×70",
+      price: centimes(CATALOG_DEFAULTS.TAPIS_BAIN_CENTS),
+      priceCurrency: "EUR",
+    },
+    {
+      "@type": "Offer",
+      name: "Petite serviette 30×50",
+      price: centimes(CATALOG_DEFAULTS.PETITE_SERVIETTE_CENTS),
+      priceCurrency: "EUR",
+    },
+    {
+      "@type": "Offer",
+      name: "Drap housse",
+      price: centimes(CATALOG_DEFAULTS.DRAP_HOUSSE_CENTS),
+      priceCurrency: "EUR",
+    },
+    {
+      "@type": "Offer",
+      name: "Housse de couette",
+      price: centimes(CATALOG_DEFAULTS.HOUSSE_COUETTE_CENTS),
+      priceCurrency: "EUR",
+    },
   ],
 };
 

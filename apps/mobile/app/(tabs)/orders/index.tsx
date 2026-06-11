@@ -89,7 +89,7 @@ export default function OrdersListScreen() {
           onRefresh={refetch}
           ListEmptyComponent={
             <EmptyState
-              icon={"\ud83d\udce6"}
+              icon="cube-outline"
               title="Aucune commande"
               description="Vos commandes apparaitront ici"
             />

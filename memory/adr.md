@@ -457,7 +457,7 @@ F3 : création de comptes avec rôles, mot de passe provisoire 12 car. affiché 
 
 - Génération : `crypto.randomBytes` → alphabet alphanumérique `[A-Za-z0-9]`, 12 caractères, hash `bcrypt` (réutiliser `utils/crypto.ts`).
 - Le mot de passe en clair n'est **présent que dans la réponse HTTP** de `POST /users` et `POST /users/:id/reset-password` (`data.temporaryPassword`), **jamais** dans les logs ni l'audit (`createAuditLog` strip déjà `password`/`passwordHash`, et on ne lui passe pas le clair).
-- RBAC métier dans le service : si `body.role == "ROLE_SUPER_ADMIN"` → `ForbiddenError` 403 ; si la cible est `ROLE_SUPER_ADMIN` et l'acteur n'est pas SUPER*ADMIN → 403 ; si `targetId == request.user.sub` sur deactivate → 403 ; `ROLE_SUPER_ADMIN` non créable via UI (réservé accès DB). Rôles acceptés en entrée : `CLIENT|LIVREUR|ADMIN` (valeurs courtes mappées vers `ROLE*_`, ou `ROLE\__`directement — le schéma Zod accepte les`ROLE\_\*`).
+- RBAC métier dans le service : si `body.role == "ROLE_SUPER_ADMIN"` → `ForbiddenError` 403 ; si la cible est `ROLE_SUPER_ADMIN` et l'acteur n'est pas SUPER*ADMIN → 403 ; si `targetId == request.user.sub` sur deactivate → 403 ; `ROLE_SUPER_ADMIN` non créable via UI (réservé accès DB). Rôles acceptés en entrée : `CLIENT|LIVREUR|ADMIN` (valeurs courtes mappées vers `ROLE*\_`, ou `ROLE\_\_`directement — le schéma Zod accepte les`ROLE\_\*`).
 - `reset-password` et `deactivate` ⇒ `revokedAt=now()` sur toutes les `RefreshToken` actives de la cible.
 - Réponse `GET /users` / `GET /users/:id` : **DTO sans `passwordHash`/`mfaSecret`/`mfaRecoveryCodes`/`deliveryPin`** (select explicite Prisma).
 - `email` unique → collision ⇒ `ConflictError` 409 `"Cet email est déjà enregistré dans le système"`.
@@ -571,3 +571,412 @@ F4 : CRUD `DeliveryZone` (`postalCodes String[]` existe), édition `Operator` (e
 - `apps/admin-web` peut servir `/images/logo_full.png` pour le PDF (asset à fournir).
 - Volume cible : ~500 devis, ~2000 users → pas d'index complexe au-delà de ceux déclarés.
 - L'agent frontend ajoutera `api.getRaw` pour préserver `pagination` (ADR-011) et déplacera le simulateur orphelin (ADR-009).
+
+---
+
+---
+
+# Architecture — Linge Serein V2 (F5–F8 : catalogue KITS, abonnement engagé, source partagée, migration prod)
+
+**Version:** 2.0
+**Date:** 2026-06-11
+**Architecte:** architect-agent
+**Périmètre:** F5 refonte catalogue (3 kits + 6 unités), F6 Pack Sérénité (engagement 3 mois), F7 source de vérité `@lingengo/shared`, F8 migration données prod (client réel PRESTIGE)
+**Statut:** Accepted
+
+---
+
+## Vue d'ensemble V2
+
+La prod tourne, contient 1 client réel (PRESTIGE ACTIVE) + données démo, et l'entrypoint exécute `prisma migrate deploy`. **Toute évolution de schéma est strictement additive et non destructive en phase 1** — aucune colonne supprimée, aucune valeur d'enum retirée, aucune contrainte durcie sur des lignes existantes. Les nouvelles migrations s'empilent **après** `20260611000001_add_quotes_users_settings_f1_f4` (qui peut ne pas encore être appliquée en prod : `migrate deploy` les jouera dans l'ordre lexicographique des timestamps). On tranche les 5 décisions ouvertes en privilégiant la **simplicité de migration** et le **zéro impact mobile/stock**.
+
+**Synthèse des verdicts :**
+
+| #   | Décision ouverte                                                                    | Verdict                                                                                                                                                                                                                                                                                                                                                        |
+| --- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `ProductCategory`/`ProductRange` + `unique([operatorId,category,range])`            | **ADR-V2-001** : ajouter `Product.slug` (unique), enum additif `ProductKind {KIT, ARTICLE}`, **drop de la contrainte composite** (seule opération « non additive » — justifiée et sûre, voir ADR). `category`/`range` rendus **nullable**. `ProductRange` enum étendu (additif) avec `KIT_BAIN`/`KIT_LIT`/`KIT_COMPLET` pour préserver la compatibilité stock. |
+| 2   | Stockage `SubscriptionConfig`                                                       | **ADR-V2-002** : **table dédiée** `SubscriptionConfig` (1 ligne / opérateur, `operatorId @unique`).                                                                                                                                                                                                                                                            |
+| 3   | `SubscriptionPlan` enum                                                             | **ADR-V2-003** : **conservé** (zéro suppression de valeur enum Postgres). `plan` devient **nullable** ; nouveau modèle = champs snapshot sur `Subscription`, `plan` legacy laissé tel quel pour le client existant.                                                                                                                                            |
+| 4   | Modèles de stock (`ClientStock`/`OperatorStock`/`StockMovement` par `ProductRange`) | **ADR-V2-004** : **inchangés en V1**. L'extension additive de `ProductRange` (ADR-V2-001) suffit à garder le stock cohérent. Aucune migration de stock.                                                                                                                                                                                                        |
+| 5   | Vitrine prix temps réel                                                             | **ADR-V2-005** : **Option A** (constantes `@lingengo/shared`, désynchro assumée, avertissement dans le code).                                                                                                                                                                                                                                                  |
+
+---
+
+## Architecture Decision Records — V2
+
+### ADR-V2-001 — Catalogue KITS : `slug` unique + `kind ProductKind`, contrainte composite levée, `category`/`range` nullable
+
+**Statut:** Accepted
+
+**Contexte:**
+9 produits cibles : 3 kits (KIT_BAIN, KIT_LIT, KIT_COMPLET) + 6 articles unitaires (SERVIETTE, DRAP_BAIN, TAPIS_BAIN, PETITE_SERVIETTE, DRAP_HOUSSE, HOUSSE_COUETTE). Le modèle `Product` actuel impose **trois NOT NULL** structurants : `serviceTypeId`, `category ProductCategory`, `range ProductRange`, plus `@@unique([operatorId, category, range])`. Problèmes :
+
+- Un « Kit Bain » n'a pas de `category`/`range` naturels dans les enums existants.
+- 6 articles unitaires ne peuvent **pas** coexister sous la contrainte composite (ex. 2 produits « SERVIETTES » ne pourraient différer que par `range` ; on aurait des collisions et des `range` artificiels).
+- Le mobile doit distinguer kit vs article pour l'affichage (AC-F5-01).
+  La spec propose 3 options (étendre enums / slug unique / `type ProductType`). On combine **slug + kind**, c'est la plus sûre à migrer et la plus lisible côté mobile.
+
+**Décision:**
+
+1. **Nouvel enum additif** `ProductKind { KIT, ARTICLE }`. Colonne `Product.kind ProductKind @default(ARTICLE)` (NOT NULL avec default → backfill implicite des 6 produits démo existants en ARTICLE, acceptable et corrigé par le reseed).
+2. **Nouvelle colonne** `Product.slug String? @unique @db.VarChar(60)` — identifiant métier stable (`kit-bain`, `kit-lit`, `kit-complet`, `serviette`, `drap-bain`, `tapis-bain`, `petite-serviette`, `drap-housse`, `housse-couette`). **Nullable** pour que les lignes existantes (sans slug) restent valides ; l'unicité Postgres ignore les NULL. Le seed/reseed renseigne les slugs des 9 produits canoniques.
+3. **`category` et `range` rendus NULLABLE** (`ProductCategory?`, `ProductRange?`) — additif au sens « relâchement de contrainte », non destructif (aucune donnée existante n'est NOT NULL-violée ; les 6 produits actuels gardent leurs valeurs). Les nouveaux kits ont `category=null, range=null`. Les 6 articles unitaires reçoivent une `category` indicative (mapping ci-dessous) mais ne **dépendent plus** de `range` pour leur identité.
+4. **Suppression de `@@unique([operatorId, category, range])`** — seule opération non strictement additive de toute la V2. Elle est **sûre** : on ne supprime pas de données, on retire une garantie d'unicité désormais inadaptée. L'unicité métier est portée par `slug`. `DROP INDEX "products_operator_id_category_range_key"` (Postgres : `ALTER TABLE products DROP CONSTRAINT ...`). Les index simples `@@index([category])`, `@@index([range])` sont conservés.
+5. **`serviceTypeId` reste NOT NULL** : tous les produits (kits et unités) sont rattachés au `ServiceType` LOCATION existant — pas de nouvelle contrainte, on réutilise le seed.
+
+Mapping `category` indicatif des 6 articles (purement descriptif, non unique) :
+
+| slug             | kind    | category   | priceCents |
+| ---------------- | ------- | ---------- | ---------- |
+| kit-bain         | KIT     | null       | 750        |
+| kit-lit          | KIT     | null       | 1650       |
+| kit-complet      | KIT     | null       | 2200       |
+| serviette        | ARTICLE | SERVIETTES | 450        |
+| drap-bain        | ARTICLE | SERVIETTES | 650        |
+| tapis-bain       | ARTICLE | TAPIS_BAIN | 400        |
+| petite-serviette | ARTICLE | SERVIETTES | 250        |
+| drap-housse      | ARTICLE | LINGE_LIT  | 750        |
+| housse-couette   | ARTICLE | LINGE_LIT  | 900        |
+
+`ProductRange` est par ailleurs **étendu (additif)** avec `KIT_BAIN`, `KIT_LIT`, `KIT_COMPLET` — non pour `Product` (qui n'en a plus besoin) mais pour garder `StockMovement`/`ClientStock`/`OperatorStock` capables de tracer le stock des kits sans refonte (voir ADR-V2-004). Ajouter une valeur d'enum Postgres est additif et non bloquant.
+
+**Alternatives considérées:**
+
+- **(b) slug seul, sans `kind`** — le mobile devrait inférer kit/article via le slug (`startsWith('kit-')`), fragile. → Rejetée : `kind` explicite est trivial et robuste pour l'affichage.
+- **(c) refonte complète `Product` (`type ProductType`, drop `category`/`range`)** — casse `StockMovement`/`ClientStock`/`OperatorStock` (FK conceptuelle sur `ProductRange`) et oblige une migration de stock hors scope V1. → Rejetée.
+- **(a) étendre les enums et garder la contrainte composite** — impose des `range` artificiels aux articles et ne résout pas la collision de 6 articles. → Rejetée.
+- **Garder `category`/`range` NOT NULL et inventer des valeurs** — pollue la sémantique, force des valeurs fausses pour les kits. → Rejetée au profit du nullable.
+
+**Conséquences:**
+
+- ✅ Migration quasi-additive : 1 enum, 2 colonnes, 2 relâchements NOT NULL, 1 drop de contrainte (justifié). Aucune perte de données. Rollback simple (re-NOT NULL impossible tant que des NULL existent, mais la phase 1 est conçue pour ne pas être rollback-bloquante — voir plan).
+- ✅ Mobile : `Product.kind` + `slug` exposés → distinction kit/article directe, zéro valeur en dur.
+- ✅ Stock V1 intact (ADR-V2-004).
+- ⚠️ `ProductsService.create` (qui check encore `unique([operator,category,range])` et exige `category`/`range`) **doit être réécrit** : check d'unicité sur `slug`, `category`/`range` optionnels, `kind` requis. Idem `products.schema.ts`. (Tâche backend.)
+- ⚠️ Le drop de contrainte doit précéder tout reseed des 9 produits (sinon collision sur les anciens `category,range`).
+
+---
+
+### ADR-V2-002 — `SubscriptionConfig` : table dédiée par opérateur
+
+**Statut:** Accepted
+
+**Contexte:**
+F6 exige une config abonnement **paramétrable sans redéploiement** (prix 8900, kitBainQty 8, kitLitQty 4, minEngagementMonths 3, noticePeriodDays 30) et **versionnable par snapshot** à la souscription. Trois options : table dédiée, colonnes sur `Operator`, JSON `Operator.metadata`.
+
+**Décision:** **table dédiée** `SubscriptionConfig`, 1 ligne par opérateur (`operatorId @unique`), typée fortement (chaque paramètre = colonne Int/String typée, pas de JSON) :
+
+```prisma
+model SubscriptionConfig {
+  id                  String   @id @default(uuid()) @db.Uuid
+  operatorId          String   @unique @map("operator_id") @db.Uuid
+  planName            String   @default("Pack Sérénité") @map("plan_name") @db.VarChar(100)
+  priceCents          Int      @default(8900) @map("price_cents")
+  kitBainQty          Int      @default(8) @map("kit_bain_qty")
+  kitLitQty           Int      @default(4) @map("kit_lit_qty")
+  minEngagementMonths Int      @default(3) @map("min_engagement_months")
+  noticePeriodDays    Int      @default(30) @map("notice_period_days")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  operator Operator @relation(fields: [operatorId], references: [id])
+  @@map("subscription_configs")
+}
+```
+
+Relation inverse `Operator.subscriptionConfig SubscriptionConfig?`. La config est lue par `GET /subscriptions/config` (client) et `GET/PATCH /admin/.../config`. Le **snapshot** à la souscription copie ces valeurs dans des champs de `Subscription` (ADR-V2-006).
+
+**Alternatives considérées:**
+
+- **Colonnes sur `Operator`** — pollue un modèle déjà chargé avec une préoccupation purement « offre commerciale » ; couplage fort. → Rejetée.
+- **JSON `Operator.metadata`** — perte du typage Prisma, validation Zod manuelle à chaque lecture, pas d'index, pas de defaults DB. La spec demande explicitement « versionnable / typé ». → Rejetée.
+
+**Conséquences:**
+
+- ✅ Typage fort, defaults DB, audit propre (`entity=SubscriptionConfig`), prêt multi-opérateur.
+- ✅ `GET /subscriptions/config` trivial (un `findUnique` par operatorId), avec **auto-provisioning** : si aucune ligne, le service en crée une avec les defaults (idempotent) — couvre le cas prod où la table vient d'être créée.
+- ⚠️ Migration ajoute 1 table + 1 relation inverse. Le seed (ADR-V2-007) crée la ligne par défaut.
+
+---
+
+### ADR-V2-003 — `SubscriptionPlan` : conservé, `plan` rendu nullable, snapshot porté par `Subscription`
+
+**Statut:** Accepted
+
+**Contexte:**
+Le client réel a `Subscription.plan = PRESTIGE` (NOT NULL aujourd'hui). Le nouveau modèle est mono-plan (« Pack Sérénité ») et paramétrable ; il n'a plus besoin de l'enum publiquement. Supprimer une valeur d'enum Postgres (`DROP VALUE`) est **impossible** proprement et casserait la ligne du client réel.
+
+**Décision:**
+
+- **Conserver `SubscriptionPlan`** (ESSENTIELLE/CONFORT/PRESTIGE) **intact** — zéro `DROP TYPE`/`DROP VALUE`. Marqué `@deprecated` dans la doc, plus utilisé publiquement.
+- **`Subscription.plan` rendu NULLABLE** (`SubscriptionPlan?`) : additif (relâchement NOT NULL), non destructif. Les abonnements existants gardent leur valeur (`PRESTIGE`, etc.). Les **nouvelles** souscriptions Pack Sérénité écrivent `plan = null` (ou conservent une valeur sentinelle — on choisit `null` : le plan n'a plus de sens, l'offre est décrite par les champs snapshot).
+- La **source de vérité du nouveau modèle** = champs snapshot sur `Subscription` (ADR-V2-006), pas l'enum.
+
+**Alternatives considérées:**
+
+- **Ajouter une valeur `PACK_SERENITE` à l'enum** — additif et possible, mais réintroduit un discriminant enum dont le modèle veut justement se passer (offre = config paramétrable). → Rejetée ; `null` + champs snapshot suffit.
+- **Supprimer l'enum / migrer le client** — destructif, casse la migration prod, rollback impossible. → Rejetée frontalement (contrainte « jamais destructif en phase 1 »).
+
+**Conséquences:**
+
+- ✅ Migration prod sûre : aucune valeur d'enum touchée, le client PRESTIGE reste lisible.
+- ✅ `createSubscriptionSchema` peut rendre `plan` optionnel/retiré (tâche backend) ; `POST /subscriptions` ne requiert plus `plan`.
+- ⚠️ `listSubscriptionsQuerySchema` garde le filtre `plan` (compat admin) ; les nouvelles souscriptions y apparaissent avec `plan=null`.
+
+---
+
+### ADR-V2-004 — Stock inchangé : `ProductRange` étendu (additif), aucune migration de stock
+
+**Statut:** Accepted
+
+**Contexte:**
+`ClientStock`, `OperatorStock` (`@@unique` par `ProductRange`) et `StockMovement.productRange` opèrent par gamme. La spec et les risques imposent explicitement : **ne pas refondre le stock en V1** (scope creep = risque haut). Mais les kits n'ont pas de `ProductRange` existante.
+
+**Décision:**
+
+- **Aucune modification** des modèles `ClientStock`/`OperatorStock`/`StockMovement`.
+- **Extension additive de l'enum `ProductRange`** avec `KIT_BAIN`, `KIT_LIT`, `KIT_COMPLET` (en plus de CONFORT/HOTEL/PRESTIGE conservés). Cela permet, si/quand le stock des kits sera tracé, de réutiliser les modèles existants sans changement de schéma. En V1, **on ne crée aucun mouvement de stock kit** (le stock reste géré sur les gammes historiques pour le client réel migré).
+- Le client réel migré garde son `ClientStock` PRESTIGE intact (AC-F8-01). Aucune réécriture.
+
+**Alternatives considérées:**
+
+- **Migrer le stock vers `productId`** — refonte lourde, hors scope V1, risque de rupture mobile (écran stock lit `productRange`). → Rejetée.
+- **Ne pas étendre `ProductRange`** — bloquerait toute évolution stock kit future et forcerait un cast. → L'extension additive est gratuite et anticipe proprement.
+
+**Conséquences:**
+
+- ✅ Zéro migration de stock, zéro impact écran stock mobile (lit toujours `productRange`).
+- ✅ Enum prêt pour une V2 stock-par-kit sans nouvelle migration structurelle.
+- ⚠️ Incohérence assumée V1 : un kit commandé ne génère pas de mouvement de stock par kit (le stock physique reste suivi à la gamme). Documenté comme dette V1 (déjà dans les hypothèses spec).
+
+---
+
+### ADR-V2-005 — Vitrine : Option A (constantes partagées, désynchro assumée)
+
+**Statut:** Accepted
+
+**Contexte:**
+La vitrine (`tarifs.tsx`) hardcode aujourd'hui prix et texte « Sans engagement ». F7 veut une source de vérité ; F6 veut « Engagement 3 mois ». Option A = importer `CATALOG_DEFAULTS`/`SUBSCRIPTION_DEFAULTS` de `@lingengo/shared` (valeurs de seed, désynchro possible avec la DB si l'admin change un prix). Option B = appel API public temps réel (scope V2).
+
+**Décision:** **Option A**. La vitrine ajoute `@lingengo/shared` à ses dépendances (workspace) et remplace les valeurs hardcodées de `tarifs.tsx` (et `devis-generator.tsx` si présent) par les constantes partagées. Un **commentaire d'avertissement** explicite indique que ces prix = valeurs par défaut de seed, non les prix DB temps réel. Le texte « Sans engagement · résiliable à tout moment » → « Engagement 3 mois · résiliable ensuite avec 30 j de préavis » (AC-F6-07).
+
+**Vérification deps :** `apps/vitrine/package.json` **ne dépend pas encore** de `@lingengo/shared`. L'agent vitrine doit l'ajouter (`"@lingengo/shared": "workspace:*"`). `@lingengo/shared` est zod-only (pas de React/PDF) → import safe dans un Server Component Next.
+
+**Alternatives considérées:**
+
+- **Option B (API temps réel)** — élargit le scope (endpoint public CORS, cache, états de chargement) pour un bénéfice marginal en V1 (les prix changent rarement). → Rejetée pour V1 (recommandation PM).
+
+**Conséquences:**
+
+- ✅ Une seule source de constantes pour seed + vitrine ; cohérence au lancement (AC-F7-03).
+- ⚠️ Si l'admin change un prix en prod, la vitrine reste sur la valeur de seed jusqu'au prochain déploiement → comportement documenté, acceptable V1.
+
+---
+
+### ADR-V2-006 — Snapshot d'engagement sur `Subscription` + blocage résiliation côté API
+
+**Statut:** Accepted
+
+**Contexte:**
+F6 : la souscription doit figer prix + composition + engagement (immuables même si la config change ensuite, AC-F6-06), et la résiliation doit être **bloquée côté API** (pas seulement mobile, exigence sécurité) tant que `committedUntil` n'est pas atteinte.
+
+**Décision:** ajout de **5 colonnes additives** sur `Subscription`, toutes nullable ou avec default (rollback-safe) :
+
+```prisma
+priceCents          Int?      @map("price_cents")            // snapshot prix mensuel
+minEngagementMonths Int       @default(3) @map("min_engagement_months")
+committedUntil      DateTime? @map("committed_until")        // startDate + minEngagementMonths (calendaire)
+kitBainQty          Int       @default(8) @map("kit_bain_qty")
+kitLitQty           Int       @default(4) @map("kit_lit_qty")
+```
+
+Logique service (`SubscriptionsService`) :
+
+- **`create`** (`POST /subscriptions`) : lit `SubscriptionConfig` (auto-provisionnée), écrit le snapshot `priceCents/minEngagementMonths/kitBainQty/kitLitQty`, calcule `committedUntil = currentPeriodStart + minEngagementMonths mois` (calcul **calendaire** via `setMonth`, pas 90j fixes). `plan = null` (ADR-V2-003). Retourne la config complète. 409 si abonnement ACTIVE existant.
+- **`cancel`** (`PATCH /subscriptions/me/cancel`) : si `committedUntil != null && now() < committedUntil` → **`UnprocessableEntityError(422, "ENGAGEMENT_ACTIVE", "Résiliation non autorisée : votre engagement court jusqu'au {date}. Vous pourrez résilier à partir du {date}.")`**. Sinon, comportement existant (`cancelledAt=now`, `cancelEffectiveAt=now+noticePeriodDays`). `UnprocessableEntityError` 422 doit être **ajouté à `packages/api/src/utils/errors.ts`** (déjà prévu ADR-010 du périmètre F1-F4 — vérifier qu'il existe, sinon l'ajouter).
+- **`getByUserId`** (`GET /subscriptions/me`) : renvoie les champs snapshot → le mobile calcule l'état d'engagement sans valeur en dur (AC-F6-05).
+
+**Alternatives considérées:**
+
+- **Recalculer l'engagement à la volée depuis la config** — viole l'immuabilité (AC-F6-06 : la config peut changer). → Rejetée, snapshot obligatoire.
+- **`committedUntil` = 90 jours fixes** — la spec exige un calcul calendaire (3 mois ≠ 90j). → Rejetée.
+
+**Conséquences:**
+
+- ✅ Blocage résiliation garanti côté serveur (testable, exigence sécu).
+- ✅ Snapshots immuables : changer la config n'altère pas les abonnements en cours.
+- ⚠️ `priceCents` nullable : les abonnements existants (client réel) auront `priceCents=null` jusqu'à la migration de données (Phase 2) qui le renseigne à 8900.
+
+---
+
+### ADR-V2-007 — Source de vérité partagée + seed/reseed des 9 produits & config
+
+**Statut:** Accepted
+
+**Contexte:**
+F7 : `packages/shared/src/constants.ts` contient `PRICE_PER_SET_CENTS` et `SUBSCRIPTION_PLANS` (barème périmé CONFORT/HOTEL/PRESTIGE). Le seed crée 6 produits SERVIETTES/TAPIS × ranges et 3 subscriptions par enum. Il faut une source unique consommée par seed + vitrine.
+
+**Décision:**
+
+1. **`@lingengo/shared`** gagne `CATALOG_DEFAULTS`, `SUBSCRIPTION_DEFAULTS`, `DELIVERY_DEFAULTS` (valeurs exactes de la spec F7) + une table `CATALOG_PRODUCTS` (les 9 produits canoniques avec `slug`, `kind`, `name`, `category|null`, `priceCents`, `description`) consommée par le seed. `PRICE_PER_SET_CENTS` et `SUBSCRIPTION_PLANS` sont **marqués `@deprecated`** (conservés pour ne pas casser un import résiduel, mais aucun nouveau code ne les utilise — AC-F7-01). Pas de dépendance React (contrainte respectée).
+2. **`packages/database/prisma/seed.ts`** réécrit pour : upsert des **9 produits** (clé d'upsert = `slug`) avec les valeurs de `CATALOG_PRODUCTS`, création/upsert du **`SubscriptionConfig`** par défaut (`SUBSCRIPTION_DEFAULTS`). Les 6 anciens produits seed (SERVIETTES/TAPIS × ranges) sont **soft-deleted** (`isActive=false, deletedAt`) plutôt que supprimés (préserve les `OrderItem` de démo). Le seed reste **idempotent**.
+3. **`apps/vitrine`** importe `CATALOG_DEFAULTS`/`SUBSCRIPTION_DEFAULTS` (ADR-V2-005).
+
+**Conséquences:**
+
+- ✅ Une source unique pour seed + vitrine ; `db seed` sur base vide → 9 produits + config (AC-F7-02).
+- ✅ `@lingengo/shared` reste léger (zod-only).
+- ⚠️ Le seed doit tourner **après** le drop de contrainte (ADR-V2-001) sinon l'upsert des 9 produits par slug coexiste avec d'anciennes lignes sous l'ex-contrainte composite — sans la contrainte, aucune collision.
+
+---
+
+### ADR-V2-008 — Endpoints config abonnement + CRUD prix produit (raccourci)
+
+**Statut:** Accepted
+
+**Contexte:**
+F5 demande `PATCH /products/:id/price` (raccourci) en plus du CRUD existant. F6 demande `GET /subscriptions/config` (client), `GET/PATCH` admin config. Les routes existent partiellement : `products` a déjà GET/POST/PUT/DELETE ; `subscriptions` a `/me`, `/me/pause|resume|cancel`, POST, GET (admin liste).
+
+**Décision:**
+
+- **`PATCH /products/:id/price`** (nouveau, admin) : body `{ priceCents: int >= 0 }`. Met à jour `priceCents` uniquement, audit `UPDATE`. N'affecte pas les `OrderItem.unitCents` (snapshot immuable — déjà le cas, aucune cascade). Le `PUT /products/:id` existant reste pour l'édition complète (renommer en cohérence, ou garder PUT — voir note implémentation : la spec dit `PATCH /products/:id`, l'existant est `PUT` ; **on garde `PUT` pour l'édition complète et on ajoute `PATCH /:id/price`** ; le contrat documente les deux).
+- **`GET /subscriptions/config`** (auth client) : renvoie la config publique `{ planName, priceCents, kitBainQty, kitLitQty, minEngagementMonths, noticePeriodDays }` de l'opérateur du user. **Auto-provisionne** la ligne si absente (defaults).
+- **`GET /subscriptions/config/admin`** + **`PATCH /subscriptions/config/admin`** (ROLE_ADMIN/SUPER_ADMIN) : lecture/écriture de la config. Validation Zod : `priceCents>=0`, `minEngagementMonths>=0`, `kitBainQty>=0`, `kitLitQty>=0`, `noticePeriodDays>=0`. Audit `UPDATE entity=SubscriptionConfig`. **Note routing :** pour rester dans le module `subscriptions` (prefix `/api/v1/subscriptions`), les paths réels sont `/config`, `/config/admin`. La spec écrit `/admin/subscriptions/config` ; conformément à ADR-007 (pas de préfixe `/admin`), on monte sous `/api/v1/subscriptions/config/admin`. Le contrat documente le path réel.
+
+**Conséquences:**
+
+- ✅ Réutilise les modules existants, conventions inchangées.
+- ✅ `PATCH /:id/price` = raccourci rapide pour l'écran admin « Modifier le prix ».
+- ⚠️ Divergence de nommage avec la spec (`/admin/subscriptions/config` → `/subscriptions/config/admin`) — assumée et tracée (cohérence routing prime, ADR-007).
+
+---
+
+## Modèle de données — changements V2 (additifs sauf 1 drop de contrainte justifié)
+
+| Action               | Cible                              | Détail                                           | Additif ?                                |
+| -------------------- | ---------------------------------- | ------------------------------------------------ | ---------------------------------------- |
+| Nouvel enum          | `ProductKind`                      | `KIT`, `ARTICLE`                                 | ✅                                       |
+| Extension enum       | `ProductRange`                     | + `KIT_BAIN`, `KIT_LIT`, `KIT_COMPLET`           | ✅ (ADD VALUE)                           |
+| Colonne              | `Product.kind`                     | `ProductKind @default(ARTICLE)`                  | ✅                                       |
+| Colonne              | `Product.slug`                     | `String? @unique @db.VarChar(60)`                | ✅                                       |
+| Relâchement NOT NULL | `Product.category`                 | `ProductCategory` → `ProductCategory?`           | ✅ (relâche)                             |
+| Relâchement NOT NULL | `Product.range`                    | `ProductRange` → `ProductRange?`                 | ✅ (relâche)                             |
+| **Drop contrainte**  | `Product`                          | **DROP `@@unique([operatorId,category,range])`** | ⚠️ **non additif** (justifié ADR-V2-001) |
+| Nouveau modèle       | `SubscriptionConfig`               | voir ADR-V2-002                                  | ✅                                       |
+| Relation inverse     | `Operator.subscriptionConfig`      | `SubscriptionConfig?`                            | ✅                                       |
+| Relâchement NOT NULL | `Subscription.plan`                | `SubscriptionPlan` → `SubscriptionPlan?`         | ✅ (relâche)                             |
+| Colonne              | `Subscription.priceCents`          | `Int?`                                           | ✅                                       |
+| Colonne              | `Subscription.minEngagementMonths` | `Int @default(3)`                                | ✅                                       |
+| Colonne              | `Subscription.committedUntil`      | `DateTime?`                                      | ✅                                       |
+| Colonne              | `Subscription.kitBainQty`          | `Int @default(8)`                                | ✅                                       |
+| Colonne              | `Subscription.kitLitQty`           | `Int @default(4)`                                | ✅                                       |
+
+**Règle d'or :** le seul `DROP CONSTRAINT` est isolé et placé **avant** tout reseed produit. Aucune donnée détruite. Tout le reste est `ADD COLUMN`/`ADD VALUE`/`DROP NOT NULL`, rollback-compatible.
+
+---
+
+## Plan de migration (3 phases de la spec F8)
+
+Les migrations Prisma s'empilent après `20260611000001`. Nommage lexicographique croissant (`migrate deploy` les applique dans l'ordre).
+
+### Phase 1 — Migration Prisma additive (sans rupture) — `20260612000001_catalog_kits_subscription_engagement`
+
+**Contenu (SQL, dans l'ordre) :**
+
+1. `CREATE TYPE "ProductKind" AS ENUM ('KIT', 'ARTICLE');`
+2. `ALTER TYPE "ProductRange" ADD VALUE IF NOT EXISTS 'KIT_BAIN'; ... 'KIT_LIT'; ... 'KIT_COMPLET';`
+   ⚠️ **Postgres : `ALTER TYPE ... ADD VALUE` ne peut pas s'exécuter dans le même bloc transactionnel qu'une utilisation de la valeur.** Prisma exécute chaque migration en transaction → mettre les `ADD VALUE` **dans leur propre migration** OU s'assurer qu'aucune ligne de la même migration n'utilise la nouvelle valeur (c'est le cas ici : on n'insère aucune ligne `KIT_*` dans la migration). Si `migrate deploy` échoue sur le bloc transactionnel, **scinder** les `ADD VALUE` dans une migration dédiée préalable `20260612000000_extend_product_range`. **Recommandation : migration dédiée `20260612000000` pour les `ADD VALUE`**, puis `20260612000001` pour le reste.
+3. `ALTER TABLE "products" ADD COLUMN "kind" "ProductKind" NOT NULL DEFAULT 'ARTICLE';`
+4. `ALTER TABLE "products" ADD COLUMN "slug" VARCHAR(60);` puis `CREATE UNIQUE INDEX "products_slug_key" ON "products"("slug");`
+5. `ALTER TABLE "products" ALTER COLUMN "category" DROP NOT NULL;`
+6. `ALTER TABLE "products" ALTER COLUMN "range" DROP NOT NULL;`
+7. `ALTER TABLE "products" DROP CONSTRAINT IF EXISTS "products_operator_id_category_range_key";`
+8. `CREATE TABLE "subscription_configs" (...);` + FK `operator_id` + `CREATE UNIQUE INDEX` sur `operator_id`.
+9. `ALTER TABLE "subscriptions" ALTER COLUMN "plan" DROP NOT NULL;`
+10. `ALTER TABLE "subscriptions" ADD COLUMN "price_cents" INTEGER;`
+11. `ALTER TABLE "subscriptions" ADD COLUMN "min_engagement_months" INTEGER NOT NULL DEFAULT 3;`
+12. `ALTER TABLE "subscriptions" ADD COLUMN "committed_until" TIMESTAMP(3);`
+13. `ALTER TABLE "subscriptions" ADD COLUMN "kit_bain_qty" INTEGER NOT NULL DEFAULT 8;`
+14. `ALTER TABLE "subscriptions" ADD COLUMN "kit_lit_qty" INTEGER NOT NULL DEFAULT 4;`
+
+**Garanties Phase 1 :** aucune donnée modifiée, aucune valeur d'enum retirée. Rollback Prisma possible (les colonnes ajoutées sont nullable/default ; le drop NOT NULL et le drop constraint sont réversibles tant qu'on n'a pas inséré de NULL — donc **avant** le reseed de Phase 2). **AC-F8-02 satisfait.**
+
+### Phase 2 — Migration des données (script, post-déploiement Phase 1) — `packages/database/prisma/migrate-v2-data.ts`
+
+Script idempotent exécuté **manuellement** après validation (pas un `migrate deploy` auto, car il porte une décision propriétaire — AC-F8-03). Étapes :
+
+1. **Drop constraint déjà fait en Phase 1** → reseed produits possible.
+2. **Upsert des 9 produits canoniques** (clé `slug`) depuis `CATALOG_PRODUCTS` (`@lingengo/shared`), `kind`, `category|null`, `range=null`, `serviceTypeId=LOCATION`, `priceCents`, `isActive=true`.
+3. **Soft-delete des anciens produits** non canoniques (les 6 SERVIETTES/TAPIS × ranges) : `isActive=false, deletedAt=now()`. **Conserve les `OrderItem`** (référence par UUID intacte — AC-F8-01).
+4. **Créer `SubscriptionConfig`** pour l'opérateur si absent (defaults `SUBSCRIPTION_DEFAULTS`).
+5. **Migrer le client réel PRESTIGE → Pack Sérénité** : sur sa `Subscription` ACTIVE, set `priceCents=8900, kitBainQty=8, kitLitQty=4, minEngagementMonths=3`. **`plan` laissé tel quel (`PRESTIGE`) ou mis à `null`** — on choisit de **laisser `PRESTIGE`** (trace historique, non destructif) ; le nouveau modèle est porté par les snapshots.
+6. **Décision engagement client existant (AC-F8-03)** — exposée par un flag d'environnement explicite `MIGRATE_EXISTING_ENGAGEMENT` :
+   - `MIGRATE_EXISTING_ENGAGEMENT=exempt` → `committedUntil = null` (résiliation libre immédiate).
+   - `MIGRATE_EXISTING_ENGAGEMENT=enforce` → `committedUntil = now() + 3 mois`.
+   - **Défaut si non fourni : le script s'arrête et demande le choix** (refuse de deviner). Le propriétaire valide avant exécution prod.
+7. **Stock inchangé** (ADR-V2-004) : aucune écriture sur `ClientStock`/`OperatorStock`/`StockMovement`.
+
+### Phase 3 — Nettoyage (post-validation, optionnel, non bloquant)
+
+À exécuter **seulement** après confirmation que tout fonctionne en prod (jours/semaines après) :
+
+1. Les anciens produits sont déjà soft-deleted (Phase 2.3) → rien à supprimer physiquement.
+2. `SubscriptionPlan` enum **conservé** (ADR-V2-003) — pas de `DROP VALUE`. Aucune action destructive.
+3. `PRICE_PER_SET_CENTS`/`SUBSCRIPTION_PLANS` dans `@lingengo/shared` : suppression définitive possible une fois confirmé qu'aucun import résiduel n'existe (`tsc --noEmit` vert sans eux). Jusque-là, `@deprecated`.
+
+**Aucune opération destructive en Phase 3 n'est requise pour la V1.** La phase est documentée mais peut rester vide.
+
+---
+
+## Découpage du travail (frontières de fichiers pour paralléliser)
+
+### gwani-backend (`packages/api`, `packages/database`, `packages/shared`)
+
+- `packages/database/prisma/schema.prisma` : appliquer tous les changements V2 (ADR-V2-001/002/003/004/006). **(fait par l'architecte ci-dessous — le backend vérifie + génère les migrations.)**
+- `packages/database/prisma/migrations/20260612000000_extend_product_range/` + `20260612000001_catalog_kits_subscription_engagement/` : créer les 2 migrations SQL (Phase 1).
+- `packages/database/prisma/migrate-v2-data.ts` : script Phase 2 (idempotent, flag `MIGRATE_EXISTING_ENGAGEMENT`).
+- `packages/database/prisma/seed.ts` : reseed 9 produits par slug + `SubscriptionConfig` (ADR-V2-007).
+- `packages/shared/src/constants.ts` : ajouter `CATALOG_DEFAULTS`, `SUBSCRIPTION_DEFAULTS`, `DELIVERY_DEFAULTS`, `CATALOG_PRODUCTS` ; `@deprecated` sur `PRICE_PER_SET_CENTS`/`SUBSCRIPTION_PLANS`. **(squelette posé par l'architecte ci-dessous.)**
+- `packages/api/src/schemas/products.schema.ts` : `kind`/`slug` ajoutés, `category`/`range` optionnels, `priceUpdateSchema`.
+- `packages/api/src/services/products.service.ts` : check unicité sur `slug` (plus `category,range`), gérer `kind`/`slug`, `updatePrice()`.
+- `packages/api/src/routes/products/index.ts` : ajouter `PATCH /:id/price`.
+- `packages/api/src/schemas/subscriptions.schema.ts` : retirer `plan` requis de create, ajouter `subscriptionConfigSchema`/`updateConfigSchema`.
+- `packages/api/src/services/subscriptions.service.ts` : `getConfig()` (auto-provision), `updateConfig()`, snapshot dans `create()`, blocage engagement dans `cancel()`.
+- `packages/api/src/routes/subscriptions/index.ts` : `GET /config`, `GET /config/admin`, `PATCH /config/admin`.
+- `packages/api/src/utils/errors.ts` : vérifier/ajouter `UnprocessableEntityError(422)`.
+- **Frontière :** ne touche pas aux modules `quotes/users/settings` (F1-F4) ni au stock.
+
+### apps/mobile
+
+- `apps/mobile/lib/api.ts` : étendre `interface Product` avec `kind` + `slug` ; étendre `interface Subscription` avec `priceCents/minEngagementMonths/committedUntil/kitBainQty/kitLitQty` ; ajouter `useSubscriptionConfig()` (`GET /subscriptions/config`) ; adapter `useCreateOrder`/`useMySubscription`.
+- `apps/mobile/app/(tabs)/` écran catalogue/commande : afficher kits vs articles via `kind`, prix depuis `/products` (zéro valeur en dur — AC-F5-01).
+- `apps/mobile/app/(tabs)/` écran abonnement : afficher Pack Sérénité depuis `useSubscriptionConfig()`, composition (8+4), engagement, `committedUntil` (AC-F6-01/05).
+- Écran résiliation : bloquer l'UI si `committedUntil` non atteinte, afficher la date (AC-F6-05) ; gérer le 422 `ENGAGEMENT_ACTIVE`.
+- **Frontière :** ne touche pas à l'écran stock (inchangé, lit toujours `productRange`).
+
+### admin-web (`apps/admin-web`)
+
+- `src/app/(dashboard)/produits/page.tsx` : liste 9 produits + bouton « Modifier le prix » (PATCH `/products/:id/price`) ; afficher `kind` (badge Kit/Article).
+- `src/app/(dashboard)/produits/[id]/modifier/page.tsx` : **nouveau** formulaire édition prix/nom/description.
+- `src/app/(dashboard)/abonnements/page.tsx` : section « Configuration Pack Sérénité » (GET/PATCH `/subscriptions/config/admin`) — prix, kitBainQty, kitLitQty, minEngagementMonths, noticePeriodDays.
+- `src/lib/api.ts` : hooks produits (price update) + config abonnement.
+- **Frontière :** ne touche pas aux pages devis/utilisateurs/reglages/commandes (F1-F4 livrées).
+
+### vitrine (`apps/vitrine`)
+
+- `package.json` : ajouter `"@lingengo/shared": "workspace:*"`.
+- `src/components/tarifs.tsx` : remplacer prix hardcodés par `CATALOG_DEFAULTS`/`SUBSCRIPTION_DEFAULTS` ; remplacer « Sans engagement · résiliable à tout moment » → « Engagement 3 mois · résiliable ensuite avec 30 j de préavis » (AC-F6-07) ; commentaire d'avertissement (valeurs de seed, pas DB temps réel).
+- `src/components/devis-generator.tsx` (si présent) : aligner les prix sur `CATALOG_DEFAULTS`.
+- **Frontière :** Server Components Next, pas de React dans `@lingengo/shared` → import safe.
+
+---
+
+## Hypothèses techniques V2
+
+- `prisma migrate deploy` joue `20260611000001` (F1-F4) puis `20260612000000`/`20260612000001` (V2) dans l'ordre. Si `20260611000001` n'est pas encore en prod, l'enchaînement reste correct (timestamps croissants).
+- Le `ADD VALUE` sur `ProductRange` est isolé dans `20260612000000` pour éviter le problème transactionnel Postgres (valeur enum ajoutée non utilisable dans la même transaction).
+- Le script Phase 2 est exécuté **manuellement** avec `MIGRATE_EXISTING_ENGAGEMENT` validé par le propriétaire (AC-F8-03) — jamais auto au déploiement.
+- Le reseed (9 produits) tourne **après** le drop de la contrainte composite (Phase 1).
+- Le client réel garde son `ClientStock` PRESTIGE et `plan=PRESTIGE` (trace) ; son abonnement reçoit les snapshots Pack Sérénité.
+- `@lingengo/shared` reste zod-only (importable par API Fastify ET vitrine Next Server Component).

@@ -2,7 +2,7 @@ import { Tabs } from "expo-router";
 import { View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, font } from "@/lib/theme";
-import { useNotifications } from "@/lib/api";
+import { useNotifications, useOrders } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -48,10 +48,35 @@ function NotifIcon({ focused }: { focused: boolean }) {
   );
 }
 
+function PendingOrdersIcon({ focused }: { focused: boolean }) {
+  const { data } = useOrders("PENDING");
+  const role = useAuthStore((s) => s.user?.role);
+  const count = role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN" ? (data?.length ?? 0) : 0;
+
+  return (
+    <View>
+      <Ionicons
+        name={focused ? "cube" : "cube-outline"}
+        size={24}
+        color={focused ? colors.primary : colors.textTertiary}
+      />
+      {count > 0 && (
+        <View
+          style={styles.badge}
+          accessibilityLabel={`${count} commande${count > 1 ? "s" : ""} en attente`}
+        >
+          <Text style={styles.badgeText}>{count > 9 ? "9+" : count}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 export default function TabsLayout() {
   const role = useAuthStore((s) => s.user?.role);
   const isClient = role === "ROLE_CLIENT";
   const isDriver = role === "ROLE_LIVREUR";
+  const isAdmin = role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN";
 
   return (
     <Tabs
@@ -80,6 +105,7 @@ export default function TabsLayout() {
         headerShadowVisible: false,
       }}
     >
+      {/* ── Accueil ── tous les rôles ── */}
       <Tabs.Screen
         name="index"
         options={{
@@ -90,19 +116,34 @@ export default function TabsLayout() {
           tabBarAccessibilityLabel: "Accueil",
         }}
       />
+
+      {/* ── Commander (catalogue + commandes) — CLIENT seulement ── */}
       <Tabs.Screen
         name="orders"
         options={{
-          title: "Commandes",
+          title: isClient ? "Commander" : "Commandes",
           headerShown: false,
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name="cube" outline="cube-outline" focused={focused} />
-          ),
-          tabBarAccessibilityLabel: "Commandes",
-          // Hide for drivers - they use deliveries
+          tabBarIcon: ({ focused }) =>
+            isAdmin ? (
+              <PendingOrdersIcon focused={focused} />
+            ) : (
+              <TabIcon name="cube" outline="cube-outline" focused={focused} />
+            ),
+          tabBarAccessibilityLabel: isClient ? "Commander ou voir mes commandes" : "Commandes",
           href: isDriver ? null : "/(tabs)/orders",
         }}
       />
+
+      {/* ── Catalogue — accessible via quick-actions, jamais dans la tab bar ── */}
+      <Tabs.Screen
+        name="catalogue"
+        options={{
+          title: "Catalogue",
+          href: null,
+        }}
+      />
+
+      {/* ── Stock — CLIENT seulement ── */}
       <Tabs.Screen
         name="stock"
         options={{
@@ -111,10 +152,48 @@ export default function TabsLayout() {
             <TabIcon name="stats-chart" outline="stats-chart-outline" focused={focused} />
           ),
           tabBarAccessibilityLabel: "Mon stock de linge",
-          // Only for clients
           href: isClient ? "/(tabs)/stock" : null,
         }}
       />
+
+      {/* ── Clients — ADMIN seulement ── */}
+      <Tabs.Screen
+        name="clients"
+        options={{
+          title: "Clients",
+          headerShown: false,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="people" outline="people-outline" focused={focused} />
+          ),
+          tabBarAccessibilityLabel: "Gestion des clients",
+          href: isAdmin ? "/(tabs)/clients" : null,
+        }}
+      />
+
+      {/* ── Stock global — ADMIN seulement (masqué du tab bar, accessible depuis accueil) ── */}
+      <Tabs.Screen
+        name="stock-global"
+        options={{
+          title: "Stock global",
+          href: null,
+        }}
+      />
+
+      {/* ── Tournée — LIVREUR seulement ── */}
+      <Tabs.Screen
+        name="tournee"
+        options={{
+          title: "Tournée",
+          headerShown: false,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="navigate" outline="navigate-outline" focused={focused} />
+          ),
+          tabBarAccessibilityLabel: "Ma tournée de livraison",
+          href: isDriver ? "/(tabs)/tournee" : null,
+        }}
+      />
+
+      {/* ── Notifications — tous les rôles ── */}
       <Tabs.Screen
         name="notifications"
         options={{
@@ -123,6 +202,8 @@ export default function TabsLayout() {
           tabBarAccessibilityLabel: "Notifications",
         }}
       />
+
+      {/* ── Profil — tous les rôles ── */}
       <Tabs.Screen
         name="profile"
         options={{

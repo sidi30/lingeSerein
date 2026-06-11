@@ -752,11 +752,279 @@
     }
   ],
 
+  "scope_v2": "F5 catalogue KITS, F6 Pack Serenite engagement 3 mois, F7 source partagee, F8 migration. Voir ADR-V2-* dans memory/adr.md.",
+
+  "endpoints_v2": [
+    {
+      "id": "EP-P01",
+      "feature": "F5",
+      "method": "GET",
+      "path": "/products",
+      "role": "public (mobile + admin)",
+      "description": "Liste les produits actifs (9 canoniques : 3 kits + 6 articles). Aucun prix code en dur cote mobile.",
+      "request": {
+        "query": {
+          "kind": "enum KIT|ARTICLE, optionnel (V2)",
+          "category": "enum SERVIETTES|DRAPS|TAPIS_BAIN|LINGE_LIT|KIT_CUISINE|ARTICLE_ACCUEIL, optionnel",
+          "page": "int >=1 default 1",
+          "limit": "int 1..100 default 20 (mobile passe limit=100)"
+        }
+      },
+      "responses": {
+        "200": {
+          "body": {
+            "success": true,
+            "data": "ProductV2DTO[]",
+            "pagination": "{ page, limit, total, totalPages }"
+          }
+        },
+        "400": "VALIDATION_ERROR"
+      },
+      "notes": "Ne retourne que isActive=true && deletedAt=null. Inclut serviceType {kind,name}."
+    },
+    {
+      "id": "EP-P02",
+      "feature": "F5",
+      "method": "POST",
+      "path": "/products",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Creer un produit. Unicite portee par slug (plus de contrainte category+range).",
+      "request": {
+        "body": {
+          "slug": "string max 60, optionnel (genere/fourni) — unique",
+          "kind": "enum KIT|ARTICLE, requis",
+          "serviceTypeId": "uuid, requis",
+          "category": "enum ProductCategory, optionnel (null pour kits)",
+          "range": "enum ProductRange, optionnel",
+          "name": "string 2..200, requis",
+          "description": "string max 2000, optionnel",
+          "priceCents": "int >=0, requis",
+          "attributes": "object, optionnel",
+          "imageUrl": "url max 500, optionnel"
+        }
+      },
+      "responses": {
+        "201": { "body": { "success": true, "data": "ProductV2DTO" } },
+        "400": "VALIDATION_ERROR ('Le nom du produit est obligatoire', 'Le prix doit etre superieur ou egal a 0')",
+        "409": "CONFLICT (slug deja utilise)",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "CREATE entity=Product, changes={ slug, kind, priceCents }"
+    },
+    {
+      "id": "EP-P03",
+      "feature": "F5",
+      "method": "PUT",
+      "path": "/products/:id",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Edition complete (nom, prix, description, slug, kind, category, range, attributes). Conserve l'endpoint PUT existant.",
+      "request": { "body": "Idem POST, tous champs optionnels (partial)" },
+      "responses": {
+        "200": { "body": { "success": true, "data": "ProductV2DTO" } },
+        "400": "VALIDATION_ERROR",
+        "404": "NOT_FOUND",
+        "409": "CONFLICT (slug)",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "UPDATE entity=Product"
+    },
+    {
+      "id": "EP-P04",
+      "feature": "F5",
+      "method": "PATCH",
+      "path": "/products/:id/price",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Raccourci : modifie le prix uniquement. N'affecte PAS les OrderItem.unitCents existants (snapshot immuable, AC-F5-03).",
+      "request": { "body": { "priceCents": "int >=0, requis" } },
+      "responses": {
+        "200": { "body": { "success": true, "data": "ProductV2DTO" } },
+        "400": "VALIDATION_ERROR ('Le prix doit etre superieur ou egal a 0')",
+        "404": "NOT_FOUND",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "UPDATE entity=Product, changes={ priceCents }"
+    },
+    {
+      "id": "EP-P05",
+      "feature": "F5",
+      "method": "DELETE",
+      "path": "/products/:id",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Soft-delete : isActive=false + deletedAt. Disparait de GET /products. Commandes/abonnements existants intacts (ref UUID).",
+      "responses": {
+        "200": { "body": { "success": true, "data": { "message": "Produit supprime" } } },
+        "404": "NOT_FOUND",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "DELETE entity=Product"
+    },
+    {
+      "id": "EP-SUB-CFG01",
+      "feature": "F6",
+      "method": "GET",
+      "path": "/subscriptions/config",
+      "role": "auth (ROLE_CLIENT)",
+      "description": "Config publique du Pack Serenite de l'operateur du user. Auto-provisionne la ligne avec les defaults si absente.",
+      "responses": {
+        "200": { "body": { "success": true, "data": "SubscriptionConfigPublicDTO" } },
+        "401": "UNAUTHORIZED"
+      },
+      "notes": "Le mobile affiche prix/composition/engagement depuis cette reponse (zero valeur en dur, AC-F6-01)."
+    },
+    {
+      "id": "EP-SUB-CFG02",
+      "feature": "F6",
+      "method": "GET",
+      "path": "/subscriptions/config/admin",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Config complete (admin). Path reel sous /api/v1/subscriptions (pas de prefixe /admin, ADR-007).",
+      "responses": {
+        "200": { "body": { "success": true, "data": "SubscriptionConfigDTO" } },
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "EP-SUB-CFG03",
+      "feature": "F6",
+      "method": "PATCH",
+      "path": "/subscriptions/config/admin",
+      "role": "ROLE_ADMIN|ROLE_SUPER_ADMIN",
+      "description": "Modifier la config. N'affecte PAS les abonnements en cours (snapshots immuables, AC-F6-06).",
+      "request": {
+        "body": {
+          "planName": "string 1..100, optionnel",
+          "priceCents": "int >=0, optionnel",
+          "kitBainQty": "int >=0, optionnel",
+          "kitLitQty": "int >=0, optionnel",
+          "minEngagementMonths": "int >=0, optionnel",
+          "noticePeriodDays": "int >=0, optionnel",
+          "isActive": "boolean, optionnel"
+        }
+      },
+      "responses": {
+        "200": { "body": { "success": true, "data": "SubscriptionConfigDTO" } },
+        "400": "VALIDATION_ERROR ('La duree d'engagement minimale doit etre superieure ou egale a 0', 'Le prix ne peut pas etre negatif')",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "UPDATE entity=SubscriptionConfig"
+    },
+    {
+      "id": "EP-SUB01",
+      "feature": "F6",
+      "method": "POST",
+      "path": "/subscriptions",
+      "role": "ROLE_CLIENT",
+      "description": "Souscrire au Pack Serenite. Lit SubscriptionConfig, ecrit le snapshot, calcule committedUntil (calendaire). plan=null (ADR-V2-003). Le champ 'plan' n'est plus requis dans le body.",
+      "request": {
+        "body": {
+          "products": "array optionnel V2 (compose depuis config) — si absent, le service derive la composition kitBain/kitLit de la config"
+        }
+      },
+      "responses": {
+        "201": {
+          "body": {
+            "success": true,
+            "data": "SubscriptionV2DTO (priceCents=8900, minEngagementMonths=3, committedUntil=startDate+3mois, kitBainQty=8, kitLitQty=4, status=ACTIVE)"
+          }
+        },
+        "409": "CONFLICT ('Vous avez deja un abonnement actif')",
+        "400": "VALIDATION_ERROR",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "CREATE entity=Subscription"
+    },
+    {
+      "id": "EP-SUB02",
+      "feature": "F6",
+      "method": "GET",
+      "path": "/subscriptions/me",
+      "role": "ROLE_CLIENT",
+      "description": "Abonnement courant + champs snapshot d'engagement (priceCents, minEngagementMonths, committedUntil, kitBainQty, kitLitQty).",
+      "responses": {
+        "200": { "body": { "success": true, "data": "SubscriptionV2DTO" } },
+        "404": "NOT_FOUND",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      }
+    },
+    {
+      "id": "EP-SUB03",
+      "feature": "F6",
+      "method": "PATCH",
+      "path": "/subscriptions/me/cancel",
+      "role": "ROLE_CLIENT",
+      "description": "Resiliation. BLOQUEE cote API si now() < committedUntil (AC-F6-03). Sinon cancelledAt=now, cancelEffectiveAt=now+noticePeriodDays.",
+      "responses": {
+        "200": {
+          "body": { "success": true, "data": "SubscriptionV2DTO (cancelledAt, cancelEffectiveAt)" }
+        },
+        "422": "UNPROCESSABLE_ENTITY code=ENGAGEMENT_ACTIVE ('Resiliation non autorisee : votre engagement court jusqu'au {committedUntil}. Vous pourrez resilier a partir du {committedUntil}.')",
+        "404": "NOT_FOUND",
+        "401": "UNAUTHORIZED",
+        "403": "FORBIDDEN"
+      },
+      "audit": "UPDATE entity=Subscription"
+    }
+  ],
+
+  "dto_v2": {
+    "ProductV2DTO": {
+      "id": "uuid",
+      "slug": "string|null (ex: 'kit-bain')",
+      "kind": "KIT|ARTICLE",
+      "category": "ProductCategory|null",
+      "range": "ProductRange|null",
+      "name": "string",
+      "description": "string|null",
+      "priceCents": "int",
+      "attributes": "object",
+      "imageUrl": "string|null",
+      "isActive": "boolean",
+      "serviceType": "{ kind, name }"
+    },
+    "SubscriptionConfigPublicDTO": {
+      "planName": "string ('Pack Serenite')",
+      "priceCents": "int (8900)",
+      "kitBainQty": "int (8)",
+      "kitLitQty": "int (4)",
+      "minEngagementMonths": "int (3)",
+      "noticePeriodDays": "int (30)"
+    },
+    "SubscriptionConfigDTO": "SubscriptionConfigPublicDTO + { id, operatorId, isActive, createdAt, updatedAt }",
+    "SubscriptionV2DTO": {
+      "id": "uuid",
+      "plan": "SubscriptionPlan|null (legacy; null pour Pack Serenite)",
+      "status": "ACTIVE|PAUSED|CANCELLED|PAST_DUE",
+      "currentPeriodStart": "ISO",
+      "currentPeriodEnd": "ISO",
+      "priceCents": "int|null (snapshot, null si legacy non migre)",
+      "minEngagementMonths": "int",
+      "committedUntil": "ISO|null",
+      "kitBainQty": "int",
+      "kitLitQty": "int",
+      "pauseMonthsUsed": "int",
+      "cancelledAt": "ISO|null",
+      "cancelEffectiveAt": "ISO|null",
+      "products": "SubProduct[]"
+    }
+  },
+
   "notes_implementation": {
     "frontend_api_client": "Ajouter api.getRaw<{data,pagination,meta?}>(endpoint, params) dans apps/admin-web/src/lib/api.ts pour les listes paginees (l'unwrap actuel ecrase pagination). Voir ADR-011.",
     "pdf": "DevisDocument + downloadDevisPdf importes depuis @lingengo/ui; computeDevisTotals depuis @lingengo/shared. Mapper QuoteDTO -> DevisData via quoteToDevisData (shared). PDF nomme 'LS-Devis-{numero}.pdf'. Voir ADR-006.",
     "transitions_shared": "QUOTE_TRANSITIONS / QUOTE_EDITABLE / ORDER_TRANSITIONS exportes par @lingengo/shared pour usage front (griser boutons) et back (validation).",
-    "errors": "Ajouter UnprocessableEntityError(422) dans packages/api/src/utils/errors.ts (ADR-010).",
-    "jobs": "quote-expiry.worker.ts (cron quotidien) + expireOverdue() appele dans QuotesService.list (ADR-008)."
+    "errors": "Ajouter UnprocessableEntityError(422) dans packages/api/src/utils/errors.ts (ADR-010 + ADR-V2-006, code ENGAGEMENT_ACTIVE).",
+    "jobs": "quote-expiry.worker.ts (cron quotidien) + expireOverdue() appele dans QuotesService.list (ADR-008).",
+    "v2_catalog": "Product : slug (unique) + kind (KIT|ARTICLE), category/range nullable, contrainte @@unique([operatorId,category,range]) RETIREE (ADR-V2-001). ProductsService.create check unicite sur slug. Migrations 20260612000000 (ADD VALUE ProductRange) + 20260612000001 (reste Phase 1).",
+    "v2_subscription": "SubscriptionConfig (table dediee, 1/operateur, auto-provision). Subscription : plan nullable + snapshots priceCents/minEngagementMonths/committedUntil/kitBainQty/kitLitQty. cancel() bloque si now()<committedUntil (422 ENGAGEMENT_ACTIVE). committedUntil = currentPeriodStart + minEngagementMonths mois (setMonth, calendaire).",
+    "v2_migration": "Phase 1 = migrations additives (1 seul DROP CONSTRAINT justifie). Phase 2 = script manuel migrate-v2-data.ts (reseed 9 produits par slug + soft-delete anciens + migration client reel PRESTIGE->Pack Serenite). Flag MIGRATE_EXISTING_ENGAGEMENT=exempt|enforce OBLIGATOIRE (AC-F8-03, choix proprietaire). Phase 3 = nettoyage non destructif (rien d'obligatoire V1).",
+    "v2_shared": "CATALOG_DEFAULTS / CATALOG_PRODUCTS / SUBSCRIPTION_DEFAULTS / DELIVERY_DEFAULTS dans @lingengo/shared. PRICE_PER_SET_CENTS + SUBSCRIPTION_PLANS marques @deprecated. Vitrine importe @lingengo/shared (Option A, ADR-V2-005)."
   }
 }

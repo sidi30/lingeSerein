@@ -1,4 +1,4 @@
-import { View, Text, Pressable, StyleSheet } from "react-native";
+import { View, Text, Pressable, FlatList, StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,18 +9,60 @@ import { Card } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SectionHeader } from "@/components/SectionHeader";
-import { LoadingScreen } from "@/components/LoadingScreen";
+import { SkeletonBox } from "@/components/SkeletonBox";
+import { ProgressRing } from "@/components/ProgressRing";
 import { useAuthStore } from "@/lib/store";
 import {
   useProfile,
   useMyStock,
   useMySubscription,
+  useSubscriptionConfig,
   useOrders,
   useDashboardKpis,
+  useDashboardAlerts,
   useTodayRound,
   formatCents,
+  formatDate,
 } from "@/lib/api";
+import type { Order, DashboardAlert, DeliveryStop } from "@/lib/api";
 import { colors, font, spacing, radius } from "@/lib/theme";
+
+// ─── Quick action button ─────────────────────────────────────────
+
+function QuickAction({
+  icon,
+  label,
+  color,
+  bgColor,
+  onPress,
+  badge,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  color: string;
+  bgColor: string;
+  onPress: () => void;
+  badge?: number;
+}) {
+  return (
+    <Pressable
+      style={[styles.actionCard, { backgroundColor: bgColor }]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <View style={{ position: "relative" }}>
+        <Ionicons name={icon} size={28} color={color} />
+        {badge != null && badge > 0 && (
+          <View style={styles.actionBadge}>
+            <Text style={styles.actionBadgeText}>{badge > 9 ? "9+" : badge}</Text>
+          </View>
+        )}
+      </View>
+      <Text style={[styles.actionLabel, { color }]}>{label}</Text>
+    </Pressable>
+  );
+}
 
 // ─── Client home ─────────────────────────────────────────────────
 
@@ -28,19 +70,29 @@ function ClientHome() {
   const profile = useProfile();
   const stock = useMyStock();
   const sub = useMySubscription();
+  const subConfig = useSubscriptionConfig();
   const orders = useOrders();
 
   const isLoading = profile.isLoading || stock.isLoading || sub.isLoading || orders.isLoading;
   const refreshing =
     profile.isRefetching || stock.isRefetching || sub.isRefetching || orders.isRefetching;
   const refetch = () => {
-    profile.refetch();
-    stock.refetch();
-    sub.refetch();
-    orders.refetch();
+    void profile.refetch();
+    void stock.refetch();
+    void sub.refetch();
+    void subConfig.refetch();
+    void orders.refetch();
   };
 
-  if (isLoading && !profile.data) return <LoadingScreen />;
+  if (isLoading && !profile.data) {
+    return (
+      <ScreenWrapper>
+        <SkeletonBox height={120} style={{ marginBottom: spacing.md }} />
+        <SkeletonBox height={80} style={{ marginBottom: spacing.md }} />
+        <SkeletonBox height={100} />
+      </ScreenWrapper>
+    );
+  }
 
   const nextOrder = orders.data?.find((o) => o.status !== "DELIVERED" && o.status !== "CANCELLED");
   const totalClean = stock.data?.stocks.reduce((s, st) => s + st.cleanSets, 0) ?? 0;
@@ -56,11 +108,15 @@ function ClientHome() {
         end={{ x: 1, y: 1 }}
         style={styles.hero}
       >
-        <Text style={styles.heroGreeting}>Bonjour, {profile.data?.name?.split(" ")[0] ?? ""}</Text>
+        <Text style={styles.heroGreeting}>
+          Bonjour, {profile.data?.name?.split(" ")[0] ?? ""} 👋
+        </Text>
         {sub.data && (
           <View style={styles.heroPill}>
             <Text style={styles.heroPillText}>
-              {sub.data.plan} · {sub.data.status === "ACTIVE" ? "Actif" : sub.data.status}
+              {/* Nom du plan : depuis la config (Pack Sérénité) ou legacy */}
+              {subConfig.data?.planName ?? sub.data.plan ?? "Abonnement"} ·{" "}
+              {sub.data.status === "ACTIVE" ? "Actif" : sub.data.status}
             </Text>
           </View>
         )}
@@ -70,7 +126,7 @@ function ClientHome() {
       <Pressable
         onPress={() => router.push("/(tabs)/stock")}
         accessibilityRole="button"
-        accessibilityLabel="Mon stock"
+        accessibilityLabel="Voir mon stock de linge"
       >
         <Card style={styles.stockCard}>
           <View style={styles.stockRow}>
@@ -118,6 +174,7 @@ function ClientHome() {
           <Pressable
             onPress={() => router.push(`/(tabs)/orders/${nextOrder.id}`)}
             accessibilityRole="button"
+            accessibilityLabel={`Commande ${nextOrder.orderNumber}`}
           >
             <Card>
               <View style={styles.deliveryRow}>
@@ -134,15 +191,15 @@ function ClientHome() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.deliveryNum}>{nextOrder.orderNumber}</Text>
                   <Text style={styles.deliverySlot}>
-                    {nextOrder.timeSlot ?? "Creneau a confirmer"}
+                    {nextOrder.timeSlot ?? "Créneau à confirmer"}
                   </Text>
-                  <Text style={styles.deliveryItems}>
+                  <Text style={styles.deliveryItems} numberOfLines={1}>
                     {nextOrder.items
-                      .map((i) => `${i.quantity}x ${i.product?.range ?? "?"}`)
+                      .map((i) => `${i.quantity}x ${i.product?.name ?? i.product?.range ?? "?"}`)
                       .join(", ")}
                   </Text>
                 </View>
-                <View style={{ alignItems: "flex-end" }}>
+                <View style={{ alignItems: "flex-end", gap: 4 }}>
                   <StatusBadge type="order" status={nextOrder.status} />
                   <Text style={styles.deliveryPrice}>{formatCents(nextOrder.totalCents)}</Text>
                 </View>
@@ -155,47 +212,34 @@ function ClientHome() {
       {/* Quick actions */}
       <SectionHeader title="Actions rapides" />
       <View style={styles.actionsGrid}>
-        <Pressable
-          style={[styles.actionCard, { backgroundColor: colors.primaryLight }]}
+        <QuickAction
+          icon="add-circle"
+          label="Commander"
+          color={colors.primary}
+          bgColor={colors.primaryLight}
           onPress={() => router.push("/(tabs)/orders/new")}
-          accessibilityRole="button"
-          accessibilityLabel="Nouvelle commande"
-        >
-          <Ionicons name="add-circle" size={28} color={colors.primary} style={styles.actionIcon} />
-          <Text style={[styles.actionLabel, { color: colors.primary }]}>Commander</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionCard, { backgroundColor: colors.successLight }]}
+        />
+        <QuickAction
+          icon="receipt"
+          label="Commandes"
+          color={colors.success}
+          bgColor={colors.successLight}
           onPress={() => router.push("/(tabs)/orders")}
-          accessibilityRole="button"
-          accessibilityLabel="Mes commandes"
-        >
-          <Ionicons name="receipt" size={28} color={colors.success} style={styles.actionIcon} />
-          <Text style={[styles.actionLabel, { color: colors.success }]}>Commandes</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionCard, { backgroundColor: colors.warningLight }]}
+        />
+        <QuickAction
+          icon="shirt-outline"
+          label="Catalogue"
+          color={colors.accent}
+          bgColor={colors.accentLight}
+          onPress={() => router.push("/(tabs)/catalogue")}
+        />
+        <QuickAction
+          icon="notifications"
+          label="Alertes"
+          color={colors.warning}
+          bgColor={colors.warningLight}
           onPress={() => router.push("/(tabs)/notifications")}
-          accessibilityRole="button"
-          accessibilityLabel="Notifications"
-        >
-          <Ionicons
-            name="notifications"
-            size={28}
-            color={colors.warning}
-            style={styles.actionIcon}
-          />
-          <Text style={[styles.actionLabel, { color: colors.warning }]}>Alertes</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionCard, { backgroundColor: colors.infoLight }]}
-          onPress={() => router.push("/(tabs)/profile")}
-          accessibilityRole="button"
-          accessibilityLabel="Mon profil"
-        >
-          <Ionicons name="person" size={28} color={colors.info} style={styles.actionIcon} />
-          <Text style={[styles.actionLabel, { color: colors.info }]}>Profil</Text>
-        </Pressable>
+        />
       </View>
     </ScreenWrapper>
   );
@@ -203,22 +247,109 @@ function ClientHome() {
 
 // ─── Admin home ──────────────────────────────────────────────────
 
+const PendingOrderCard = ({ order, index }: { order: Order; index: number }) => (
+  <Animated.View entering={FadeInDown.delay(index * 50).springify()}>
+    <Pressable
+      onPress={() => router.push(`/(tabs)/orders/${order.id}`)}
+      accessibilityRole="button"
+      accessibilityLabel={`Commande ${order.orderNumber} de ${order.user?.name ?? "client"}`}
+    >
+      <Card style={styles.pendingCard}>
+        <View style={styles.deliveryRow}>
+          <View style={styles.deliveryDateBox}>
+            <Text style={styles.deliveryDay}>{new Date(order.deliveryDate).getDate()}</Text>
+            <Text style={styles.deliveryMonth}>
+              {new Date(order.deliveryDate).toLocaleDateString("fr-FR", { month: "short" })}
+            </Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.deliveryNum}>{order.orderNumber}</Text>
+            <Text style={styles.deliverySlot}>{order.user?.name ?? "Client"}</Text>
+            {order.user?.zone && <Text style={styles.deliveryItems}>{order.user.zone.name}</Text>}
+          </View>
+          <View style={{ alignItems: "flex-end", gap: 4 }}>
+            <Text style={styles.deliveryPrice}>{formatCents(order.totalCents)}</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </View>
+        </View>
+      </Card>
+    </Pressable>
+  </Animated.View>
+);
+
+const AlertCard = ({ alert, alertKey }: { alert: DashboardAlert; alertKey: string }) => {
+  const severityColor =
+    alert.severity === "error"
+      ? colors.error
+      : alert.severity === "warning"
+        ? colors.warning
+        : colors.info;
+  return (
+    <Pressable
+      key={alertKey}
+      onPress={() =>
+        alert.entityId
+          ? router.push(`/(tabs)/clients/${alert.entityId}`)
+          : router.push("/(tabs)/stock-global")
+      }
+      accessibilityRole="button"
+      accessibilityLabel={alert.message}
+    >
+      <Card style={[styles.alertCard, { borderLeftColor: severityColor, borderLeftWidth: 4 }]}>
+        <View style={styles.alertRow}>
+          <Ionicons
+            name={alert.severity === "error" ? "close-circle-outline" : "warning-outline"}
+            size={18}
+            color={severityColor}
+          />
+          <Text style={[styles.alertText, { color: severityColor }]} numberOfLines={2}>
+            {alert.message}
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+        </View>
+      </Card>
+    </Pressable>
+  );
+};
+
 function AdminHome() {
   const profile = useProfile();
   const kpis = useDashboardKpis();
-  const orders = useOrders();
+  const alerts = useDashboardAlerts();
+  const orders = useOrders("PENDING");
 
   const isLoading = profile.isLoading || kpis.isLoading;
-  const refreshing = profile.isRefetching || kpis.isRefetching || orders.isRefetching;
+  const refreshing =
+    profile.isRefetching || kpis.isRefetching || orders.isRefetching || alerts.isRefetching;
   const refetch = () => {
     profile.refetch();
     kpis.refetch();
     orders.refetch();
+    alerts.refetch();
   };
 
-  if (isLoading && !profile.data) return <LoadingScreen />;
+  if (isLoading && !profile.data) {
+    return (
+      <ScreenWrapper>
+        <SkeletonBox height={110} style={{ marginBottom: spacing.md }} />
+        <View style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm }}>
+          <SkeletonBox height={90} style={{ flex: 1 }} />
+          <SkeletonBox height={90} style={{ flex: 1 }} />
+        </View>
+        <View style={{ flexDirection: "row", gap: spacing.sm }}>
+          <SkeletonBox height={90} style={{ flex: 1 }} />
+          <SkeletonBox height={90} style={{ flex: 1 }} />
+        </View>
+      </ScreenWrapper>
+    );
+  }
 
   const k = kpis.data;
+  const pendingOrders = orders.data ?? [];
+  const visibleAlerts = alerts.data?.slice(0, 3) ?? [];
+
+  const revenueDiff = k ? k.revenueCents - k.revenuePrevWeekCents : 0;
+  const revenueTrend = revenueDiff >= 0 ? "up" : "down";
 
   return (
     <ScreenWrapper refreshing={refreshing} onRefresh={refetch}>
@@ -229,18 +360,45 @@ function AdminHome() {
         style={styles.hero}
       >
         <Text style={styles.heroGreeting}>Admin · {profile.data?.name?.split(" ")[0] ?? ""}</Text>
+        <Text style={styles.heroDate}>
+          {new Date().toLocaleDateString("fr-FR", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+          })}
+        </Text>
       </LinearGradient>
 
       {k && (
         <>
+          {/* KPI row 1 */}
           <View style={styles.statsRow}>
-            <StatCard
-              icon="cash-outline"
-              label="CA semaine"
-              value={formatCents(k.revenueCents)}
-              sub={`vs ${formatCents(k.revenuePrevWeekCents)}`}
-              color={colors.success}
-            />
+            <Pressable style={{ flex: 1 }} onPress={() => {}} accessibilityRole="none">
+              <Card style={styles.kpiCard}>
+                <View style={[styles.kpiIcon, { backgroundColor: colors.successLight }]}>
+                  <Ionicons name="cash-outline" size={18} color={colors.success} />
+                </View>
+                <Text style={[styles.kpiValue, { color: colors.success }]}>
+                  {formatCents(k.revenueCents)}
+                </Text>
+                <Text style={styles.kpiLabel}>CA semaine</Text>
+                <View style={styles.kpiTrend}>
+                  <Ionicons
+                    name={revenueTrend === "up" ? "trending-up" : "trending-down"}
+                    size={14}
+                    color={revenueTrend === "up" ? colors.success : colors.error}
+                  />
+                  <Text
+                    style={[
+                      styles.kpiTrendText,
+                      { color: revenueTrend === "up" ? colors.success : colors.error },
+                    ]}
+                  >
+                    vs {formatCents(k.revenuePrevWeekCents)}
+                  </Text>
+                </View>
+              </Card>
+            </Pressable>
             <StatCard
               icon="car-outline"
               label="Livraisons"
@@ -248,10 +406,12 @@ function AdminHome() {
               color={colors.info}
             />
           </View>
+
+          {/* KPI row 2 */}
           <View style={[styles.statsRow, { marginTop: spacing.sm }]}>
             <StatCard
               icon="people-outline"
-              label="Nouveaux"
+              label="Nouveaux clients"
               value={k.newClients}
               color={colors.primary}
             />
@@ -262,50 +422,154 @@ function AdminHome() {
               color={colors.accent}
             />
           </View>
-          {k.lowStockAlerts > 0 && (
-            <Card style={styles.alertCard}>
-              <Text style={styles.alertText}>
-                {"\u26a0\ufe0f"} {k.lowStockAlerts} alerte{k.lowStockAlerts > 1 ? "s" : ""} stock
-                bas
-              </Text>
-            </Card>
+
+          {/* Alerts */}
+          {visibleAlerts.length > 0 && (
+            <>
+              <SectionHeader
+                title={`Alertes stock (${k.lowStockAlerts})`}
+                action={{ label: "Voir tout", onPress: () => router.push("/(tabs)/stock-global") }}
+              />
+              {visibleAlerts.map((alert, i) => {
+                const k = `${alert.type}-${alert.entityId ?? "none"}-${i}`;
+                return <AlertCard key={k} alertKey={k} alert={alert} />;
+              })}
+            </>
+          )}
+          {k.lowStockAlerts > 0 && visibleAlerts.length === 0 && (
+            <Pressable onPress={() => router.push("/(tabs)/stock-global")}>
+              <Card
+                style={[styles.alertCard, { borderLeftColor: colors.warning, borderLeftWidth: 4 }]}
+              >
+                <View style={styles.alertRow}>
+                  <Ionicons name="warning-outline" size={18} color={colors.warning} />
+                  <Text style={[styles.alertText, { color: colors.warning }]}>
+                    {k.lowStockAlerts} alerte{k.lowStockAlerts > 1 ? "s" : ""} stock bas
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                </View>
+              </Card>
+            </Pressable>
           )}
         </>
       )}
 
+      {/* Quick actions */}
+      <SectionHeader title="Navigation rapide" />
+      <View style={styles.actionsGrid}>
+        <QuickAction
+          icon="cube"
+          label="Commandes"
+          color={colors.primary}
+          bgColor={colors.primaryLight}
+          onPress={() => router.push("/(tabs)/orders")}
+          badge={pendingOrders.length}
+        />
+        <QuickAction
+          icon="people"
+          label="Clients"
+          color={colors.accent}
+          bgColor={colors.accentLight}
+          onPress={() => router.push("/(tabs)/clients")}
+        />
+        <QuickAction
+          icon="stats-chart"
+          label="Stock global"
+          color={colors.info}
+          bgColor={colors.infoLight}
+          onPress={() => router.push("/(tabs)/stock-global")}
+        />
+        <QuickAction
+          icon="notifications"
+          label="Alertes"
+          color={colors.warning}
+          bgColor={colors.warningLight}
+          onPress={() => router.push("/(tabs)/notifications")}
+        />
+      </View>
+
+      {/* Pending orders */}
       <SectionHeader
-        title="Commandes en attente"
+        title={`Commandes en attente (${pendingOrders.length})`}
         action={{ label: "Tout voir", onPress: () => router.push("/(tabs)/orders") }}
       />
-      {orders.data
-        ?.filter((o) => o.status === "PENDING")
-        .slice(0, 5)
-        .map((order, i) => (
-          <Animated.View key={order.id} entering={FadeInDown.delay(i * 60).springify()}>
-            <Pressable onPress={() => router.push(`/(tabs)/orders/${order.id}`)}>
-              <Card style={{ marginBottom: spacing.sm }}>
-                <View style={styles.deliveryRow}>
-                  <View style={styles.deliveryDateBox}>
-                    <Text style={styles.deliveryDay}>{new Date(order.deliveryDate).getDate()}</Text>
-                    <Text style={styles.deliveryMonth}>
-                      {new Date(order.deliveryDate).toLocaleDateString("fr-FR", { month: "short" })}
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.deliveryNum}>{order.orderNumber}</Text>
-                    <Text style={styles.deliverySlot}>{order.user?.name ?? "Client"}</Text>
-                  </View>
-                  <Text style={styles.deliveryPrice}>{formatCents(order.totalCents)}</Text>
-                </View>
-              </Card>
-            </Pressable>
-          </Animated.View>
-        ))}
+      {pendingOrders.length === 0 ? (
+        <Card>
+          <Text style={styles.noPending}>Aucune commande en attente</Text>
+        </Card>
+      ) : (
+        pendingOrders
+          .slice(0, 5)
+          .map((order, i) => <PendingOrderCard key={order.id} order={order} index={i} />)
+      )}
     </ScreenWrapper>
   );
 }
 
 // ─── Driver home ─────────────────────────────────────────────────
+
+const DriverStopCard = ({
+  stop,
+  index,
+  isCurrent,
+}: {
+  stop: DeliveryStop;
+  index: number;
+  isCurrent: boolean;
+}) => (
+  <Animated.View entering={FadeInDown.delay(index * 50).springify()}>
+    <Pressable
+      onPress={() => router.push(`/(tabs)/tournee/stop/${stop.id}`)}
+      accessibilityRole="button"
+      accessibilityLabel={`Arrêt ${stop.stopOrder}: ${stop.client.name}`}
+    >
+      <Card
+        style={[
+          styles.stopCard,
+          isCurrent && styles.stopCardCurrent,
+          stop.status === "COMPLETED" && styles.stopCardDone,
+        ]}
+      >
+        <View style={styles.deliveryRow}>
+          <View
+            style={[
+              styles.stopNum,
+              isCurrent && { backgroundColor: colors.accent },
+              stop.status === "COMPLETED" && { backgroundColor: colors.success },
+            ]}
+          >
+            {stop.status === "COMPLETED" ? (
+              <Ionicons name="checkmark" size={16} color={colors.textInverse} />
+            ) : (
+              <Text style={styles.stopNumText}>#{stop.stopOrder}</Text>
+            )}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text
+              style={[
+                styles.deliveryNum,
+                stop.status === "COMPLETED" && { color: colors.textTertiary },
+              ]}
+            >
+              {stop.client.name}
+            </Text>
+            <Text style={styles.deliverySlot}>
+              {stop.setsToDeliver} set{stop.setsToDeliver > 1 ? "s" : ""} à livrer
+            </Text>
+            {stop.specialInstructions && (
+              <Text style={[styles.deliveryItems, { color: colors.warning }]} numberOfLines={1}>
+                {stop.specialInstructions}
+              </Text>
+            )}
+          </View>
+          {stop.status !== "COMPLETED" && (
+            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+          )}
+        </View>
+      </Card>
+    </Pressable>
+  </Animated.View>
+);
 
 function DriverHome() {
   const profile = useProfile();
@@ -318,12 +582,22 @@ function DriverHome() {
     round.refetch();
   };
 
-  if (isLoading && !profile.data) return <LoadingScreen />;
+  if (isLoading && !profile.data) {
+    return (
+      <ScreenWrapper>
+        <SkeletonBox height={120} style={{ marginBottom: spacing.md }} />
+        <SkeletonBox height={100} style={{ marginBottom: spacing.md }} />
+        <SkeletonBox height={80} />
+      </ScreenWrapper>
+    );
+  }
 
   const todayRound = round.data;
   const completed = todayRound?.stops.filter((s) => s.status === "COMPLETED").length ?? 0;
   const total = todayRound?.stops.length ?? 0;
-  const pending = todayRound?.stops.filter((s) => s.status === "PENDING") ?? [];
+  const currentStop = todayRound?.stops
+    .filter((s) => s.status !== "COMPLETED")
+    .sort((a, b) => a.stopOrder - b.stopOrder)[0];
 
   return (
     <ScreenWrapper refreshing={refreshing} onRefresh={refetch}>
@@ -334,92 +608,77 @@ function DriverHome() {
         style={styles.hero}
       >
         <Text style={styles.heroGreeting}>{profile.data?.name?.split(" ")[0] ?? "Livreur"}</Text>
-        <Text style={[styles.heroPillText, { color: "rgba(255,255,255,0.8)" }]}>
-          {todayRound ? `${completed}/${total} arrets` : "Pas de tournee"}
+        <Text style={[styles.heroPillText, { color: "rgba(255,255,255,0.85)" }]}>
+          {todayRound ? `${completed}/${total} arrêts complétés` : "Aucune tournée aujourd'hui"}
         </Text>
       </LinearGradient>
 
       {!todayRound ? (
-        <Card
-          style={{ marginTop: spacing.lg, alignItems: "center", paddingVertical: spacing.xxxl }}
-        >
+        <Card style={styles.noRoundCard}>
           <Ionicons name="car-outline" size={48} color={colors.textTertiary} />
-          <Text
-            style={{
-              fontSize: font.sizes.lg,
-              fontWeight: font.weights.semibold,
-              color: colors.textPrimary,
-              marginTop: spacing.md,
-            }}
-          >
-            Pas de tournee aujourd'hui
-          </Text>
-          <Text
-            style={{ fontSize: font.sizes.sm, color: colors.textTertiary, marginTop: spacing.xs }}
-          >
-            Revenez demain !
-          </Text>
+          <Text style={styles.noRoundTitle}>Pas de tournée aujourd'hui</Text>
+          <Text style={styles.noRoundSub}>Revenez demain !</Text>
         </Card>
       ) : (
         <>
+          {/* Progress gauge */}
           {total > 0 && (
-            <Card
-              style={{ marginTop: spacing.md, alignItems: "center", paddingVertical: spacing.xl }}
-            >
-              <PieChart
-                data={[
-                  { value: completed || 0.1, color: colors.success },
-                  { value: total - completed || 0.1, color: colors.border },
-                ]}
-                donut
-                radius={50}
-                innerRadius={36}
-                innerCircleColor={colors.surface}
-                centerLabelComponent={() => (
-                  <Text
-                    style={{
-                      fontSize: font.sizes.lg,
-                      fontWeight: font.weights.heavy,
-                      color: colors.textPrimary,
-                    }}
-                  >
-                    {Math.round((completed / total) * 100)}%
+            <Card style={styles.progressCard}>
+              <View style={styles.progressRow}>
+                <ProgressRing
+                  completed={completed}
+                  total={total}
+                  size={90}
+                  color={colors.success}
+                />
+                <View style={styles.progressInfo}>
+                  <Text style={styles.progressTitle}>
+                    {completed === total ? "Tournée terminée !" : "En cours"}
                   </Text>
-                )}
-              />
-              <Text
-                style={{
-                  fontSize: font.sizes.sm,
-                  color: colors.textTertiary,
-                  marginTop: spacing.md,
-                }}
+                  <Text style={styles.progressSub}>
+                    {completed}/{total} arrêts
+                  </Text>
+                  {currentStop && (
+                    <View style={styles.currentStopBadge}>
+                      <Text style={styles.currentStopText}>
+                        Prochain : {currentStop.client.name}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              {/* Quick nav to Tournée tab */}
+              <Pressable
+                onPress={() => router.push("/(tabs)/tournee")}
+                style={styles.viewTourneeBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Voir la carte de la tournée"
               >
-                Progression de la tournee
-              </Text>
+                <Ionicons name="navigate-outline" size={16} color={colors.primary} />
+                <Text style={styles.viewTourneeBtnText}>Voir la carte de la tournée</Text>
+              </Pressable>
             </Card>
           )}
 
-          <SectionHeader title={`Arrets restants (${pending.length})`} />
-          {pending.map((stop, i) => (
-            <Animated.View key={stop.id} entering={FadeInDown.delay(i * 60).springify()}>
-              <Card style={{ marginBottom: spacing.sm }}>
-                <View style={styles.deliveryRow}>
-                  <View style={[styles.deliveryDateBox, { backgroundColor: colors.successLight }]}>
-                    <Text style={[styles.deliveryDay, { color: colors.success }]}>
-                      #{stop.stopOrder}
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.deliveryNum}>{stop.client.name}</Text>
-                    <Text style={styles.deliverySlot}>{stop.setsToDeliver} sets a livrer</Text>
-                    {stop.specialInstructions && (
-                      <Text style={styles.deliveryItems}>{stop.specialInstructions}</Text>
-                    )}
-                  </View>
-                </View>
-              </Card>
-            </Animated.View>
-          ))}
+          <SectionHeader
+            title={`Arrêts (${total - completed} restant${total - completed > 1 ? "s" : ""})`}
+            action={{
+              label: "Tournée",
+              onPress: () => router.push("/(tabs)/tournee"),
+            }}
+          />
+          {[...todayRound.stops]
+            .sort((a, b) => a.stopOrder - b.stopOrder)
+            .slice(0, 5)
+            .map((stop, i) => (
+              <DriverStopCard
+                key={stop.id}
+                stop={stop}
+                index={i}
+                isCurrent={stop.id === currentStop?.id}
+              />
+            ))}
         </>
       )}
     </ScreenWrapper>
@@ -448,6 +707,12 @@ const styles = StyleSheet.create({
     fontWeight: font.weights.heavy,
     color: colors.textInverse,
   },
+  heroDate: {
+    fontSize: font.sizes.sm,
+    color: "rgba(255,255,255,0.7)",
+    marginTop: spacing.xs,
+    textTransform: "capitalize",
+  },
   heroPill: {
     backgroundColor: "rgba(255,255,255,0.2)",
     paddingHorizontal: spacing.md,
@@ -460,6 +725,7 @@ const styles = StyleSheet.create({
     fontSize: font.sizes.sm,
     fontWeight: font.weights.semibold,
     color: colors.textInverse,
+    marginTop: spacing.xs,
   },
   // Stock mini
   stockCard: {},
@@ -485,22 +751,13 @@ const styles = StyleSheet.create({
     fontSize: font.sizes.sm,
     color: colors.textSecondary,
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
+  dot: { width: 8, height: 8, borderRadius: 4 },
   miniDonutCenter: {
     fontSize: font.sizes.lg,
     fontWeight: font.weights.heavy,
     color: colors.textPrimary,
   },
-  chevron: {
-    fontSize: 28,
-    color: colors.textTertiary,
-    fontWeight: font.weights.bold,
-  },
-  // Delivery
+  // Delivery card
   deliveryRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -550,6 +807,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
+    marginBottom: spacing.md,
   },
   actionCard: {
     width: "48%",
@@ -559,29 +817,167 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     minHeight: 90,
-  },
-  actionIcon: {
-    fontSize: 28,
-    marginBottom: spacing.xs,
+    gap: spacing.xs,
   },
   actionLabel: {
     fontSize: font.sizes.sm,
     fontWeight: font.weights.semibold,
   },
-  // Stats
-  statsRow: {
+  actionBadge: {
+    position: "absolute",
+    top: -6,
+    right: -6,
+    backgroundColor: colors.error,
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  actionBadgeText: {
+    fontSize: 10,
+    fontWeight: font.weights.bold,
+    color: colors.textInverse,
+  },
+  // Admin KPIs
+  statsRow: { flexDirection: "row", gap: spacing.sm },
+  kpiCard: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.sm,
+    gap: spacing.xs,
+  },
+  kpiIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  kpiValue: {
+    fontSize: font.sizes.xl,
+    fontWeight: font.weights.heavy,
+  },
+  kpiLabel: {
+    fontSize: font.sizes.xs,
+    color: colors.textTertiary,
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+    textAlign: "center",
+  },
+  kpiTrend: {
     flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  kpiTrendText: {
+    fontSize: font.sizes.xs,
+  },
+  // Alerts
+  alertCard: {
+    marginBottom: spacing.sm,
+    borderLeftWidth: 4,
+  },
+  alertRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.sm,
   },
-  // Alert
-  alertCard: {
-    marginTop: spacing.md,
-    borderColor: colors.warning,
-    backgroundColor: colors.warningLight,
-  },
   alertText: {
-    fontSize: font.sizes.md,
+    flex: 1,
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.medium,
+  },
+  // Pending orders
+  pendingCard: { marginBottom: spacing.sm },
+  noPending: {
+    fontSize: font.sizes.sm,
+    color: colors.textTertiary,
+    textAlign: "center",
+    paddingVertical: spacing.xl,
+  },
+  // Driver
+  progressCard: { marginBottom: spacing.md },
+  progressRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xl,
+    marginBottom: spacing.md,
+  },
+  progressInfo: { flex: 1 },
+  progressTitle: {
+    fontSize: font.sizes.lg,
+    fontWeight: font.weights.bold,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  progressSub: {
+    fontSize: font.sizes.sm,
+    color: colors.textSecondary,
+  },
+  currentStopBadge: {
+    backgroundColor: colors.accentLight,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    alignSelf: "flex-start",
+    marginTop: spacing.sm,
+  },
+  currentStopText: {
+    fontSize: font.sizes.xs,
     fontWeight: font.weights.semibold,
-    color: colors.warning,
+    color: colors.accent,
+  },
+  viewTourneeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.primaryLight,
+  },
+  viewTourneeBtnText: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.semibold,
+    color: colors.primary,
+  },
+  stopCard: { marginBottom: spacing.sm },
+  stopCardCurrent: {
+    borderColor: colors.accent,
+    borderWidth: 1.5,
+  },
+  stopCardDone: {
+    opacity: 0.6,
+  },
+  stopNum: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stopNumText: {
+    fontSize: font.sizes.xs,
+    fontWeight: font.weights.bold,
+    color: colors.primary,
+  },
+  noRoundCard: {
+    marginTop: spacing.xl,
+    alignItems: "center",
+    paddingVertical: spacing.xxxl,
+    gap: spacing.md,
+  },
+  noRoundTitle: {
+    fontSize: font.sizes.lg,
+    fontWeight: font.weights.semibold,
+    color: colors.textPrimary,
+  },
+  noRoundSub: {
+    fontSize: font.sizes.sm,
+    color: colors.textTertiary,
   },
 });

@@ -10,23 +10,21 @@ import {
   removeFromHistory,
   type DevisHistoryEntry,
 } from "@/lib/devis-history";
+import { CATALOG_PRODUCTS } from "@lingengo/shared";
 
 const DEFAULT_REGLEMENT =
   "Règlement à 30 jours par virement bancaire. Facturation mensuelle à la rotation.";
 
-/* ─── Catalogue (source de vérité : page Tarifs) ─── */
+// NOTE (Option A, ADR-V2-005) : catalogue dérivé de @lingengo/shared (source de vérité de seed).
+// Si les prix sont modifiés via l'admin en production, ce catalogue restera sur les valeurs
+// de départ — désynchro assumée en V1.
 
-const CATALOG: { name: string; cents: number }[] = [
-  { name: "Kit Bain (drap de bain + serviette + tapis)", cents: 750 },
-  { name: "Kit Lit (housse de couette + drap housse + taies)", cents: 1650 },
-  { name: "Kit Complet (Bain + Lit groupés)", cents: 2200 },
-  { name: "Serviette 50×90", cents: 450 },
-  { name: "Drap de bain 70×150", cents: 650 },
-  { name: "Tapis de bain 50×70", cents: 400 },
-  { name: "Petite serviette 30×50", cents: 250 },
-  { name: "Drap housse", cents: 750 },
-  { name: "Housse de couette", cents: 900 },
-];
+/* ─── Catalogue dérivé de CATALOG_PRODUCTS (@lingengo/shared) ─── */
+
+const CATALOG: { name: string; cents: number }[] = CATALOG_PRODUCTS.map((p) => ({
+  name: p.description ? `${p.name} (${p.description})` : p.name,
+  cents: p.priceCents,
+}));
 
 function todayFr(): string {
   return new Date().toLocaleDateString("fr-FR", {

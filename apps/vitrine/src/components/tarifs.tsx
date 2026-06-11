@@ -2,38 +2,120 @@
 
 import { ArrowRight, Check, Truck } from "lucide-react";
 import { Reveal } from "./reveal";
+import { CATALOG_DEFAULTS, SUBSCRIPTION_DEFAULTS, DELIVERY_DEFAULTS } from "@lingengo/shared";
+
+// NOTE (Option A, ADR-V2-005) : ces valeurs reflètent les constantes de seed
+// (@lingengo/shared). Si les prix sont modifiés via l'admin en production, la
+// vitrine restera sur ces valeurs de départ — désynchro assumée en V1.
+
+function centsToEuroStr(cents: number): string {
+  return (
+    (cents / 100).toLocaleString("fr-FR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }) + " €"
+  );
+}
+
+const engagementLabel = `Engagement ${SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS} mois · résiliable ensuite avec ${SUBSCRIPTION_DEFAULTS.NOTICE_PERIOD_DAYS} j de préavis`;
 
 const abonnementFeatures = [
-  "8 kits bain inclus par mois",
-  "4 kits lit inclus par mois",
+  `${SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} kits bain inclus par mois`,
+  `${SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY} kits lit inclus par mois`,
   "Livraisons & reprises incluses",
   "Entretien blanchisserie compris",
   "Kits supplémentaires au tarif normal",
-  "Sans engagement · résiliable à tout moment",
+  engagementLabel,
 ];
 
+// Économies calculées depuis les constantes partagées
+const kitBainMensuels = SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY * CATALOG_DEFAULTS.KIT_BAIN_CENTS;
+const kitLitMensuels = SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY * CATALOG_DEFAULTS.KIT_LIT_CENTS;
+// 4 livraisons estimées à 12 € = 4800 c (valeur illustrative, pas issue d'une constante)
+const livraisonsEstimees = 4 * (DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 10); // ~48 € illustratif
+const totalSansAbo = kitBainMensuels + kitLitMensuels + livraisonsEstimees;
+const economie = totalSansAbo - SUBSCRIPTION_DEFAULTS.PRICE_CENTS;
+const economiePct = Math.round((economie / totalSansAbo) * 100);
+
 const abonnementSavings = [
-  { label: "8 kits bain à la rotation", amount: "60,00 €", bold: false, highlight: false },
-  { label: "4 kits lit à la rotation", amount: "66,00 €", bold: false, highlight: false },
-  { label: "Livraisons estimées (×4)", amount: "48,00 €", bold: false, highlight: false },
-  { label: "Total sans abonnement", amount: "174,00 €", bold: true, highlight: false },
-  { label: "Avec l'abonnement", amount: "89 €", bold: false, highlight: true },
+  {
+    label: `${SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} kits bain à la rotation`,
+    amount: centsToEuroStr(kitBainMensuels),
+    bold: false,
+    highlight: false,
+  },
+  {
+    label: `${SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY} kits lit à la rotation`,
+    amount: centsToEuroStr(kitLitMensuels),
+    bold: false,
+    highlight: false,
+  },
+  {
+    label: "Livraisons estimées (×4)",
+    amount: centsToEuroStr(livraisonsEstimees),
+    bold: false,
+    highlight: false,
+  },
+  {
+    label: "Total sans abonnement",
+    amount: centsToEuroStr(totalSansAbo),
+    bold: true,
+    highlight: false,
+  },
+  {
+    label: "Avec l'abonnement",
+    amount: centsToEuroStr(SUBSCRIPTION_DEFAULTS.PRICE_CENTS),
+    bold: false,
+    highlight: true,
+  },
 ];
 
 const unitPrices = [
-  { price: "4,50 €", name: "Serviette 50×90", sub: "serviette de toilette" },
-  { price: "6,50 €", name: "Drap de bain 70×150", sub: "grand drap de bain" },
-  { price: "4,00 €", name: "Tapis de bain 50×70", sub: "sortie de douche" },
-  { price: "2,50 €", name: "Petite serviette 30×50", sub: "gant / petite serviette" },
-  { price: "7,50 €", name: "Drap housse", sub: "90×200 ou 160×200 cm" },
-  { price: "9,00 €", name: "Housse de couette", sub: "160×200 ou 240×220 cm" },
+  {
+    price: centsToEuroStr(CATALOG_DEFAULTS.SERVIETTE_CENTS),
+    name: "Serviette 50×90",
+    sub: "serviette de toilette",
+  },
+  {
+    price: centsToEuroStr(CATALOG_DEFAULTS.DRAP_BAIN_CENTS),
+    name: "Drap de bain 70×150",
+    sub: "grand drap de bain",
+  },
+  {
+    price: centsToEuroStr(CATALOG_DEFAULTS.TAPIS_BAIN_CENTS),
+    name: "Tapis de bain 50×70",
+    sub: "sortie de douche",
+  },
+  {
+    price: centsToEuroStr(CATALOG_DEFAULTS.PETITE_SERVIETTE_CENTS),
+    name: "Petite serviette 30×50",
+    sub: "gant / petite serviette",
+  },
+  {
+    price: centsToEuroStr(CATALOG_DEFAULTS.DRAP_HOUSSE_CENTS),
+    name: "Drap housse",
+    sub: "90×200 ou 160×200 cm",
+  },
+  {
+    price: centsToEuroStr(CATALOG_DEFAULTS.HOUSSE_COUETTE_CENTS),
+    name: "Housse de couette",
+    sub: "160×200 ou 240×220 cm",
+  },
 ];
 
 const zones = [
-  { price: "Offerte", city: "Orange", sub: "dès 4 kits commandés" },
+  {
+    price: "Offerte",
+    city: "Orange",
+    sub: `dès ${DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits commandés`,
+  },
   { price: "12 €", city: "Zone proche", sub: "Carpentras, Vaison, Bollène…" },
   { price: "15 €", city: "Zone élargie", sub: "Avignon, Apt, Pertuis…" },
-  { price: "Offerte", city: "Tout le Vaucluse", sub: "dès 120 € de commande" },
+  {
+    price: "Offerte",
+    city: "Tout le Vaucluse",
+    sub: `dès ${centsToEuroStr(DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS)} de commande`,
+  },
 ];
 
 export function Tarifs() {
@@ -66,7 +148,9 @@ export function Tarifs() {
               </p>
 
               <div className="mb-6">
-                <span className="font-serif text-5xl font-bold tabular-nums">89 €</span>
+                <span className="font-serif text-5xl font-bold tabular-nums">
+                  {centsToEuroStr(SUBSCRIPTION_DEFAULTS.PRICE_CENTS).replace(",00", "")}
+                </span>
                 <span className="text-sm text-white/70 ml-2">/ mois · livraison incluse</span>
               </div>
 
@@ -111,7 +195,7 @@ export function Tarifs() {
                   ))}
                 </div>
                 <p className="text-xs text-lavender-700 font-medium mt-3">
-                  Économie : ~85 € / mois soit −49 %
+                  Économie : ~{centsToEuroStr(economie)} / mois soit −{economiePct} %
                 </p>
               </div>
               <p className="mt-6 text-xs text-gray-500 leading-relaxed border-t border-lavender-100 pt-4">
@@ -184,7 +268,10 @@ export function Tarifs() {
               className="transition-transform group-hover:translate-x-1"
             />
           </a>
-          <p className="mt-4 text-gray-600 text-sm">Sans engagement — Réponse sous 24 h ouvrées</p>
+          <p className="mt-4 text-gray-600 text-sm">
+            Engagement {SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS} mois — Réponse sous 24 h
+            ouvrées
+          </p>
         </Reveal>
       </div>
     </section>

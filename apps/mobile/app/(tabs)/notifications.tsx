@@ -104,7 +104,7 @@ export default function NotificationsScreen() {
         onRefresh={refetch}
         ListEmptyComponent={
           <EmptyState
-            icon={"\ud83d\udd14"}
+            icon="notifications-outline"
             title="Aucune notification"
             description="Vous serez notifie des livraisons, stocks et paiements"
           />

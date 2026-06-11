@@ -1,17 +1,18 @@
 {
-  "current": "READY_FOR_QA",
-  "updated_by": "frontend",
-  "updated_at": "2026-06-11T18:00:00+02:00",
+  "current": "READY_FOR_DEV",
+  "updated_by": "backend",
+  "updated_at": "2026-06-11T23:30:00+02:00",
   "previous": "READY_FOR_DEV",
   "checkpoints": {
     "architecture_approved": true,
     "backend_done": true,
-    "frontend_done": true
+    "frontend_done": false
   },
   "agents": {
     "backend": "DONE",
-    "frontend": "DONE"
+    "mobile": "PENDING",
+    "admin-web": "PENDING",
+    "vitrine": "PENDING"
   },
-  "note": "Frontend livré: admin-web pages devis/commandes/utilisateurs/reglages, packages/ui devis-pdf, tsconfig paths corrigés, build Next.js vert. docker-compose.dev.yml généré. Prêt pour QA.",
-  "next_agent": "qa"
+  "note": "ADR V2 (F5-F8) tranches : ADR-V2-001 catalogue KITS (slug unique + kind ProductKind, contrainte composite levee, category/range nullable, ProductRange etendu). ADR-V2-002 SubscriptionConfig table dediee. ADR-V2-003 SubscriptionPlan conserve (plan nullable, snapshots sur Subscription). ADR-V2-004 stock inchange. ADR-V2-005 vitrine Option A. ADR-V2-006 snapshot engagement + blocage resiliation cote API. ADR-V2-007 source partagee + reseed 9 produits. ADR-V2-008 endpoints config + PATCH price. Schema Prisma cible applique (prisma format OK). Plan migration 3 phases (20260612000000 ADD VALUE, 20260612000001 additif, migrate-v2-data.ts manuel avec flag MIGRATE_EXISTING_ENGAGEMENT). Decoupage backend/mobile/admin-web/vitrine avec frontieres de fichiers."
 }

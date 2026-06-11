@@ -31,6 +31,16 @@ enum ProductRange {
   CONFORT
   HOTEL
   PRESTIGE
+  // V2 — extension additive pour le stock des kits (ADR-V2-001/004). Non utilisé par Product (qui n'a plus besoin de range).
+  KIT_BAIN
+  KIT_LIT
+  KIT_COMPLET
+}
+
+/// V2 — distingue les kits des articles unitaires pour l'affichage mobile (ADR-V2-001)
+enum ProductKind {
+  KIT
+  ARTICLE
 }
 
 enum ProductCategory {
@@ -48,6 +58,7 @@ enum ServiceTypeKind {
   ENTRETIEN
 }
 
+/// @deprecated V2 — conservé pour compat (client réel PRESTIGE). Le modèle V2 = Pack Sérénité via SubscriptionConfig + snapshots (ADR-V2-003). Aucune valeur retirée (DROP VALUE Postgres impossible proprement).
 enum SubscriptionPlan {
   ESSENTIELLE
   CONFORT
@@ -150,19 +161,20 @@ model Operator {
   email         String    @unique @db.VarChar(320)
   phone         String?   @db.VarChar(20) // chiffré AES-256 en application
   address       String?   @db.Text // chiffré AES-256 en application
-  siret         String?   @db.VarChar(14) @map("siret") // SIRET 14 chiffres
-  legalMentions String?   @db.Text @map("legal_mentions") // mentions légales PDF devis
+  siret         String?   @map("siret") @db.VarChar(14) // SIRET 14 chiffres
+  legalMentions String?   @map("legal_mentions") @db.Text // mentions légales PDF devis
   isActive      Boolean   @default(true) @map("is_active")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
   deletedAt     DateTime? @map("deleted_at")
 
-  zones          DeliveryZone[]
-  users          User[]
-  products       Product[]
-  deliveryRounds DeliveryRound[]
-  invoices       Invoice[]
-  quotes         Quote[]
+  zones              DeliveryZone[]
+  users              User[]
+  products           Product[]
+  deliveryRounds     DeliveryRound[]
+  invoices           Invoice[]
+  quotes             Quote[]
+  subscriptionConfig SubscriptionConfig? // V2 — config Pack Sérénité (ADR-V2-002)
 
   @@map("operators")
 }
@@ -295,21 +307,24 @@ model ServiceType {
 
 /// Produit (serviette, drap, tapis, etc.)
 model Product {
-  id                   String          @id @default(uuid()) @db.Uuid
-  operatorId           String          @map("operator_id") @db.Uuid
-  serviceTypeId        String          @map("service_type_id") @db.Uuid
-  category             ProductCategory
-  range                ProductRange
-  name                 String          @db.VarChar(200) // ex: "Set serviettes Confort"
-  description          String?         @db.Text
-  priceCents           Int             @map("price_cents") // prix unitaire en centimes
-  attributes           Json            @default("{}") @db.JsonB // grammage, dimensions, matière, etc.
-  imageUrl             String?         @map("image_url") @db.VarChar(500)
-  stockAlertThreshold  Int             @default(3) @map("stock_alert_threshold") // seuil alerte stock (unités)
-  isActive             Boolean         @default(true) @map("is_active")
-  createdAt            DateTime        @default(now()) @map("created_at")
-  updatedAt            DateTime        @updatedAt @map("updated_at")
-  deletedAt            DateTime?       @map("deleted_at")
+  id                  String           @id @default(uuid()) @db.Uuid
+  operatorId          String           @map("operator_id") @db.Uuid
+  serviceTypeId       String           @map("service_type_id") @db.Uuid
+  // V2 — slug = identifiant métier stable, unicité portée ici (ADR-V2-001). Nullable : lignes legacy sans slug restent valides (NULL ignoré par l'unique).
+  slug                String?          @unique @db.VarChar(60)
+  kind                ProductKind      @default(ARTICLE) // V2 — KIT vs ARTICLE (affichage mobile)
+  category            ProductCategory? // V2 — nullable (kits sans catégorie)
+  range               ProductRange? // V2 — nullable, n'est plus discriminant d'identité
+  name                String           @db.VarChar(200) // ex: "Kit Bain", "Serviette de toilette"
+  description         String?          @db.Text
+  priceCents          Int              @map("price_cents") // prix unitaire en centimes
+  attributes          Json             @default("{}") @db.JsonB // grammage, dimensions, matière, etc.
+  imageUrl            String?          @map("image_url") @db.VarChar(500)
+  stockAlertThreshold Int              @default(3) @map("stock_alert_threshold") // seuil alerte stock (unités)
+  isActive            Boolean          @default(true) @map("is_active")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  deletedAt           DateTime?        @map("deleted_at")
 
   operator             Operator              @relation(fields: [operatorId], references: [id])
   serviceType          ServiceType           @relation(fields: [serviceTypeId], references: [id])
@@ -317,7 +332,8 @@ model Product {
   orderItems           OrderItem[]
   subscriptionProducts SubscriptionProduct[]
 
-  @@unique([operatorId, category, range])
+  // V2 — @@unique([operatorId, category, range]) RETIRÉE (ADR-V2-001) : incompatible avec 9 produits KITS. Unicité = slug.
+  @@index([kind])
   @@index([category])
   @@index([range])
   @@index([serviceTypeId])
@@ -354,15 +370,21 @@ model LinenBatch {
 model Subscription {
   id                   String             @id @default(uuid()) @db.Uuid
   userId               String             @unique @map("user_id") @db.Uuid
-  plan                 SubscriptionPlan
+  plan                 SubscriptionPlan? // V2 — nullable (ADR-V2-003). Legacy pour client réel ; null pour Pack Sérénité.
   status               SubscriptionStatus @default(ACTIVE)
   stripeSubscriptionId String?            @unique @map("stripe_subscription_id") @db.VarChar(255)
   currentPeriodStart   DateTime           @map("current_period_start")
   currentPeriodEnd     DateTime           @map("current_period_end")
+  // V2 — Pack Sérénité : snapshots immuables au moment de la souscription (ADR-V2-006)
+  priceCents           Int?               @map("price_cents") // prix mensuel snapshot (null pour legacy non migré)
+  minEngagementMonths  Int                @default(3) @map("min_engagement_months")
+  committedUntil       DateTime?          @map("committed_until") // startDate + minEngagementMonths (calendaire)
+  kitBainQty           Int                @default(8) @map("kit_bain_qty")
+  kitLitQty            Int                @default(4) @map("kit_lit_qty")
   pausedAt             DateTime?          @map("paused_at")
   pauseMonthsUsed      Int                @default(0) @map("pause_months_used") // max 2/an
   cancelledAt          DateTime?          @map("cancelled_at")
-  cancelEffectiveAt    DateTime?          @map("cancel_effective_at") // +30j préavis
+  cancelEffectiveAt    DateTime?          @map("cancel_effective_at") // +noticePeriodDays préavis
   createdAt            DateTime           @default(now()) @map("created_at")
   updatedAt            DateTime           @updatedAt @map("updated_at")
 
@@ -386,6 +408,25 @@ model SubscriptionProduct {
 
   @@unique([subscriptionId, productId])
   @@map("subscription_products")
+}
+
+/// V2 — Configuration de l'offre d'abonnement Pack Sérénité, paramétrable par opérateur (ADR-V2-002)
+model SubscriptionConfig {
+  id                  String   @id @default(uuid()) @db.Uuid
+  operatorId          String   @unique @map("operator_id") @db.Uuid
+  planName            String   @default("Pack Sérénité") @map("plan_name") @db.VarChar(100)
+  priceCents          Int      @default(8900) @map("price_cents")
+  kitBainQty          Int      @default(8) @map("kit_bain_qty")
+  kitLitQty           Int      @default(4) @map("kit_lit_qty")
+  minEngagementMonths Int      @default(3) @map("min_engagement_months")
+  noticePeriodDays    Int      @default(30) @map("notice_period_days")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  operator Operator @relation(fields: [operatorId], references: [id])
+
+  @@map("subscription_configs")
 }
 
 // ============================================================================
@@ -466,10 +507,10 @@ model Quote {
   updatedAt          DateTime    @updatedAt @map("updated_at")
   deletedAt          DateTime?   @map("deleted_at")
 
-  operator Operator   @relation(fields: [operatorId], references: [id])
-  user     User?      @relation("QuoteClient", fields: [userId], references: [id])
-  creator  User       @relation("QuoteCreator", fields: [createdBy], references: [id])
-  order    Order?     @relation("QuoteOrder", fields: [convertedToOrderId], references: [id])
+  operator Operator    @relation(fields: [operatorId], references: [id])
+  user     User?       @relation("QuoteClient", fields: [userId], references: [id])
+  creator  User        @relation("QuoteCreator", fields: [createdBy], references: [id])
+  order    Order?      @relation("QuoteOrder", fields: [convertedToOrderId], references: [id])
   lignes   QuoteLine[]
 
   @@index([operatorId])

@@ -1,0 +1,25 @@
+# Déploiement prod du back-office admin Linge Serein.
+# https://admin.lingeserein.fr (Cloudflare proxied) → Traefik → ls-admin:3000.
+# L'admin parle à l'API publique https://api.lingeserein.fr/api/v1 (URL inlinée au build).
+services:
+  ls-admin:
+    build:
+      context: ../..
+      dockerfile: apps/admin-web/Dockerfile
+    image: lingeserein-admin:latest
+    container_name: ls-admin
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.lsadmin.rule=Host(`admin.lingeserein.fr`)"
+      - "traefik.http.routers.lsadmin.entrypoints=https"
+      - "traefik.http.routers.lsadmin.tls=true"
+      - "traefik.http.routers.lsadmin.tls.certresolver=letsencrypt-dns"
+      - "traefik.http.services.lsadmin.loadbalancer.server.port=3000"
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:
+    external: true
