@@ -262,9 +262,13 @@ async function main() {
   console.log("  Delivery Schedules: Mon+Thu (zone 1), Tue+Fri (zone 2)");
 
   // ---- Users ----
-  // Comptes réels : mot de passe commun "@Rayana2"
+  // Comptes réels : mot de passe commun lu depuis SEED_USERS_PASSWORD (jamais en dur)
   // client2/client3 = fixtures démo inactives (login impossible)
-  const realUserHash = await bcrypt.hash("@Rayana2", BCRYPT_ROUNDS);
+  const seedPassword = process.env.SEED_USERS_PASSWORD;
+  if (!seedPassword) {
+    throw new Error("SEED_USERS_PASSWORD manquant — export la variable avant de lancer le seed.");
+  }
+  const realUserHash = await bcrypt.hash(seedPassword, BCRYPT_ROUNDS);
   const demoHash = realUserHash;
   const driverPinHash = await bcrypt.hash("123456", BCRYPT_ROUNDS);
 

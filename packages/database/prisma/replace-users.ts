@@ -4,13 +4,14 @@
  * - Supprime admin@lingengo.fr, livreur@lingengo.fr, client1/2/3@example.com
  *   ainsi que toutes leurs données liées (ordre FK respecté).
  * - Crée :
- *     sirtecnologie@gmail.com  / @Rayana2  → ROLE_ADMIN
- *     sidi@gmail.com           / @Rayana2  → ROLE_LIVREUR (PIN 123456)
- *     autressir@gmail.com      / @Rayana2  → ROLE_CLIENT
+ *     sirtecnologie@gmail.com  → ROLE_ADMIN
+ *     sidi@gmail.com           → ROLE_LIVREUR (PIN 123456)
+ *     autressir@gmail.com      → ROLE_CLIENT
+ *   Mot de passe commun lu depuis la variable d'environnement SEED_USERS_PASSWORD.
  * - Recrée un jeu de données minimal (abonnement, stock, commande, tournée)
  *   pour que les écrans mobiles ne soient pas vides.
  *
- * Usage : npx tsx packages/database/prisma/replace-users.ts
+ * Usage : SEED_USERS_PASSWORD=... npx tsx packages/database/prisma/replace-users.ts
  * Idempotent : ré-exécutable sans erreur.
  */
 import { PrismaClient } from "@prisma/client";
@@ -27,7 +28,11 @@ const OLD_EMAILS = [
   "client3@example.com",
 ];
 
-const PASSWORD = "@Rayana2";
+const PASSWORD = process.env.SEED_USERS_PASSWORD;
+if (!PASSWORD) {
+  console.error("SEED_USERS_PASSWORD manquant — export la variable avant de lancer ce script.");
+  process.exit(1);
+}
 
 async function deleteOldUsers() {
   const oldUsers = await prisma.user.findMany({
