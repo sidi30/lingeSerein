@@ -6,9 +6,10 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3001/api/v1
 
 // Transport: interdire le cleartext (HTTP) hors développement. Un build
 // release qui pointerait vers http:// exposerait le Bearer token à un MITM.
-if (!__DEV__ && API_URL.startsWith("http://")) {
-  throw new Error("EXPO_PUBLIC_API_URL doit utiliser HTTPS en production (cleartext interdit).");
-}
+// NB: la garde est évaluée à CHAQUE requête (apiFetch), jamais au chargement du
+// module. Un throw au top-level planterait le bundle release au lancement
+// (l'écran de login importe ce fichier) → l'app se fermerait aussitôt ouverte.
+const CLEARTEXT_IN_PROD = !__DEV__ && API_URL.startsWith("http://");
 
 export class ApiError extends Error {
   constructor(
@@ -63,6 +64,12 @@ export async function apiFetch<T>(
   options?: RequestInit,
   retried = false,
 ): Promise<T> {
+  // Garde transport: refuse le cleartext en prod au moment de l'appel (erreur
+  // catchable, surfacée comme état d'erreur de requête) plutôt qu'un crash global.
+  if (CLEARTEXT_IN_PROD) {
+    throw new ApiError(0, "Configuration invalide : l'API doit utiliser HTTPS en production.");
+  }
+
   const token = useAuthStore.getState().accessToken;
   const hasBody = options?.body != null;
 
