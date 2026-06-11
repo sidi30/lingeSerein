@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   Pressable,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
@@ -158,6 +157,14 @@ function RefuseModal({
 }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState(false);
+
+  // Modal reste monté entre ouvertures → reset des états à la fermeture.
+  useEffect(() => {
+    if (!visible) {
+      setReason("");
+      setError(false);
+    }
+  }, [visible]);
 
   const handleConfirm = () => {
     if (!reason.trim()) {

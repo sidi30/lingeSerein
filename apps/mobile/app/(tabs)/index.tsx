@@ -1,4 +1,4 @@
-import { View, Text, Pressable, FlatList, StyleSheet } from "react-native";
+import { View, Text, Pressable, StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -22,7 +22,6 @@ import {
   useDashboardAlerts,
   useTodayRound,
   formatCents,
-  formatDate,
 } from "@/lib/api";
 import type { Order, DashboardAlert, DeliveryStop } from "@/lib/api";
 import { colors, font, spacing, radius } from "@/lib/theme";
@@ -287,11 +286,18 @@ const AlertCard = ({ alert, alertKey }: { alert: DashboardAlert; alertKey: strin
   return (
     <Pressable
       key={alertKey}
-      onPress={() =>
-        alert.entityId
-          ? router.push(`/(tabs)/clients/${alert.entityId}`)
-          : router.push("/(tabs)/stock-global")
-      }
+      onPress={() => {
+        // entityId is a client id ONLY for these alert types. For others
+        // (e.g. DELIVERY_UNCONFIRMED) entityId = stop.id, not a client →
+        // routing to /clients/${id} would 404 "Client introuvable".
+        const isClientAlert =
+          (alert.type === "STOCK_LOW" || alert.type === "PAYMENT_FAILED") && !!alert.entityId;
+        if (isClientAlert) {
+          router.push(`/(tabs)/clients/${alert.entityId}`);
+        } else {
+          router.push("/(tabs)/stock-global");
+        }
+      }}
       accessibilityRole="button"
       accessibilityLabel={alert.message}
     >

@@ -1,4 +1,4 @@
-import { View, Text, Pressable, StyleSheet, Linking } from "react-native";
+import { View, Text, Pressable, StyleSheet, Linking, Alert } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -86,9 +86,14 @@ export default function ClientDetailScreen() {
   const dirtySets = client.stocks.reduce((acc, s) => acc + s.dirtySets, 0);
 
   const handleCall = () => {
-    if (client.phone) {
-      void Linking.openURL(`tel:${client.phone}`);
-    }
+    if (!client.phone) return;
+    void (async () => {
+      try {
+        await Linking.openURL(`tel:${client.phone}`);
+      } catch {
+        Alert.alert("Erreur", "Impossible d'ouvrir l'application Téléphone.");
+      }
+    })();
   };
 
   return (

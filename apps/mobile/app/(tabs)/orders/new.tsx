@@ -60,8 +60,9 @@ LocaleConfig.locales["fr"] = {
 };
 LocaleConfig.defaultLocale = "fr";
 
+const DEFAULT_TIME_SLOT = "08:00-10:00";
 const TIME_SLOTS = [
-  { value: "08:00-10:00", label: "8h - 10h", icon: "sunny-outline" as const },
+  { value: DEFAULT_TIME_SLOT, label: "8h - 10h", icon: "sunny-outline" as const },
   { value: "10:00-12:00", label: "10h - 12h", icon: "partly-sunny-outline" as const },
   { value: "14:00-16:00", label: "14h - 16h", icon: "cloud-outline" as const },
 ];
@@ -248,7 +249,7 @@ export default function NewOrderScreen() {
 
   const [step, setStep] = useState(0);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [timeSlot, setTimeSlot] = useState(TIME_SLOTS[0]!.value);
+  const [timeSlot, setTimeSlot] = useState(DEFAULT_TIME_SLOT);
   const [notes, setNotes] = useState("");
   const [selectedDate, setSelectedDate] = useState(tomorrowYmd());
 

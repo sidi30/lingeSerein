@@ -12,7 +12,6 @@ import {
   Alert,
   Linking,
   Platform,
-  TextInput,
   KeyboardAvoidingView,
   ScrollView,
 } from "react-native";
@@ -137,15 +136,27 @@ export default function StopDetailScreen() {
   const isDone = stop.status === "COMPLETED";
 
   const handleCall = () => {
-    if (stop.client.phone) {
-      void Linking.openURL(`tel:${stop.client.phone}`);
-    }
+    if (!stop.client.phone) return;
+    void (async () => {
+      try {
+        await Linking.openURL(`tel:${stop.client.phone}`);
+      } catch {
+        Alert.alert("Erreur", "Impossible d'ouvrir l'application Téléphone.");
+      }
+    })();
   };
 
   const handleNavigate = () => {
     const address = encodeURIComponent(stop.client.address ?? stop.client.name);
-    const url = Platform.OS === "ios" ? `maps://?daddr=${address}` : `geo:0,0?q=${address}`;
-    void Linking.openURL(url);
+    const url =
+      Platform.OS === "ios" ? `https://maps.apple.com/?daddr=${address}` : `geo:0,0?q=${address}`;
+    void (async () => {
+      try {
+        await Linking.openURL(url);
+      } catch {
+        Alert.alert("Erreur", "Impossible d'ouvrir l'application Plans.");
+      }
+    })();
   };
 
   const handleValidate = () => {

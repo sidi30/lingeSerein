@@ -6,16 +6,11 @@
  * NE PAS faire d'OTA sur ce changement.
  */
 
-import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import { View, Text, Pressable, FlatList, StyleSheet, Platform, Alert } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import Animated, {
-  FadeInDown,
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-} from "react-native-reanimated";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Location from "expo-location";
 import { ScreenWrapper } from "@/components/ScreenWrapper";
 import { Card } from "@/components/Card";
@@ -34,7 +29,8 @@ const geocodeCache = new Map<string, { latitude: number; longitude: number }>();
 async function geocodeAddress(
   address: string,
 ): Promise<{ latitude: number; longitude: number } | null> {
-  if (geocodeCache.has(address)) return geocodeCache.get(address)!;
+  const cached = geocodeCache.get(address);
+  if (cached) return cached;
   try {
     const results = await Location.geocodeAsync(address);
     if (results.length > 0 && results[0]) {
@@ -218,11 +214,12 @@ function MapViewSection({
     );
   }
 
-  const firstValid = validCoords[0];
-  const initialRegion = firstValid
+  // Centre initial : premier arrêt géocodé, sinon position de l'utilisateur.
+  const regionCenter = validCoords[0] ?? userLocation;
+  const initialRegion = regionCenter
     ? {
-        latitude: firstValid.latitude,
-        longitude: firstValid.longitude,
+        latitude: regionCenter.latitude,
+        longitude: regionCenter.longitude,
         latitudeDelta: 0.04,
         longitudeDelta: 0.04,
       }
