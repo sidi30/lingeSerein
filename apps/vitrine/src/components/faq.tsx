@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
 import { Reveal } from "./reveal";
+
+const ABO = SUBSCRIPTION_DEFAULTS;
 
 const faqs = [
   {
@@ -24,7 +27,7 @@ const faqs = [
   },
   {
     q: "Comment fonctionne l'abonnement de location de linge ?",
-    a: "L'abonnement repose sur une formule mensuelle (Starter, Essentielle ou Pro) incluant un nombre fixe de sets de linge et de livraisons. Il est sans engagement de durée et modifiable à tout moment, ce qui vous permet d'ajuster les volumes selon votre saison touristique en Vaucluse.",
+    a: `L'abonnement Pack Sérénité est une formule mensuelle à ${ABO.PRICE_CENTS / 100} € incluant ${ABO.KIT_BAIN_QTY} kits bain, ${ABO.KIT_LIT_QTY} kits lit et les livraisons. Il comporte un engagement minimum de ${ABO.MIN_ENGAGEMENT_MONTHS} mois, puis il est résiliable avec un préavis de ${ABO.NOTICE_PERIOD_DAYS} jours. La composition peut être ajustée avec nous selon votre saison touristique en Vaucluse.`,
   },
   {
     q: "Que se passe-t-il en cas de dégradation du linge ?",

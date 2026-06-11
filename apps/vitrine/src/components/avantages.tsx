@@ -20,9 +20,9 @@ const avantages = [
   },
   {
     icon: <Calendar size={24} />,
-    title: "Sans engagement",
+    title: "À la carte sans engagement",
     description:
-      "Pas d'abonnement, pas de contrat annuel. Vous commandez quand vous en avez besoin, à la rotation, sans minimum.",
+      "Hors abonnement, vous commandez quand vous en avez besoin, à la rotation, sans minimum ni contrat annuel.",
   },
   {
     icon: <Star size={24} />,
