@@ -7,7 +7,9 @@ const base = "https://lingeserein.fr";
 // Images de contenu de l'accueil → extension Google Image Sitemap (<image:image>).
 // Logos/icônes exclus (boilerplate ignoré par Google Images).
 const homeImages = [
-  `${base}/site/hero-principal.webp`,
+  `${base}/site/linge-fleur.webp`,
+  `${base}/site/service-gants.webp`,
+  `${base}/site/chambre-ambiance.webp`,
   `${base}/site/livraison-hotel.webp`,
   `${base}/site/livraison-linge.webp`,
   `${base}/site/livraison-voiture.webp`,

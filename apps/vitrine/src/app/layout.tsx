@@ -349,7 +349,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="fr" className={`${playfair.variable} ${inter.variable}`}>
       <head>
         {/* Préchargement de l'image LCP du hero (export statique : next/image priority n'émet pas de preload fiable en mode fill) */}
-        <link rel="preload" as="image" href="/site/hero-principal.webp" fetchPriority="high" />
+        <link rel="preload" as="image" href="/site/linge-fleur.webp" fetchPriority="high" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationSchema) }}
