@@ -65,7 +65,7 @@ function HeroCarousel() {
     return () => clearInterval(id);
   }, [reduced]);
 
-  const slide = SLIDES[index];
+  const slide = SLIDES[index]!;
 
   return (
     <div className="relative">
