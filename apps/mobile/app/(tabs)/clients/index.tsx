@@ -1,5 +1,6 @@
 import { useState, useCallback, memo } from "react";
 import { View, Text, TextInput, FlatList, Pressable, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -8,7 +9,7 @@ import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
 import { useClients } from "@/lib/api";
 import type { ClientListItem } from "@/lib/api";
-import { colors, font, spacing, radius } from "@/lib/theme";
+import { colors, font, spacing, radius, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
 import { useDebounce } from "@/lib/useDebounce";
 
 const ClientRow = memo(function ClientRow({
@@ -91,6 +92,7 @@ export default function ClientsListScreen() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
   const { data, isLoading, refetch, isRefetching } = useClients(debouncedSearch || undefined);
+  const insets = useSafeAreaInsets();
 
   const renderClient = useCallback(
     ({ item, index }: { item: ClientListItem; index: number }) => (
@@ -134,7 +136,10 @@ export default function ClientsListScreen() {
           data={data ?? []}
           keyExtractor={(c) => c.id}
           renderItem={renderClient}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[
+            styles.list,
+            { paddingBottom: TAB_BAR_BASE_HEIGHT + insets.bottom + spacing.xl },
+          ]}
           refreshing={isRefetching}
           onRefresh={refetch}
           ListEmptyComponent={
@@ -178,7 +183,6 @@ const styles = StyleSheet.create({
   list: {
     padding: spacing.lg,
     paddingTop: 0,
-    paddingBottom: 100,
     gap: spacing.sm,
   },
   row: {
@@ -223,7 +227,7 @@ const styles = StyleSheet.create({
   lowStockText: {
     fontSize: 10,
     fontWeight: font.weights.semibold,
-    color: colors.warning,
+    color: colors.warningText,
   },
   email: {
     fontSize: font.sizes.sm,

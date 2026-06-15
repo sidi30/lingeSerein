@@ -3,7 +3,7 @@
     "name": "Linge Serein",
     "slug": "linge-serein",
     "owner": "sidi30",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "scheme": "linge-serein",
     "platforms": ["ios", "android", "web"],
     "orientation": "portrait",

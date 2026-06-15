@@ -1,7 +1,8 @@
 import { Tabs } from "expo-router";
 import { View, Text, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, font } from "@/lib/theme";
+import { colors, font, radius, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
 import { useNotifications, useOrders } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 
@@ -74,6 +75,7 @@ function PendingOrdersIcon({ focused }: { focused: boolean }) {
 
 export default function TabsLayout() {
   const role = useAuthStore((s) => s.user?.role);
+  const insets = useSafeAreaInsets();
   const isClient = role === "ROLE_CLIENT";
   const isDriver = role === "ROLE_LIVREUR";
   const isAdmin = role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN";
@@ -88,11 +90,22 @@ export default function TabsLayout() {
           fontWeight: font.weights.medium,
         },
         tabBarStyle: {
-          borderTopColor: colors.border,
+          borderTopWidth: 0,
           backgroundColor: colors.surface,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 4,
+          height: TAB_BAR_BASE_HEIGHT + insets.bottom,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
+          paddingTop: 8,
+          borderTopLeftRadius: radius.xl,
+          borderTopRightRadius: radius.xl,
+          // soft upward shadow → floating menu look
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: -3 },
+          shadowOpacity: 0.06,
+          shadowRadius: 12,
+          elevation: 12,
+        },
+        tabBarItemStyle: {
+          paddingTop: 2,
         },
         headerStyle: {
           backgroundColor: colors.surface,

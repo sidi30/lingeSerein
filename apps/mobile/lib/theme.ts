@@ -16,15 +16,19 @@ export const colors = {
   accent: "#7B6FA6",
   accentLight: "#EDE7F6",
 
-  // Semantic
+  // Semantic — `*Text` = AA-safe (>=4.5:1) on the matching `*Light` background
   success: "#10b981",
   successLight: "#d1fae5",
+  successText: "#047857",
   warning: "#f59e0b",
   warningLight: "#fef3c7",
+  warningText: "#b45309",
   error: "#ef4444",
   errorLight: "#fee2e2",
+  errorText: "#b91c1c",
   info: "#06b6d4",
   infoLight: "#cffafe",
+  infoText: "#0e7490",
 
   // Neutral
   white: "#ffffff",
@@ -113,3 +117,6 @@ export const shadow = {
 } as const;
 
 export const MIN_HIT_TARGET = 44;
+
+/** Tab bar height excluding the bottom safe-area inset (added at runtime). */
+export const TAB_BAR_BASE_HEIGHT = 56;

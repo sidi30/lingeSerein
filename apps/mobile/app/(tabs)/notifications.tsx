@@ -1,4 +1,6 @@
 import { View, Text, Pressable, FlatList, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
@@ -10,25 +12,41 @@ import {
   formatDateShort,
 } from "@/lib/api";
 import type { Notification } from "@/lib/api";
-import { colors, font, spacing } from "@/lib/theme";
+import { colors, font, spacing, radius, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
 
-const TYPE_ICONS: Record<string, string> = {
-  STOCK_LOW: "\ud83d\udce6",
-  DELIVERY_REMINDER: "\ud83d\ude9a",
-  DELIVERY_CONFIRMED: "\u2705",
-  DELIVERY_CANCELLED: "\u274c",
-  DELIVERY_DELAYED: "\u23f0",
-  PAYMENT_FAILED: "\ud83d\udcb3",
-  PAYMENT_SUCCESS: "\u2705",
-  SUBSCRIPTION_RENEWED: "\ud83d\udd04",
-  SUBSCRIPTION_EXPIRING: "\u26a0\ufe0f",
-  ACCOUNT_LOCKED: "\ud83d\udd12",
-  GENERAL: "\ud83d\udce8",
+type IconName = keyof typeof Ionicons.glyphMap;
+
+const TYPE_META: Record<string, { icon: IconName; color: string; bg: string }> = {
+  STOCK_LOW: { icon: "cube-outline", color: colors.warning, bg: colors.warningLight },
+  DELIVERY_REMINDER: { icon: "car-outline", color: colors.info, bg: colors.infoLight },
+  DELIVERY_CONFIRMED: {
+    icon: "checkmark-circle-outline",
+    color: colors.success,
+    bg: colors.successLight,
+  },
+  DELIVERY_CANCELLED: { icon: "close-circle-outline", color: colors.error, bg: colors.errorLight },
+  DELIVERY_DELAYED: { icon: "time-outline", color: colors.warning, bg: colors.warningLight },
+  PAYMENT_FAILED: { icon: "card-outline", color: colors.error, bg: colors.errorLight },
+  PAYMENT_SUCCESS: {
+    icon: "checkmark-circle-outline",
+    color: colors.success,
+    bg: colors.successLight,
+  },
+  SUBSCRIPTION_RENEWED: { icon: "refresh-outline", color: colors.info, bg: colors.infoLight },
+  SUBSCRIPTION_EXPIRING: {
+    icon: "alert-circle-outline",
+    color: colors.warning,
+    bg: colors.warningLight,
+  },
+  ACCOUNT_LOCKED: { icon: "lock-closed-outline", color: colors.error, bg: colors.errorLight },
+  GENERAL: { icon: "mail-outline", color: colors.primary, bg: colors.primaryLight },
 };
+
+const FALLBACK_META = TYPE_META.GENERAL;
 
 function NotifItem({ notif, onPress }: { notif: Notification; onPress: () => void }) {
   const isUnread = !notif.readAt;
-  const icon = TYPE_ICONS[notif.type] ?? "\ud83d\udce8";
+  const meta = TYPE_META[notif.type] ?? FALLBACK_META;
 
   return (
     <Pressable
@@ -36,10 +54,13 @@ function NotifItem({ notif, onPress }: { notif: Notification; onPress: () => voi
       accessibilityRole="button"
       accessibilityLabel={`${isUnread ? "Non lue: " : ""}${notif.title}`}
       accessibilityHint="Marquer comme lue"
+      style={({ pressed }) => pressed && styles.pressed}
     >
       <Card style={[styles.notifCard, isUnread && styles.notifUnread]}>
         <View style={styles.notifRow}>
-          <Text style={styles.notifIcon}>{icon}</Text>
+          <View style={[styles.notifIconChip, { backgroundColor: meta.bg }]}>
+            <Ionicons name={meta.icon} size={20} color={meta.color} />
+          </View>
           <View style={{ flex: 1 }}>
             <View style={styles.notifHeader}>
               <Text
@@ -65,6 +86,7 @@ export default function NotificationsScreen() {
   const { data, isLoading, refetch, isRefetching } = useNotifications();
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
+  const insets = useSafeAreaInsets();
 
   if (isLoading) return <LoadingScreen />;
 
@@ -99,7 +121,10 @@ export default function NotificationsScreen() {
             }}
           />
         )}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[
+          styles.list,
+          { paddingBottom: TAB_BAR_BASE_HEIGHT + insets.bottom + spacing.xl },
+        ]}
         refreshing={isRefetching}
         onRefresh={refetch}
         ListEmptyComponent={
@@ -131,9 +156,11 @@ const styles = StyleSheet.create({
     fontWeight: font.weights.semibold,
     color: colors.primary,
   },
+  pressed: {
+    opacity: 0.7,
+  },
   list: {
     padding: spacing.lg,
-    paddingBottom: spacing.xxxl,
   },
   notifCard: {
     marginBottom: spacing.sm,
@@ -145,10 +172,14 @@ const styles = StyleSheet.create({
   notifRow: {
     flexDirection: "row",
     gap: spacing.md,
+    alignItems: "flex-start",
   },
-  notifIcon: {
-    fontSize: 24,
-    marginTop: 2,
+  notifIconChip: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
   },
   notifHeader: {
     flexDirection: "row",

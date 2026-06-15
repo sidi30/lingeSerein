@@ -545,7 +545,7 @@ const styles = StyleSheet.create({
   locWarningText: {
     flex: 1,
     fontSize: font.sizes.xs,
-    color: colors.warning,
+    color: colors.warningText,
   },
   // List
   list: {
@@ -608,7 +608,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: radius.full,
   },
-  setsText: { fontSize: 10, color: colors.info, fontWeight: font.weights.semibold },
+  setsText: { fontSize: 10, color: colors.infoText, fontWeight: font.weights.semibold },
   warnBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -618,7 +618,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: radius.full,
   },
-  warnText: { fontSize: 10, color: colors.warning, fontWeight: font.weights.semibold },
+  warnText: { fontSize: 10, color: colors.warningText, fontWeight: font.weights.semibold },
   // Map
   mapContainer: { flex: 1 },
   map: { flex: 1 },

@@ -3,11 +3,13 @@ import {
   View,
   Text,
   TextInput,
+  ScrollView,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
   type ViewStyle,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Link } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLogin } from "@/lib/auth";
@@ -18,6 +20,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const login = useLogin();
+  const insets = useSafeAreaInsets();
 
   const handleLogin = () => {
     if (!email.trim() || !password) return;
@@ -29,73 +32,83 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.headerGradient}>
-        <Text style={styles.logo} accessibilityRole="header">
-          Linge Serein
-        </Text>
-        <Text style={styles.subtitle}>Votre linge, notre sérénité</Text>
-      </LinearGradient>
-
-      <View style={styles.formContainer}>
-        <View style={styles.form}>
-          <Text style={styles.formTitle}>Connexion</Text>
-
-          <Text style={styles.label} nativeID="email-label">
-            Adresse email
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
+        <LinearGradient
+          colors={[colors.primary, colors.primaryDark]}
+          style={[styles.headerGradient, { paddingTop: insets.top + spacing.xxxl }]}
+        >
+          <Text style={styles.logo} accessibilityRole="header">
+            Linge Serein
           </Text>
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoComplete="email"
-            textContentType="emailAddress"
-            accessibilityLabel="Adresse email"
-            placeholder="client@example.com"
-            placeholderTextColor={colors.textTertiary}
-          />
+          <Text style={styles.subtitle}>Votre linge, notre sérénité</Text>
+        </LinearGradient>
 
-          <Text style={styles.label} nativeID="password-label">
-            Mot de passe
-          </Text>
-          <TextInput
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoComplete="password"
-            textContentType="password"
-            accessibilityLabel="Mot de passe"
-            placeholder="Votre mot de passe"
-            placeholderTextColor={colors.textTertiary}
-          />
+        <View style={[styles.formContainer, { paddingBottom: insets.bottom + spacing.xxl }]}>
+          <View style={styles.form}>
+            <Text style={styles.formTitle}>Connexion</Text>
 
-          {login.isError && (
-            <View
-              style={styles.errorBox}
-              accessibilityRole="alert"
-              accessibilityLiveRegion="assertive"
-            >
-              <Text style={styles.errorText}>Email ou mot de passe incorrect</Text>
-            </View>
-          )}
+            <Text style={styles.label} nativeID="email-label">
+              Adresse email
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoComplete="email"
+              textContentType="emailAddress"
+              accessibilityLabel="Adresse email"
+              placeholder="client@example.com"
+              placeholderTextColor={colors.textTertiary}
+            />
 
-          <Button
-            title="Se connecter"
-            onPress={handleLogin}
-            loading={login.isPending}
-            disabled={!email.trim() || !password}
-            style={{ marginTop: spacing.xl }}
-          />
+            <Text style={styles.label} nativeID="password-label">
+              Mot de passe
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoComplete="password"
+              textContentType="password"
+              accessibilityLabel="Mot de passe"
+              placeholder="Votre mot de passe"
+              placeholderTextColor={colors.textTertiary}
+            />
+
+            {login.isError && (
+              <View
+                style={styles.errorBox}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="assertive"
+              >
+                <Text style={styles.errorText}>Email ou mot de passe incorrect</Text>
+              </View>
+            )}
+
+            <Button
+              title="Se connecter"
+              onPress={handleLogin}
+              loading={login.isPending}
+              disabled={!email.trim() || !password}
+              style={{ marginTop: spacing.xl }}
+            />
+          </View>
+
+          <Link href="/(auth)/register" style={styles.link}>
+            <Text style={styles.linkText}>
+              Pas encore de compte ? <Text style={styles.linkBold}>S'inscrire</Text>
+            </Text>
+          </Link>
         </View>
-
-        <Link href="/(auth)/register" style={styles.link}>
-          <Text style={styles.linkText}>
-            Pas encore de compte ? <Text style={styles.linkBold}>S'inscrire</Text>
-          </Text>
-        </Link>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -105,8 +118,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   headerGradient: {
-    paddingTop: 80,
     paddingBottom: 40,
     paddingHorizontal: spacing.xxl,
     alignItems: "center",
@@ -122,7 +137,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   formContainer: {
-    flex: 1,
+    flexGrow: 1,
     marginTop: -spacing.xl,
     paddingHorizontal: spacing.xxl,
   },
@@ -174,7 +189,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   errorText: {
-    color: colors.error,
+    color: colors.errorText,
     fontSize: font.sizes.sm,
     fontWeight: font.weights.medium,
   },

@@ -511,7 +511,7 @@ const styles = StyleSheet.create({
   engagementNoticeText: {
     flex: 1,
     fontSize: font.sizes.xs,
-    color: colors.info,
+    color: colors.infoText,
     lineHeight: 18,
   },
   // Abonnement existant
@@ -572,7 +572,7 @@ const styles = StyleSheet.create({
   engagementText: {
     flex: 1,
     fontSize: font.sizes.xs,
-    color: colors.warning,
+    color: colors.warningText,
     lineHeight: 18,
   },
   engagementDate: {
@@ -586,7 +586,7 @@ const styles = StyleSheet.create({
   },
   engagementDoneText: {
     fontSize: font.sizes.xs,
-    color: colors.success,
+    color: colors.successText,
   },
   // Articles inclus
   subProducts: {

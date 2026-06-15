@@ -16,6 +16,7 @@ import {
   ScrollView,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
@@ -25,7 +26,7 @@ import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
 import { useTodayRound, useCompleteStop } from "@/lib/api";
 import type { DeliveryStop } from "@/lib/api";
-import { colors, font, spacing, radius, MIN_HIT_TARGET } from "@/lib/theme";
+import { colors, font, spacing, radius, MIN_HIT_TARGET, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
 
 // ─── Stepper ──────────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ export default function StopDetailScreen() {
 
   const { data: round, isLoading } = useTodayRound();
   const completeStop = useCompleteStop();
+  const insets = useSafeAreaInsets();
 
   const stop: DeliveryStop | undefined = round?.stops.find((s) => s.id === stopId);
 
@@ -218,7 +220,10 @@ export default function StopDetailScreen() {
     >
       <ScrollView
         style={styles.flex}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: TAB_BAR_BASE_HEIGHT + insets.bottom + spacing.xl },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* Already done */}
@@ -361,7 +366,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
   scrollContent: {
     padding: spacing.lg,
-    paddingBottom: spacing.huge,
     gap: spacing.md,
   },
   doneBanner: {
@@ -374,7 +378,7 @@ const styles = StyleSheet.create({
   doneBannerText: {
     fontSize: font.sizes.md,
     fontWeight: font.weights.semibold,
-    color: colors.success,
+    color: colors.successText,
   },
   // Client card
   clientCard: { gap: spacing.sm },
@@ -437,7 +441,7 @@ const styles = StyleSheet.create({
   warningTitle: {
     fontSize: font.sizes.md,
     fontWeight: font.weights.bold,
-    color: colors.warning,
+    color: colors.warningText,
   },
   warningText: {
     fontSize: font.sizes.md,

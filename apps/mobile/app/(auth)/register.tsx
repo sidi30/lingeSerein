@@ -8,6 +8,8 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { Link } from "expo-router";
 import type { RegisterInput } from "@lingengo/shared";
 import { useRegister } from "@/lib/auth";
@@ -32,6 +34,7 @@ export default function RegisterScreen() {
   const [accoType, setAccoType] = useState<AccommodationType>("HOTEL");
   const [success, setSuccess] = useState(false);
   const register = useRegister();
+  const insets = useSafeAreaInsets();
 
   const handleRegister = () => {
     if (!name.trim() || !email.trim() || !password || !address.trim()) return;
@@ -50,8 +53,12 @@ export default function RegisterScreen() {
   if (success) {
     return (
       <View style={styles.container}>
-        <View style={styles.inner}>
-          <Text style={styles.successIcon}>{"✉️"}</Text>
+        <View
+          style={[styles.inner, styles.successInner, { paddingTop: insets.top + spacing.huge }]}
+        >
+          <View style={styles.successIconChip}>
+            <Ionicons name="mail-outline" size={36} color={colors.primary} />
+          </View>
           <Text style={styles.successTitle}>Compte cree !</Text>
           <Text style={styles.successText}>
             Un email de verification a ete envoye. Verifiez votre boite mail puis connectez-vous.
@@ -77,7 +84,14 @@ export default function RegisterScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <ScrollView contentContainerStyle={styles.inner} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.inner,
+          { paddingTop: insets.top + spacing.xxl, paddingBottom: insets.bottom + spacing.xxl },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.title} accessibilityRole="header">
           Creer un compte
         </Text>
@@ -166,7 +180,8 @@ export default function RegisterScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.white },
-  inner: { padding: spacing.xxl, paddingTop: 60 },
+  inner: { padding: spacing.xxl },
+  successInner: { alignItems: "center" },
   title: {
     fontSize: font.sizes.xxl,
     fontWeight: font.weights.bold,
@@ -191,8 +206,8 @@ const styles = StyleSheet.create({
   },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
@@ -211,11 +226,19 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginTop: spacing.md,
   },
-  errorText: { color: colors.error, fontSize: font.sizes.sm },
+  errorText: { color: colors.errorText, fontSize: font.sizes.sm },
   link: { alignSelf: "center", marginTop: spacing.xl, marginBottom: spacing.xxxl },
   linkText: { fontSize: font.sizes.sm, color: colors.textSecondary },
   linkBold: { color: colors.primary, fontWeight: font.weights.semibold },
-  successIcon: { fontSize: 48, textAlign: "center", marginBottom: spacing.lg },
+  successIconChip: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.lg,
+  },
   successTitle: {
     fontSize: font.sizes.xl,
     fontWeight: font.weights.bold,

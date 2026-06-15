@@ -11,6 +11,7 @@ import {
   Pressable,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { ScreenWrapper } from "@/components/ScreenWrapper";
@@ -157,6 +158,7 @@ function RefuseModal({
 }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState(false);
+  const insets = useSafeAreaInsets();
 
   // Modal reste monté entre ouvertures → reset des états à la fermeture.
   useEffect(() => {
@@ -182,7 +184,7 @@ function RefuseModal({
         style={styles.modalOverlay}
       >
         <Pressable style={styles.modalBackdrop} onPress={onCancel} />
-        <View style={styles.modalSheet}>
+        <View style={[styles.modalSheet, { paddingBottom: spacing.xxl + insets.bottom }]}>
           <View style={styles.modalHandle} />
           <Text style={styles.modalTitle}>Refuser la commande</Text>
           <Text style={styles.modalSubtitle}>La raison du refus sera communiquée au client.</Text>
@@ -472,7 +474,7 @@ export default function OrderDetailScreen() {
             },
           ]}
         >
-          <Text style={{ fontSize: font.sizes.sm, color: colors.warning, textAlign: "center" }}>
+          <Text style={{ fontSize: font.sizes.sm, color: colors.warningText, textAlign: "center" }}>
             L'annulation n'est plus possible à moins de 24h de la livraison.
           </Text>
         </Card>

@@ -449,7 +449,7 @@ function AdminHome() {
               >
                 <View style={styles.alertRow}>
                   <Ionicons name="warning-outline" size={18} color={colors.warning} />
-                  <Text style={[styles.alertText, { color: colors.warning }]}>
+                  <Text style={[styles.alertText, { color: colors.warningText }]}>
                     {k.lowStockAlerts} alerte{k.lowStockAlerts > 1 ? "s" : ""} stock bas
                   </Text>
                   <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
@@ -563,7 +563,7 @@ const DriverStopCard = ({
               {stop.setsToDeliver} set{stop.setsToDeliver > 1 ? "s" : ""} à livrer
             </Text>
             {stop.specialInstructions && (
-              <Text style={[styles.deliveryItems, { color: colors.warning }]} numberOfLines={1}>
+              <Text style={[styles.deliveryItems, { color: colors.warningText }]} numberOfLines={1}>
                 {stop.specialInstructions}
               </Text>
             )}
