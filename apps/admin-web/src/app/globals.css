@@ -88,3 +88,13 @@ input[type="search"]::-webkit-search-cancel-button {
   -webkit-appearance: none;
   appearance: none;
 }
+
+/* iOS Safari auto-zooms on focus when input font-size < 16px.
+   Force >=16px on small screens for every field (incl. raw inputs in pages). */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

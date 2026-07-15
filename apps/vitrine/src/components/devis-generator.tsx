@@ -48,7 +48,7 @@ function fmt(cents: number): string {
 }
 
 const inputCls =
-  "w-full rounded-lg border border-lavender-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest";
+  "w-full rounded-lg border border-lavender-200 bg-white px-3 py-2 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest";
 const labelCls = "block text-xs font-medium text-gray-700 mb-1";
 
 export function DevisGenerator() {
@@ -419,7 +419,7 @@ export function DevisGenerator() {
             {lines.map((l, i) => (
               <div
                 key={i}
-                className="grid grid-cols-[1fr_70px_100px] sm:grid-cols-[1fr_70px_100px_100px_36px] gap-2 items-center"
+                className="grid grid-cols-[1fr_56px_88px_36px] sm:grid-cols-[1fr_70px_100px_100px_36px] gap-2 items-center"
               >
                 <input
                   className={inputCls}
@@ -453,7 +453,7 @@ export function DevisGenerator() {
                 <button
                   type="button"
                   onClick={() => removeLine(i)}
-                  className="hidden sm:flex items-center justify-center h-9 w-9 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                  className="flex items-center justify-center h-9 w-9 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                   aria-label="Supprimer la ligne"
                 >
                   <Trash2 size={15} aria-hidden />

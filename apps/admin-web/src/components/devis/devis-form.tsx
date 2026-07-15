@@ -460,6 +460,42 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
                       <p className={errorCls}>{errors.lignes[i]?.unitCentsEuros?.message}</p>
                     )}
                   </div>
+                  {/* Mobile action bar (total + reorder + delete) — desktop uses dedicated cells below */}
+                  <div className="flex items-center justify-between gap-2 sm:hidden">
+                    <span className="text-sm font-medium text-gray-900 tabular-nums">
+                      Total : {formatPrice(lineTotal)}
+                    </span>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => i > 0 && move(i, i - 1)}
+                        disabled={i === 0}
+                        className="flex h-9 w-9 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30"
+                        aria-label="Monter la ligne"
+                      >
+                        <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => i < fields.length - 1 && move(i, i + 1)}
+                        disabled={i === fields.length - 1}
+                        className="flex h-9 w-9 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30"
+                        aria-label="Descendre la ligne"
+                      >
+                        <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fields.length > 1 && remove(i)}
+                        disabled={fields.length === 1}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 hover:bg-danger-50 hover:text-danger-600 disabled:opacity-30 transition-colors"
+                        aria-label="Supprimer la ligne"
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="hidden sm:flex items-center justify-end">
                     <span className="text-sm font-medium text-gray-900 tabular-nums">
                       {formatPrice(lineTotal)}

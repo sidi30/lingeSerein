@@ -76,7 +76,8 @@ export function Navbar() {
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
           className="lg:hidden p-2 rounded-lg hover:bg-lavender-50 transition-colors"
-          aria-label="Menu"
+          aria-label={mobileOpen ? "Fermer le menu" : "Ouvrir le menu"}
+          aria-expanded={mobileOpen}
         >
           {mobileOpen ? (
             <X size={24} className="text-forest" />
