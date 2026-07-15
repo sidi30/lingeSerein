@@ -14,8 +14,14 @@ import {
   Sparkles,
 } from "lucide-react";
 import { DevisGenerator } from "@/components/devis-generator";
+import { ContractGenerator } from "@/components/contract-generator";
 import { DevisRequest } from "@/components/devis-request";
-import { CATALOG_DEFAULTS, SUBSCRIPTION_DEFAULTS, DELIVERY_DEFAULTS } from "@lingengo/shared";
+import {
+  CATALOG_DEFAULTS,
+  SUBSCRIPTION_DEFAULTS,
+  DELIVERY_DEFAULTS,
+  computePackSereniteComparison,
+} from "@lingengo/shared";
 
 // NOTE (Option A, ADR-V2-005) : tous les prix proviennent de @lingengo/shared (source de vérité
 // de seed). Si les prix sont modifiés via l'admin en production, le simulateur restera sur les
@@ -96,8 +102,18 @@ const zones = [
     fraisCents: 0,
     note: `Offerte dès ${DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits`,
   },
-  { id: "proche", name: "Zone proche", fraisCents: 1200, note: "Carpentras, Vaison…" },
-  { id: "elargie", name: "Zone élargie", fraisCents: 1500, note: "Avignon, Apt…" },
+  {
+    id: "proche",
+    name: "Zone proche",
+    fraisCents: DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS,
+    note: "Carpentras, Vaison…",
+  },
+  {
+    id: "elargie",
+    name: "Zone élargie",
+    fraisCents: DELIVERY_DEFAULTS.ZONE_ELARGIE_CENTS,
+    note: "Avignon, Apt…",
+  },
 ];
 
 // Kit Complet : remise groupage bain+lit (−2 € par paire)
@@ -228,14 +244,18 @@ function DevisPageInner() {
     const nbKits = qBain + qLit;
     const totalVente = sumVente - groupDiscount;
 
-    // Livraison : offerte dès 120 € ou (Orange dès 4 kits), sinon frais de zone
+    // Réduction commerciale appliquée sur les marchandises (avant livraison).
+    const reductionMontant = Math.round(totalVente * (reduction / 100));
+    const venteGoods = totalVente - reductionMontant; // montant marchandises réellement facturé
+
+    // Livraison : offerte dès 120 € (évalué sur le montant POST-réduction réellement facturé)
+    // ou (Orange dès 4 kits), sinon frais de zone.
     const livraisonFrais =
-      totalVente >= FREE_DELIVERY_THRESHOLD || (zoneId === "orange" && nbKits >= 4)
+      venteGoods >= FREE_DELIVERY_THRESHOLD || (zoneId === "orange" && nbKits >= 4)
         ? 0
         : zone.fraisCents;
 
-    const reductionMontant = Math.round(totalVente * (reduction / 100));
-    const venteApresReduc = totalVente - reductionMontant + livraisonFrais;
+    const venteApresReduc = venteGoods + livraisonFrais;
 
     const margeLivraison = venteApresReduc - sumCout;
     const margePct = venteApresReduc > 0 ? (margeLivraison / venteApresReduc) * 100 : 0;
@@ -248,7 +268,14 @@ function DevisPageInner() {
     const coutTotal = coutMois * mois;
     const margeTotal = venteTotal - coutTotal;
 
-    const ecoAbo = venteMois - ABO_PRICE;
+    // Comparaison Pack Sérénité : forfait mensuel FIXE (89 €) contre la valeur à-la-carte de
+    // l'allotissement mensuel inclus (8 bain + 4 lit + 1 livraison). Jamais multipliée par le
+    // nombre de rotations/mois. Si le volume/rotation dépasse l'allotissement, on ne revendique
+    // pas d'économie : les kits au-delà sont facturés au tarif normal.
+    const pack = computePackSereniteComparison();
+    const packCouvreVolume =
+      qBain <= SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY && qLit <= SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY;
+    const ecoAbo = packCouvreVolume ? pack.economieCents : 0;
 
     return {
       lignes,
@@ -265,6 +292,10 @@ function DevisPageInner() {
       venteTotal,
       coutTotal,
       margeTotal,
+      qBain,
+      qLit,
+      packAlaCarte: pack.alaCarteCents,
+      packCouvreVolume,
       ecoAbo,
     };
   }, [kitQtys, extraQtys, grouper, zoneId, zone.fraisCents, reduction, livraisonsParMois, mois]);
@@ -324,8 +355,9 @@ function DevisPageInner() {
           )}
         </div>
 
-        {/* Générateur de devis PDF — admin uniquement */}
+        {/* Générateurs PDF — admin uniquement */}
         {isAdmin && <DevisGenerator />}
+        {isAdmin && <ContractGenerator />}
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-7 space-y-6">
@@ -565,8 +597,8 @@ function DevisPageInner() {
                 </div>
               </div>
 
-              {/* Comparaison abonnement */}
-              {calc.lignes.length > 0 && calc.ecoAbo > 0 && (
+              {/* Comparaison abonnement — base = allotissement mensuel FIXE du pack */}
+              {calc.lignes.length > 0 && (calc.qBain > 0 || calc.qLit > 0) && (
                 <div className="rounded-2xl bg-lavender-50 border border-lavender-200 p-5">
                   <div className="flex items-center gap-2 mb-2">
                     <Sparkles size={16} aria-hidden className="text-lavender-700" />
@@ -574,15 +606,26 @@ function DevisPageInner() {
                       Pack Sérénité — {fmt(ABO_PRICE)} / mois
                     </h3>
                   </div>
-                  <p className="text-xs text-gray-700 leading-relaxed">
-                    {SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} kits bain +{" "}
-                    {SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY} kits lit + livraisons inclus. À votre volume
-                    estimé ({fmt(calc.venteMois)}/mois), l&apos;abonnement pourrait vous faire
-                    économiser{" "}
-                    <strong className="text-lavender-700">~{fmt(calc.ecoAbo)} / mois</strong>.
-                  </p>
+                  {calc.packCouvreVolume ? (
+                    <p className="text-xs text-gray-700 leading-relaxed">
+                      Le forfait inclut chaque mois {SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} kits bain +{" "}
+                      {SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY} kits lit + 1 livraison & reprise, soit{" "}
+                      {fmt(calc.packAlaCarte)}/mois à l&apos;unité. À {fmt(ABO_PRICE)}/mois, vous
+                      économisez{" "}
+                      <strong className="text-lavender-700">~{fmt(calc.ecoAbo)} / mois</strong>.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-700 leading-relaxed">
+                      Votre volume par rotation dépasse l&apos;allotissement mensuel inclus (
+                      {SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} bain +{" "}
+                      {SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY} lit). Le Pack reste une option
+                      intéressante : les kits au-delà sont facturés au tarif normal.
+                    </p>
+                  )}
                   <p className="text-[10px] text-gray-500 mt-2">
-                    Engagement {SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS} mois · résiliable
+                    1 Pack Sérénité / mois ({SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} bain +{" "}
+                    {SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY} lit), kits au-delà au tarif normal ·
+                    engagement {SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS} mois · résiliable
                     ensuite avec {SUBSCRIPTION_DEFAULTS.NOTICE_PERIOD_DAYS} j de préavis.
                   </p>
                 </div>

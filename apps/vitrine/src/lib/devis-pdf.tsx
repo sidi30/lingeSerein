@@ -42,9 +42,15 @@ const CREAM = "#faf8f3";
 const SOCIETE = {
   nom: "Linge Serein",
   baseline: "Votre linge, notre sérénité",
-  adresse: "Rue Simone Weil, 84100 Orange, Vaucluse",
+  adresse: "343 rue Simone Weil, 84100 Orange",
   tel: "07 53 56 95 48",
   email: "lingeserein@gmail.com",
+  // Mentions légales — cohérence avec le contrat (Serein Act — Rayana Mahaman Moustapha).
+  raisonSociale: "Serein Act — Rayana Mahaman Moustapha",
+  siren: "105 368 047",
+  siret: "105 368 047 00012",
+  ape: "9609Z",
+  rne: "02/06/2026",
 };
 
 /* ─── Helpers ─── */
@@ -342,6 +348,11 @@ export function DevisDocument({ data, logoSrc }: { data: DevisData; logoSrc?: st
             {data.tvaApplicable ? "" : " TVA non applicable, art. 293 B du CGI."}
           </Text>
           {!!data.reglement?.trim() && <Text style={{ marginTop: 3 }}>{data.reglement}</Text>}
+          <Text style={{ marginTop: 5 }}>
+            {SOCIETE.nom} — {SOCIETE.raisonSociale} · SIREN {SOCIETE.siren} · SIRET {SOCIETE.siret}{" "}
+            · APE {SOCIETE.ape} · {SOCIETE.adresse}. Immatriculée au RNE le {SOCIETE.rne}. TVA non
+            applicable, art. 293 B du CGI.
+          </Text>
         </View>
 
         {/* Signatures */}

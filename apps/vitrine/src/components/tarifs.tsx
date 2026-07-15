@@ -2,7 +2,12 @@
 
 import { ArrowRight, Check, Truck } from "lucide-react";
 import { Reveal } from "./reveal";
-import { CATALOG_DEFAULTS, SUBSCRIPTION_DEFAULTS, DELIVERY_DEFAULTS } from "@lingengo/shared";
+import {
+  CATALOG_DEFAULTS,
+  SUBSCRIPTION_DEFAULTS,
+  DELIVERY_DEFAULTS,
+  computePackSereniteComparison,
+} from "@lingengo/shared";
 
 // NOTE (Option A, ADR-V2-005) : ces valeurs reflètent les constantes de seed
 // (@lingengo/shared). Si les prix sont modifiés via l'admin en production, la
@@ -22,20 +27,18 @@ const engagementLabel = `Engagement ${SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTH
 const abonnementFeatures = [
   `${SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} kits bain inclus par mois`,
   `${SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY} kits lit inclus par mois`,
-  "Livraisons & reprises incluses",
+  "1 livraison & reprise incluse",
   "Entretien blanchisserie compris",
   "Kits supplémentaires au tarif normal",
   engagementLabel,
 ];
 
-// Économies calculées depuis les constantes partagées
+// Économie mensuelle : valeur à-la-carte de l'allotissement FIXE du pack (8 bain + 4 lit + 1
+// livraison) comparée au prix fixe du pack. Source unique partagée avec le simulateur de devis.
 const kitBainMensuels = SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY * CATALOG_DEFAULTS.KIT_BAIN_CENTS;
 const kitLitMensuels = SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY * CATALOG_DEFAULTS.KIT_LIT_CENTS;
-// 4 livraisons estimées à 12 € = 4800 c (valeur illustrative, pas issue d'une constante)
-const livraisonsEstimees = 4 * (DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 10); // ~48 € illustratif
-const totalSansAbo = kitBainMensuels + kitLitMensuels + livraisonsEstimees;
-const economie = totalSansAbo - SUBSCRIPTION_DEFAULTS.PRICE_CENTS;
-const economiePct = Math.round((economie / totalSansAbo) * 100);
+const { alaCarteCents, packCents, economieCents } = computePackSereniteComparison();
+const economiePct = Math.round((economieCents / alaCarteCents) * 100);
 
 const abonnementSavings = [
   {
@@ -51,20 +54,20 @@ const abonnementSavings = [
     highlight: false,
   },
   {
-    label: "Livraisons estimées (×4)",
-    amount: centsToEuroStr(livraisonsEstimees),
+    label: "1 livraison & reprise (estim.)",
+    amount: centsToEuroStr(DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS),
     bold: false,
     highlight: false,
   },
   {
     label: "Total sans abonnement",
-    amount: centsToEuroStr(totalSansAbo),
+    amount: centsToEuroStr(alaCarteCents),
     bold: true,
     highlight: false,
   },
   {
     label: "Avec l'abonnement",
-    amount: centsToEuroStr(SUBSCRIPTION_DEFAULTS.PRICE_CENTS),
+    amount: centsToEuroStr(packCents),
     bold: false,
     highlight: true,
   },
@@ -195,7 +198,7 @@ export function Tarifs() {
                   ))}
                 </div>
                 <p className="text-xs text-lavender-700 font-medium mt-3">
-                  Économie : ~{centsToEuroStr(economie)} / mois soit −{economiePct} %
+                  Économie : ~{centsToEuroStr(economieCents)} / mois soit −{economiePct} %
                 </p>
               </div>
               <p className="mt-6 text-xs text-gray-500 leading-relaxed border-t border-lavender-100 pt-4">

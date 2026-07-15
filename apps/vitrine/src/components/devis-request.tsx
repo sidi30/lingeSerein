@@ -6,7 +6,7 @@ import { ArrowRight, Loader2, Check, Send } from "lucide-react";
 const API_URL = process.env.NEXT_PUBLIC_MAILER_URL || "https://api.lingeserein.fr";
 
 const inputCls =
-  "w-full rounded-lg border border-lavender-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest";
+  "w-full rounded-lg border border-lavender-200 bg-white px-3 py-2 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest";
 
 interface Props {
   /** Récapitulatif chiffré (déjà formaté) envoyé au propriétaire. */
@@ -29,9 +29,15 @@ export function DevisRequest({ recap }: Props) {
     setError("");
 
     const get = (n: string) => (form.elements.namedItem(n) as HTMLInputElement)?.value ?? "";
-    const note = get("note").trim();
+    // Retire tout caractère de contrôle ASCII SAUF \n : le schéma du mailer
+    // (noControlCharsExceptNewline) rejetterait sinon la demande en 400.
+    const stripControl = (s: string) =>
+      // eslint-disable-next-line no-control-regex
+      s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+    const recapClean = stripControl(recap);
+    const note = stripControl(get("note").trim());
     const message =
-      `Demande de devis depuis le simulateur :\n\n${recap}` +
+      `Demande de devis depuis le simulateur :\n\n${recapClean}` +
       (note ? `\n\nMessage du client :\n${note}` : "");
 
     const payload = {
@@ -50,8 +56,8 @@ export function DevisRequest({ recap }: Props) {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { message?: string } | null;
-        throw new Error(data?.message || "Envoi impossible. Réessayez ou appelez-nous.");
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error || "Envoi impossible. Réessayez ou appelez-nous.");
       }
       setStatus("sent");
     } catch (err) {
@@ -66,8 +72,7 @@ export function DevisRequest({ recap }: Props) {
         <Check size={28} aria-hidden className="mx-auto text-forest mb-2" />
         <p className="text-sm font-semibold text-forest">Demande envoyée !</p>
         <p className="text-xs text-gray-700 mt-1">
-          Vous recevrez votre devis personnalisé sous 24 h. Un email de confirmation vous a été
-          envoyé.
+          Nous avons bien reçu votre demande et vous recontactons sous 24 h.
         </p>
       </div>
     );

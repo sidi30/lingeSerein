@@ -24,7 +24,9 @@ test.describe("Devis PDF — générateur admin", () => {
     await page.getByRole("button", { name: /Kit Lit/i }).click();
 
     // Client (inputs hydratés désormais)
-    await page.getByLabel("Établissement").fill("Hôtel Le Mas Provençal");
+    // Note : /devis?admin=1 monte aussi le générateur de contrat, qui a un champ
+    // "Établissement / dénomination" — matcher en exact pour éviter l'ambiguïté.
+    await page.getByLabel("Établissement", { exact: true }).fill("Hôtel Le Mas Provençal");
     await page.getByLabel("Nom du contact").fill("Marie-Claire D.");
 
     const downloadBtn = page.getByRole("button", { name: /Télécharger le PDF/i });

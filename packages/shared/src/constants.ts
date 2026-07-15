@@ -212,7 +212,38 @@ export const SUBSCRIPTION_DEFAULTS = {
 export const DELIVERY_DEFAULTS = {
   FREE_THRESHOLD_CENTS: 12000, // offerte dès 120 €
   FREE_MIN_KITS_ORANGE: 4, // offerte dès 4 kits à Orange
+  ZONE_PROCHE_CENTS: 1200, // zone proche (Carpentras, Vaison…) — 12 €
+  ZONE_ELARGIE_CENTS: 1500, // zone élargie (Avignon, Apt…) — 15 €
 } as const;
+
+/**
+ * Comparaison à-la-carte vs Pack Sérénité (base mensuelle, honnête).
+ *
+ * Le Pack Sérénité est un FORFAIT mensuel fixe (89 €) qui inclut un allotissement mensuel
+ * FIXE : {@link SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} kits bain + {@link SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY}
+ * kits lit + 1 livraison & reprise incluse. La base de comparaison honnête est donc la valeur
+ * à-la-carte de CE panier mensuel fixe — jamais multipliée par le nombre de rotations/mois.
+ * La livraison est illustrée au tarif « zone proche » (12 €).
+ *
+ * @returns montants en centimes : `alaCarteCents` (panier mensuel à l'unité),
+ * `packCents` (prix du pack) et `economieCents` (= alaCarteCents − packCents).
+ */
+export function computePackSereniteComparison(): {
+  alaCarteCents: number;
+  packCents: number;
+  economieCents: number;
+} {
+  const kitsCents =
+    SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY * CATALOG_DEFAULTS.KIT_BAIN_CENTS +
+    SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY * CATALOG_DEFAULTS.KIT_LIT_CENTS;
+  const alaCarteCents = kitsCents + DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS;
+  const packCents = SUBSCRIPTION_DEFAULTS.PRICE_CENTS;
+  return {
+    alaCarteCents,
+    packCents,
+    economieCents: alaCarteCents - packCents,
+  };
+}
 
 /** Rate limiting */
 export const RATE_LIMITS = {

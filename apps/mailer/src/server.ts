@@ -72,6 +72,11 @@ const app = Fastify({
     },
   },
   bodyLimit: 16 * 1024,
+  // Derrière Traefik : sans trustProxy, request.ip vaut l'IP du conteneur proxy,
+  // donc @fastify/rate-limit partagerait la limite stricte de /api/contact entre
+  // TOUS les visiteurs (un 429 global au bout de 5 envois) et on stockerait une IP
+  // inutile. trustProxy fait résoudre request.ip depuis X-Forwarded-For (posé par Traefik).
+  trustProxy: true,
 });
 
 await app.register(cors, {
@@ -177,6 +182,11 @@ app.post(
       app.log.error({ err }, "Échec de la persistance de la demande de devis");
     }
 
+    // Dégradation gracieuse : le lead est DÉJÀ persisté (visible dans /admin/devis).
+    // Les deux envois sont donc indépendants et « best effort » — on log en cas
+    // d'échec sans jamais throw. Ainsi une auth SMTP cassée (App Password) ou un
+    // échec de la confirmation client ne provoque plus de 500 → pas de retry visiteur,
+    // donc pas de leads/emails dupliqués, et le proprio récupère la demande via l'inbox.
     try {
       // Email de notification pour Linge Serein
       await transporter.sendMail({
@@ -186,7 +196,11 @@ app.post(
         subject: `Nouvelle demande de devis — ${safeCompany}`,
         html: notificationEmail(data),
       });
+    } catch (err) {
+      app.log.error({ err }, "Échec de l'envoi de la notification propriétaire");
+    }
 
+    try {
       // Email de confirmation pour le client
       await transporter.sendMail({
         from: `"Linge Serein" <${GMAIL_USER}>`,
@@ -194,12 +208,11 @@ app.post(
         subject: "Linge Serein — Nous avons bien reçu votre demande",
         html: confirmationEmail(data),
       });
-
-      return reply.status(200).send({ message: "Demande envoyée avec succès" });
-    } catch (error) {
-      app.log.error(error);
-      return reply.status(500).send({ error: "Erreur lors de l'envoi" });
+    } catch (err) {
+      app.log.error({ err }, "Échec de l'envoi de la confirmation client");
     }
+
+    return reply.status(200).send({ message: "Demande envoyée avec succès" });
   },
 );
 

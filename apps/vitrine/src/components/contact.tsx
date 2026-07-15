@@ -140,8 +140,8 @@ export function Contact() {
                 </div>
                 <h3 className="font-serif text-2xl font-bold text-forest mb-3">Demande envoyée</h3>
                 <p className="text-gray-700 leading-relaxed mb-8">
-                  Merci pour votre confiance. Vous allez recevoir un email de confirmation. Notre
-                  équipe vous recontactera sous 24 heures.
+                  Merci pour votre confiance. Nous avons bien reçu votre demande et notre équipe
+                  vous recontactera sous 24 heures.
                 </p>
                 <button
                   onClick={() => setStatus("idle")}
@@ -172,7 +172,7 @@ export function Contact() {
                       minLength={2}
                       autoComplete="name"
                       placeholder="Votre nom"
-                      className="w-full min-h-[44px] rounded-xl border border-lavender-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 transition-colors focus:border-lavender-500 focus:ring-2 focus:ring-lavender-100 focus:outline-none"
+                      className="w-full min-h-[44px] rounded-xl border border-lavender-200 bg-white px-4 py-3 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 transition-colors focus:border-lavender-500 focus:ring-2 focus:ring-lavender-100 focus:outline-none"
                     />
                   </div>
                   <div>
@@ -193,7 +193,7 @@ export function Contact() {
                       minLength={2}
                       autoComplete="organization"
                       placeholder="Nom de l'établissement"
-                      className="w-full min-h-[44px] rounded-xl border border-lavender-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 transition-colors focus:border-lavender-500 focus:ring-2 focus:ring-lavender-100 focus:outline-none"
+                      className="w-full min-h-[44px] rounded-xl border border-lavender-200 bg-white px-4 py-3 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 transition-colors focus:border-lavender-500 focus:ring-2 focus:ring-lavender-100 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -213,7 +213,7 @@ export function Contact() {
                     autoComplete="email"
                     inputMode="email"
                     placeholder="votre@email.fr"
-                    className="w-full min-h-[44px] rounded-xl border border-lavender-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 transition-colors focus:border-lavender-500 focus:ring-2 focus:ring-lavender-100 focus:outline-none"
+                    className="w-full min-h-[44px] rounded-xl border border-lavender-200 bg-white px-4 py-3 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 transition-colors focus:border-lavender-500 focus:ring-2 focus:ring-lavender-100 focus:outline-none"
                   />
                 </div>
 
@@ -233,7 +233,7 @@ export function Contact() {
                     autoComplete="tel"
                     inputMode="tel"
                     placeholder="06 ..."
-                    className="w-full min-h-[44px] rounded-xl border border-lavender-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 transition-colors focus:border-lavender-500 focus:ring-2 focus:ring-lavender-100 focus:outline-none"
+                    className="w-full min-h-[44px] rounded-xl border border-lavender-200 bg-white px-4 py-3 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 transition-colors focus:border-lavender-500 focus:ring-2 focus:ring-lavender-100 focus:outline-none"
                   />
                 </div>
 
@@ -252,7 +252,7 @@ export function Contact() {
                     minLength={10}
                     aria-describedby="message-help"
                     placeholder="Volume, fréquence, types de linge..."
-                    className="w-full rounded-xl border border-lavender-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 transition-colors focus:border-lavender-500 focus:ring-2 focus:ring-lavender-100 focus:outline-none resize-none"
+                    className="w-full rounded-xl border border-lavender-200 bg-white px-4 py-3 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 transition-colors focus:border-lavender-500 focus:ring-2 focus:ring-lavender-100 focus:outline-none resize-none"
                   />
                   <p id="message-help" className="mt-2 text-xs text-gray-600">
                     Plus votre description est précise, plus notre devis sera juste.
