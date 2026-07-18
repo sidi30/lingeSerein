@@ -4,6 +4,7 @@
  */
 
 export * from "./constants";
+export * from "./contract";
 export * from "./dates";
 export * from "./devis";
 export * from "./env";

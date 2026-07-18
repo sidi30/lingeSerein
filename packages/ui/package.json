@@ -12,6 +12,10 @@
     "./devis-pdf": {
       "types": "./dist/devis-pdf.d.ts",
       "default": "./dist/devis-pdf.js"
+    },
+    "./contract-pdf": {
+      "types": "./dist/contract-pdf.d.ts",
+      "default": "./dist/contract-pdf.js"
     }
   },
   "scripts": {

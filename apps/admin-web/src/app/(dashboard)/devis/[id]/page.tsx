@@ -17,8 +17,18 @@ import { useToast } from "@/lib/toast";
 import { formatPrice, formatDate } from "@/lib/format";
 import { QUOTE_TRANSITIONS, QUOTE_EDITABLE, quoteToDevisData } from "@lingengo/shared";
 import type { QuoteDTO, QuoteStatus, ProductDTO } from "@/lib/types";
-import { Download, Copy, Trash2, ArrowRight, Edit, AlertCircle, CheckCircle2 } from "lucide-react";
+import {
+  Download,
+  Copy,
+  Trash2,
+  ArrowRight,
+  Edit,
+  AlertCircle,
+  CheckCircle2,
+  FileSignature,
+} from "lucide-react";
 import { DevisForm } from "@/components/devis/devis-form";
+import { ContractModal } from "@/components/devis/contract-modal";
 
 type BadgeVariant = "default" | "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -47,6 +57,7 @@ export default function DevisDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [convertModal, setConvertModal] = useState(false);
   const [clientRequiredModal, setClientRequiredModal] = useState(false);
+  const [contractModal, setContractModal] = useState(false);
 
   // Mapping ligne → produit pour la conversion
   const [lineProductMapping, setLineProductMapping] = useState<Record<string, string>>({});
@@ -185,6 +196,10 @@ export default function DevisDetailPage() {
             <Button variant="secondary" size="sm" onClick={handlePdf}>
               <Download className="h-4 w-4" aria-hidden="true" />
               PDF
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setContractModal(true)}>
+              <FileSignature className="h-4 w-4" aria-hidden="true" />
+              Générer le contrat
             </Button>
             <Button
               variant="secondary"
@@ -395,6 +410,9 @@ export default function DevisDetailPage() {
           </Card>
         )}
       </div>
+
+      {/* Modal génération de contrat */}
+      <ContractModal quote={quote} open={contractModal} onClose={() => setContractModal(false)} />
 
       {/* Modal conversion */}
       <Modal
