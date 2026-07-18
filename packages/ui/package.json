@@ -16,6 +16,10 @@
     "./contract-pdf": {
       "types": "./dist/contract-pdf.d.ts",
       "default": "./dist/contract-pdf.js"
+    },
+    "./logo": {
+      "types": "./dist/logo.d.ts",
+      "default": "./dist/logo.js"
     }
   },
   "scripts": {

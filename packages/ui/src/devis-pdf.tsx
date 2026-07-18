@@ -9,6 +9,7 @@
 import { Document, Page, Text, View, Image, StyleSheet, pdf } from "@react-pdf/renderer";
 import { computeDevisTotals } from "@lingengo/shared";
 import type { DevisData } from "@lingengo/shared";
+import { LOGO_DATA_URI } from "./logo";
 
 /* ─── Branding ─── */
 
@@ -413,21 +414,25 @@ export async function downloadDevisPdf(
   data: DevisData,
   options?: { operator?: OperatorInfo; logoUrl?: string },
 ) {
-  let logoSrc: string | undefined;
-  const logoUrl = options?.logoUrl ?? "/images/logo_full.png";
-  try {
-    const res = await fetch(logoUrl);
-    if (res.ok) {
-      const blob = await res.blob();
-      logoSrc = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
+  // Logo embarqué (data-URI) TOUJOURS disponible → jamais de fallback texte.
+  // `options.logoUrl` reste un override optionnel : si le fetch réussit on l'utilise,
+  // sinon on conserve le logo embarqué.
+  let logoSrc: string = LOGO_DATA_URI;
+  if (options?.logoUrl) {
+    try {
+      const res = await fetch(options.logoUrl);
+      if (res.ok) {
+        const blob = await res.blob();
+        logoSrc = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch {
+      // conserve le LOGO_DATA_URI embarqué
     }
-  } catch {
-    logoSrc = undefined;
   }
 
   const blob = await pdf(

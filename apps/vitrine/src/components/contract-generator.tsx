@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Download, FileSignature, Loader2 } from "lucide-react";
-import type { ContractData } from "@/lib/contract-pdf";
+import type { ContractData } from "@lingengo/shared";
 import { SignaturePad } from "./signature-pad";
 import { SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
 
@@ -66,6 +66,8 @@ export function ContractGenerator() {
 
   const buildData = useCallback(
     (): ContractData => ({
+      // Générateur manuel = abonnement Pack Sérénité. Champs "devis" non utilisés ici.
+      type: "ABONNEMENT",
       numero,
       date,
       lieu,
@@ -78,6 +80,9 @@ export function ContractGenerator() {
       engagementMois,
       preavisJours,
       jourFacturation,
+      lignes: [],
+      totalCents: 0,
+      tvaApplicable: false,
       depotGarantieCents: Math.round(depotEuros * 100),
       conditionsParticulieres,
       signatureSrc: signature ?? undefined,
@@ -104,7 +109,7 @@ export function ContractGenerator() {
   const handleDownload = async () => {
     setGenerating(true);
     try {
-      const { downloadContractPdf } = await import("@/lib/contract-pdf");
+      const { downloadContractPdf } = await import("@lingengo/ui/contract-pdf");
       await downloadContractPdf(buildData());
     } catch (e) {
       console.error(e);

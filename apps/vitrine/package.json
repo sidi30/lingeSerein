@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@lingengo/shared": "*",
+    "@lingengo/ui": "*",
     "@react-pdf/renderer": "^4.5.1",
     "lucide-react": "^1.7.0",
     "motion": "^12.38.0",
