@@ -12,7 +12,6 @@ import {
   UnprocessableEntityError,
 } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
-import { encrypt } from "../utils/crypto.js";
 
 const BCRYPT_ROUNDS = 12;
 
@@ -67,14 +66,17 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(params.password, BCRYPT_ROUNDS);
-    const encryptionKey = process.env["ENCRYPTION_KEY"]!;
-
     const user = await this.prisma.user.create({
       data: {
         email: params.email,
         passwordHash,
         name: params.name,
-        address: encrypt(params.address, encryptionKey),
+        // Adresse stockée EN CLAIR, comme partout ailleurs dans l'application.
+        // Elle était auparavant chiffrée ici, et ici seulement, alors qu'aucun
+        // chemin de lecture ne la déchiffrait : l'admin et l'écran de tournée du
+        // livreur affichaient du base64. Le chiffrement ne protégeait rien (clé
+        // sur le même serveur que la base) et `phone` n'a jamais été chiffré.
+        address: params.address,
         accommodationType: params.accommodationType,
         role: "ROLE_CLIENT",
         operatorId: params.operatorId,
