@@ -47,7 +47,9 @@ function normalizeRole(role: string): "ROLE_CLIENT" | "ROLE_LIVREUR" | "ROLE_ADM
 // DTO sans champs sensibles
 function toUserDto(user: {
   id: string;
-  email: string;
+  // null depuis le CRM client : un client créé par l'admin peut n'avoir aucun
+  // email (rencontré sur un marché, au téléphone). Le DTO doit le refléter.
+  email: string | null;
   name: string;
   phone: string | null;
   role: string;
@@ -503,6 +505,16 @@ export class UsersService {
       throw new ForbiddenError("Vous ne pouvez pas réinitialiser le mot de passe d'un Super Admin");
     }
 
+    // Un client créé sans email n'a pas de compte connectable. Poser un
+    // passwordHash violerait le CHECK `users_password_requires_email` (500 sur
+    // un simple bouton admin) et ne servirait à rien : sans email, pas de login.
+    if (!target.email) {
+      throw new UnprocessableEntityError(
+        "Ce client n'a pas d'email : renseignez-en un avant de lui donner un accès à l'application",
+        "USER_HAS_NO_EMAIL",
+      );
+    }
+
     const temporaryPassword = generateTemporaryPassword();
     // IMPORTANT: jamais loggué
     const passwordHash = await bcrypt.hash(temporaryPassword, BCRYPT_ROUNDS);
@@ -513,9 +525,15 @@ export class UsersService {
       data: { revokedAt: new Date() },
     });
 
+    // isEmailVerified DOIT être posé ici, sinon le parcours « ouvrir l'accès app
+    // à un client existant » est une impasse : un client créé sans accès a
+    // isEmailVerified=false, et le login le rejette avec « Veuillez vérifier
+    // votre email ». L'admin lui communiquerait un mot de passe provisoire qui
+    // ne fonctionnerait jamais, avec un message accusant le client.
+    // C'est l'admin qui atteste de l'identité en ouvrant l'accès de vive voix.
     await this.prisma.user.update({
       where: { id },
-      data: { passwordHash },
+      data: { passwordHash, isEmailVerified: true },
     });
 
     await createAuditLog({

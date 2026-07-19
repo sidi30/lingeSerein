@@ -142,11 +142,17 @@ export class SubscriptionsService {
 
   // ---- Souscription -----------------------------------------------------------
 
+  /**
+   * @param userId   Le client titulaire de l'abonnement.
+   * @param actorId  L'auteur de l'action pour l'audit — l'admin quand il agit
+   *                 pour le compte du client. Par défaut le client lui-même.
+   */
   async create(
     data: CreateSubscriptionInput,
     userId: string,
     ipAddress?: string,
     userAgent?: string,
+    actorId?: string,
   ) {
     // Vérification : pas d'abonnement ACTIVE existant (AC-F6, 409)
     const existing = await this.prisma.subscription.findUnique({
@@ -154,7 +160,9 @@ export class SubscriptionsService {
     });
 
     if (existing && existing.status !== "CANCELLED") {
-      throw new ConflictError("Vous avez déjà un abonnement actif");
+      // Formulation neutre : ce message est lu aussi bien par le client sur
+      // mobile que par l'admin agissant pour le compte de son client.
+      throw new ConflictError("Un abonnement actif existe déjà pour ce compte");
     }
 
     // Récupérer l'opérateur du user pour lire la config
@@ -245,7 +253,7 @@ export class SubscriptionsService {
 
     await createAuditLog({
       prisma: this.prisma,
-      userId,
+      userId: actorId ?? userId,
       action: "CREATE",
       entity: "Subscription",
       entityId: subscription.id,
@@ -265,7 +273,7 @@ export class SubscriptionsService {
 
   // ---- Pause ------------------------------------------------------------------
 
-  async pause(userId: string, ipAddress?: string, userAgent?: string) {
+  async pause(userId: string, ipAddress?: string, userAgent?: string, actorId?: string) {
     const subscription = await this.prisma.subscription.findUnique({
       where: { userId },
     });
@@ -277,7 +285,7 @@ export class SubscriptionsService {
     }
 
     if (subscription.pauseMonthsUsed >= 2) {
-      throw new AppError(400, "PAUSE_LIMIT", "Vous avez atteint la limite de 2 mois de pause");
+      throw new AppError(400, "PAUSE_LIMIT", "La limite de 2 mois de pause est atteinte");
     }
 
     const updated = await this.prisma.subscription.update({
@@ -291,7 +299,7 @@ export class SubscriptionsService {
 
     await createAuditLog({
       prisma: this.prisma,
-      userId,
+      userId: actorId ?? userId,
       action: "UPDATE",
       entity: "Subscription",
       entityId: subscription.id,
@@ -305,7 +313,7 @@ export class SubscriptionsService {
 
   // ---- Reprise ----------------------------------------------------------------
 
-  async resume(userId: string, ipAddress?: string, userAgent?: string) {
+  async resume(userId: string, ipAddress?: string, userAgent?: string, actorId?: string) {
     const subscription = await this.prisma.subscription.findUnique({
       where: { userId },
     });
@@ -331,7 +339,7 @@ export class SubscriptionsService {
 
     await createAuditLog({
       prisma: this.prisma,
-      userId,
+      userId: actorId ?? userId,
       action: "UPDATE",
       entity: "Subscription",
       entityId: subscription.id,
@@ -349,7 +357,7 @@ export class SubscriptionsService {
    * BLOQUÉE si now() < committedUntil (ADR-V2-006, AC-F6-03).
    * Sinon : cancelledAt=now, cancelEffectiveAt=now+noticePeriodDays.
    */
-  async cancel(userId: string, ipAddress?: string, userAgent?: string) {
+  async cancel(userId: string, ipAddress?: string, userAgent?: string, actorId?: string) {
     const subscription = await this.prisma.subscription.findUnique({
       where: { userId },
       include: {
@@ -368,7 +376,7 @@ export class SubscriptionsService {
     if (subscription.committedUntil && now < subscription.committedUntil) {
       const dateStr = formatDate(subscription.committedUntil);
       throw new UnprocessableEntityError(
-        `Résiliation non autorisée : votre engagement court jusqu'au ${dateStr}. Vous pourrez résilier à partir du ${dateStr}.`,
+        `Résiliation non autorisée : l'engagement court jusqu'au ${dateStr}. La résiliation sera possible à partir du ${dateStr}.`,
         "ENGAGEMENT_ACTIVE",
       );
     }
@@ -399,7 +407,7 @@ export class SubscriptionsService {
 
     await createAuditLog({
       prisma: this.prisma,
-      userId,
+      userId: actorId ?? userId,
       action: "UPDATE",
       entity: "Subscription",
       entityId: subscription.id,

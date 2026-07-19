@@ -33,7 +33,9 @@ export function createInvoiceWorker(
           ...(userId ? { userId } : {}),
         },
         include: {
-          user: { select: { id: true, name: true, email: true, operatorId: true } },
+          // Pas d'email ici : il n'est pas utilisé, et un client créé par
+          // l'admin peut ne pas en avoir. La facture reste due dans tous les cas.
+          user: { select: { id: true, name: true, operatorId: true } },
           products: {
             include: {
               product: { select: { priceCents: true, name: true } },
@@ -55,7 +57,9 @@ export function createInvoiceWorker(
         });
 
         if (existing) {
-          console.log(`[invoice] Invoice already exists for user ${sub.userId} — period ${periodStart}..${periodEnd}`);
+          console.log(
+            `[invoice] Invoice already exists for user ${sub.userId} — period ${periodStart}..${periodEnd}`,
+          );
           continue;
         }
 
@@ -108,13 +112,17 @@ export function createInvoiceWorker(
         results.push(invoice.invoiceNumber);
 
         // TODO: Stripe charge — create PaymentIntent or charge saved payment method
-        console.log(`[invoice] Stripe charge placeholder — invoice=${invoice.invoiceNumber}, amount=${totalTtcCents} cents`);
+        console.log(
+          `[invoice] Stripe charge placeholder — invoice=${invoice.invoiceNumber}, amount=${totalTtcCents} cents`,
+        );
 
         // TODO: PDF generation — Factur-X format (PDF/A-3 + XML CII)
         console.log(`[invoice] PDF generation placeholder — invoice=${invoice.invoiceNumber}`);
       }
 
-      console.log(`[invoice] Generated ${results.length} invoice(s): ${results.join(", ") || "none"}`);
+      console.log(
+        `[invoice] Generated ${results.length} invoice(s): ${results.join(", ") || "none"}`,
+      );
       return { invoiceNumbers: results };
     },
     { connection },

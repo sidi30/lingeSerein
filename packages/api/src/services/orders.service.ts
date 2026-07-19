@@ -124,7 +124,25 @@ export class OrdersService {
     };
   }
 
-  async create(data: CreateOrderInput, userId: string, ipAddress?: string, userAgent?: string) {
+  /**
+   * Crée une commande.
+   *
+   * @param ownerId  Le client PROPRIÉTAIRE de la commande (order.userId).
+   * @param actorId  L'utilisateur qui effectue l'action (audit). Différent de
+   *                 ownerId quand un admin passe une commande pour un client.
+   * @param opts.source  Origine de la commande. MANUAL = saisie admin : dans ce
+   *                 cas on ne notifie pas les admins (ils se notifieraient eux-mêmes).
+   */
+  async create(
+    data: CreateOrderInput,
+    ownerId: string,
+    actorId: string,
+    opts?: { source?: "MOBILE" | "QUOTE_CONVERSION" | "MANUAL" },
+    ipAddress?: string,
+    userAgent?: string,
+  ) {
+    const source = opts?.source ?? "MOBILE";
+
     // Fetch product prices
     const productIds = data.items.map((i) => i.productId);
     const products = await this.prisma.product.findMany({
@@ -153,46 +171,79 @@ export class OrdersService {
 
     const totalCents = items.reduce((sum, item) => sum + item.totalCents, 0);
 
-    // Generate order number
-    const seq = randomBytes(3).toString("hex").toUpperCase();
+    // orderNumber est aléatoire sur 3 octets : la collision est rare mais réelle
+    // (contrainte unique → P2002). On retente avec un nouveau tirage.
     const year = new Date().getFullYear();
-    const orderNumber = `LNG-${year}-${seq}`;
+    const MAX_ATTEMPTS = 3;
 
-    const order = await this.prisma.order.create({
-      data: {
-        userId,
-        orderNumber,
-        totalCents,
-        deliveryDate: new Date(data.deliveryDate),
-        timeSlot: data.timeSlot,
-        specialNotes: data.specialNotes,
-        items: {
-          create: items,
+    const insert = (num: string) =>
+      this.prisma.order.create({
+        data: {
+          userId: ownerId,
+          orderNumber: num,
+          totalCents,
+          source,
+          deliveryDate: new Date(data.deliveryDate),
+          timeSlot: data.timeSlot,
+          specialNotes: data.specialNotes,
+          items: {
+            create: items,
+          },
         },
-      },
-      include: {
-        items: { include: { product: { select: { name: true, range: true, category: true } } } },
-      },
-    });
+        include: {
+          items: {
+            include: { product: { select: { name: true, range: true, category: true } } },
+          },
+        },
+      });
+
+    let order: Awaited<ReturnType<typeof insert>>;
+    let orderNumber = "";
+    let attempt = 0;
+
+    for (;;) {
+      attempt += 1;
+      orderNumber = `LNG-${year}-${randomBytes(3).toString("hex").toUpperCase()}`;
+
+      try {
+        order = await insert(orderNumber);
+        break;
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "P2002" && attempt < MAX_ATTEMPTS) {
+          continue;
+        }
+        throw err;
+      }
+    }
 
     await createAuditLog({
       prisma: this.prisma,
-      userId,
+      userId: actorId,
       action: "CREATE",
       entity: "Order",
       entityId: order.id,
-      changes: { orderNumber, totalCents, itemCount: items.length },
+      changes: {
+        orderNumber,
+        totalCents,
+        itemCount: items.length,
+        source,
+        ...(actorId !== ownerId ? { onBehalfOf: ownerId } : {}),
+      },
       ipAddress,
       userAgent,
     });
 
     // Badge « Commandes ». Best effort, ne peut pas faire échouer la commande.
-    await new NotificationsService(this.prisma).notifyAdmins(
-      "ORDER_CREATED",
-      `Nouvelle commande ${orderNumber}`,
-      `${items.length} article(s) — ${(totalCents / 100).toFixed(2)} €`,
-      { orderId: order.id, orderNumber, href: `/commandes/${order.id}` },
-    );
+    // Inutile sur MANUAL : c'est l'admin lui-même qui vient de saisir la commande.
+    if (source !== "MANUAL") {
+      await new NotificationsService(this.prisma).notifyAdmins(
+        "ORDER_CREATED",
+        `Nouvelle commande ${orderNumber}`,
+        `${items.length} article(s) — ${(totalCents / 100).toFixed(2)} €`,
+        { orderId: order.id, orderNumber, href: `/commandes/${order.id}` },
+      );
+    }
 
     return order;
   }

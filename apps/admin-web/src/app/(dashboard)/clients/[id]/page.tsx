@@ -1,104 +1,112 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+/**
+ * Fiche client (CRM) — blocs Identité / Commercial / Abonnement / Timeline /
+ * Stock + notes, plus la création d'une commande pour ce client.
+ *
+ * Contrat API :
+ *   GET   /clients/:id         → fiche + subscription + 50 dernières commandes + stocks + métriques
+ *   PATCH /clients/:id         → liste blanche de champs éditables
+ *   POST  /clients/:id/orders  → commande pour ce client
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { PauseCircle, PlayCircle, Plus, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { Header } from "@/components/header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Table, Thead, Th, Td, Tr } from "@/components/ui/table";
+import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useParams } from "next/navigation";
-import { useState } from "react";
+import { EmailText } from "@/components/ui/email-text";
+import { RatingStars } from "@/components/clients/rating-stars";
+import { OrderForm } from "@/components/orders/order-form";
+import { formatDate, formatPrice } from "@/lib/format";
+import {
+  CLIENT_SOURCE_LABELS,
+  type ClientDetailDTO,
+  type DeliveryZoneDTO,
+  type OrderStatus,
+} from "@/lib/types";
 
-interface ClientStock {
-  productRange: string;
-  cleanSets: number;
-  dirtySets: number;
-  totalInCirculation: number;
-}
+const inputCls =
+  "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-base sm:py-2 sm:text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500";
+const labelCls = "mb-1 block text-xs font-medium text-gray-700";
 
-interface ClientSubscription {
-  plan: string;
-  status: string;
-}
+const ACCOMMODATION_TYPES = [
+  { value: "HOTEL", label: "Hôtel" },
+  { value: "GITE", label: "Gîte" },
+  { value: "AIRBNB", label: "Airbnb" },
+  { value: "AUBERGE", label: "Auberge" },
+  { value: "AUTRE", label: "Autre" },
+];
 
-interface ClientDetail {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  accommodationType: string;
-  isActive: boolean;
-  zoneId: string;
-  stockAlertThreshold: number;
-  notes: string;
-  subscription: ClientSubscription | null;
-  stocks: ClientStock[];
-}
+type BadgeVariant = "default" | "success" | "warning" | "danger" | "info" | "neutral";
 
-interface OrderItem {
-  id: string;
-  productId: string;
-  quantity: number;
-  unitCents: number;
-  totalCents: number;
-  product: {
-    name: string;
-    range: string;
-    category: string;
-  };
-}
+const orderStatusConfig: Record<OrderStatus, { label: string; variant: BadgeVariant }> = {
+  PENDING: { label: "En attente", variant: "warning" },
+  CONFIRMED: { label: "Confirmée", variant: "info" },
+  IN_DELIVERY: { label: "En livraison", variant: "default" },
+  DELIVERED: { label: "Livrée", variant: "success" },
+  CANCELLED: { label: "Annulée", variant: "danger" },
+};
 
-interface Order {
-  id: string;
-  userId: string;
-  orderNumber: string;
-  status: string;
-  isRecurring: boolean;
-  totalCents: number;
-  deliveryDate: string;
-  timeSlot: string;
-  specialNotes: string | null;
-  items: OrderItem[];
-  user: {
-    id: string;
-    name: string;
-    email: string;
-  };
-}
+const subStatusConfig: Record<string, { label: string; variant: BadgeVariant }> = {
+  ACTIVE: { label: "Actif", variant: "success" },
+  PAUSED: { label: "En pause", variant: "warning" },
+  CANCELLED: { label: "Résilié", variant: "danger" },
+  TRIAL: { label: "Essai", variant: "info" },
+};
 
-interface OrdersResponse {
-  data: Order[];
-  pagination: { page: number; pageSize: number; total: number; totalPages: number };
-}
-
-const rangeBadgeVariant: Record<string, "info" | "default" | "warning"> = {
+const rangeBadgeVariant: Record<string, BadgeVariant> = {
   CONFORT: "info",
   HOTEL: "default",
   PRESTIGE: "warning",
 };
 
-const statusConfig: Record<
-  string,
-  { label: string; variant: "success" | "warning" | "danger" | "info" | "neutral" }
-> = {
-  PENDING: { label: "En attente", variant: "warning" },
-  CONFIRMED: { label: "Confirmée", variant: "info" },
-  IN_DELIVERY: { label: "En livraison", variant: "info" },
-  DELIVERED: { label: "Livrée", variant: "success" },
-  CANCELLED: { label: "Annulée", variant: "danger" },
-  ACTIVE: { label: "Actif", variant: "success" },
-  PAUSED: { label: "En pause", variant: "warning" },
-};
-
-function formatPrice(cents: number): string {
-  return (cents / 100).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+/** Champs éditables — strictement la liste blanche de PATCH /clients/:id. */
+interface EditableFields {
+  name: string;
+  companyName: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  postalCode: string;
+  accommodationType: string;
+  zoneId: string;
+  preferredTimeSlot: string;
+  rating: number | null;
+  requirements: string;
+  notes: string;
+  isActive: boolean;
+  stockAlertThreshold: number;
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("fr-FR");
+function toEditable(client: ClientDetailDTO): EditableFields {
+  return {
+    name: client.name ?? "",
+    companyName: client.companyName ?? "",
+    email: client.email ?? "",
+    phone: client.phone ?? "",
+    address: client.address ?? "",
+    city: client.city ?? "",
+    postalCode: client.postalCode ?? "",
+    accommodationType: client.accommodationType ?? "",
+    zoneId: client.zoneId ?? "",
+    preferredTimeSlot: client.preferredTimeSlot ?? "",
+    rating: client.rating,
+    requirements: client.requirements ?? "",
+    notes: client.notes ?? "",
+    isActive: client.isActive,
+    stockAlertThreshold: client.stockAlertThreshold ?? 0,
+  };
 }
 
 function GaugeBar({
@@ -117,7 +125,7 @@ function GaugeBar({
     <div>
       <div className="mb-1 flex items-center justify-between text-sm">
         <span className="text-gray-600">{label}</span>
-        <span className="font-semibold text-gray-900">
+        <span className="font-semibold text-gray-900 tabular-nums">
           {value} / {max}
         </span>
       </div>
@@ -128,36 +136,87 @@ function GaugeBar({
   );
 }
 
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-gray-50 p-3">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className="mt-0.5 text-base font-bold text-gray-900 tabular-nums">{value}</p>
+    </div>
+  );
+}
+
 export default function ClientDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  const [form, setForm] = useState<EditableFields | null>(null);
+  const [orderModal, setOrderModal] = useState(false);
+  const [linkSubModal, setLinkSubModal] = useState(false);
+  const [confirmCancelSub, setConfirmCancelSub] = useState(false);
+  const [subPlan, setSubPlan] = useState("");
+
   const { data: client, isLoading } = useQuery({
     queryKey: ["client", id],
-    queryFn: () => api.get<ClientDetail>(`/clients/${id}`),
+    queryFn: () => api.get<ClientDetailDTO>(`/clients/${id}`),
   });
 
-  const { data: ordersData } = useQuery({
-    queryKey: ["orders", "client", id],
-    queryFn: () => api.get<OrdersResponse>("/orders", { userId: id, pageSize: 50 }),
-    enabled: !!client,
+  const { data: zones } = useQuery({
+    queryKey: ["settings", "zones"],
+    queryFn: () => api.get<DeliveryZoneDTO[]>("/settings/zones"),
   });
 
-  const orders = ordersData?.data ?? [];
+  // Le formulaire est rechargé à chaque nouvelle version du client renvoyée par
+  // l'API : sans ça, une sauvegarde laissait le state local diverger du serveur.
+  useEffect(() => {
+    if (client) setForm(toEditable(client));
+  }, [client]);
 
-  const [notes, setNotes] = useState<string | null>(null);
-
-  const notesMutation = useMutation({
-    mutationFn: (newNotes: string) => api.patch(`/clients/${id}`, { notes: newNotes }),
+  const updateMutation = useMutation({
+    mutationFn: (patch: Partial<EditableFields>) => api.patch(`/clients/${id}`, patch),
     onSuccess: () => {
-      toast("Notes mises à jour");
+      toast("Client mis à jour");
+      queryClient.invalidateQueries({ queryKey: ["client", id] });
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+    },
+    onError: (err: unknown) =>
+      toast(err instanceof Error ? err.message : "Erreur lors de la mise à jour", "error"),
+  });
+
+  // Abonnement : endpoints admin co-localisés sur la ressource client.
+  const subMutation = useMutation({
+    mutationFn: (
+      action: { type: "link"; plan: string } | { type: "pause" | "resume" | "cancel" },
+    ) =>
+      action.type === "link"
+        ? api.post(`/clients/${id}/subscription`, { plan: action.plan })
+        : api.patch(`/clients/${id}/subscription`, {
+            status:
+              action.type === "pause"
+                ? "PAUSED"
+                : action.type === "resume"
+                  ? "ACTIVE"
+                  : "CANCELLED",
+          }),
+    onSuccess: () => {
+      toast("Abonnement mis à jour");
+      setLinkSubModal(false);
+      setConfirmCancelSub(false);
       queryClient.invalidateQueries({ queryKey: ["client", id] });
     },
-    onError: () => toast("Erreur lors de la mise à jour", "error"),
+    onError: (err: unknown) =>
+      toast(err instanceof Error ? err.message : "Erreur sur l'abonnement", "error"),
   });
 
-  if (isLoading) {
+  const orders = useMemo(() => client?.orders ?? [], [client]);
+
+  const averageBasketCents = useMemo(() => {
+    if (!client || client.ordersCount === 0) return 0;
+    return Math.round(client.revenueCents / client.ordersCount);
+  }, [client]);
+
+  if (isLoading || !form) {
     return (
       <>
         <Header title="Client" />
@@ -181,47 +240,391 @@ export default function ClientDetailPage() {
     );
   }
 
-  const currentNotes = notes ?? client.notes ?? "";
+  const set = <K extends keyof EditableFields>(key: K, value: EditableFields[K]) =>
+    setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
+
+  const saveIdentity = () => {
+    updateMutation.mutate({
+      name: form.name,
+      companyName: form.companyName,
+      email: form.email,
+      phone: form.phone,
+      address: form.address,
+      city: form.city,
+      postalCode: form.postalCode,
+      accommodationType: form.accommodationType,
+      zoneId: form.zoneId,
+      preferredTimeSlot: form.preferredTimeSlot,
+      isActive: form.isActive,
+    });
+  };
+
+  const subscription = client.subscription;
+  const subStatus = subscription ? subStatusConfig[subscription.status] : null;
 
   return (
     <>
-      <Header title={client.name} />
+      <Header
+        title={client.companyName ?? client.name}
+        actions={
+          <Button size="sm" onClick={() => setOrderModal(true)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Créer une commande
+          </Button>
+        }
+      />
 
       <div className="space-y-6 p-4 sm:p-6">
-        {/* Informations client */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <Card title="Informations" className="lg:col-span-2">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <p className="text-xs text-gray-500">Email</p>
-                <p className="text-sm font-medium">{client.email}</p>
+        {/* ─── En-tête ─── */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={client.isActive ? "success" : "neutral"}>
+            {client.isActive ? "Actif" : "Inactif"}
+          </Badge>
+          <Badge variant={client.hasAppAccess ? "info" : "neutral"}>
+            {client.hasAppAccess ? "app" : "hors-ligne"}
+          </Badge>
+          <Badge variant="neutral">{CLIENT_SOURCE_LABELS[client.source] ?? client.source}</Badge>
+        </div>
+
+        {/* ─── Identité ─── */}
+        <Card
+          title="Identité"
+          actions={
+            <Button size="sm" loading={updateMutation.isPending} onClick={saveIdentity}>
+              Enregistrer
+            </Button>
+          }
+        >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls} htmlFor="edit-name">
+                Nom du contact
+              </label>
+              <input
+                id="edit-name"
+                className={inputCls}
+                value={form.name}
+                onChange={(e) => set("name", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="edit-company">
+                Établissement
+              </label>
+              <input
+                id="edit-company"
+                className={inputCls}
+                value={form.companyName}
+                onChange={(e) => set("companyName", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="edit-email">
+                Email
+              </label>
+              <input
+                id="edit-email"
+                type="email"
+                className={inputCls}
+                value={form.email}
+                onChange={(e) => set("email", e.target.value)}
+                placeholder="Facultatif"
+              />
+              {!client.email && (
+                <p className="mt-1 text-xs">
+                  <EmailText email={null} />
+                </p>
+              )}
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="edit-phone">
+                Téléphone
+              </label>
+              <input
+                id="edit-phone"
+                type="tel"
+                inputMode="tel"
+                className={inputCls}
+                value={form.phone}
+                onChange={(e) => set("phone", e.target.value)}
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className={labelCls} htmlFor="edit-address">
+                Adresse
+              </label>
+              <input
+                id="edit-address"
+                className={inputCls}
+                value={form.address}
+                onChange={(e) => set("address", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="edit-postal">
+                Code postal
+              </label>
+              <input
+                id="edit-postal"
+                inputMode="numeric"
+                className={inputCls}
+                value={form.postalCode}
+                onChange={(e) => set("postalCode", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="edit-city">
+                Ville
+              </label>
+              <input
+                id="edit-city"
+                className={inputCls}
+                value={form.city}
+                onChange={(e) => set("city", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="edit-accommodation">
+                Type d&apos;hébergement
+              </label>
+              <select
+                id="edit-accommodation"
+                className={inputCls}
+                value={form.accommodationType}
+                onChange={(e) => set("accommodationType", e.target.value)}
+              >
+                <option value="">Non précisé</option>
+                {ACCOMMODATION_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="edit-zone">
+                Zone
+              </label>
+              <select
+                id="edit-zone"
+                className={inputCls}
+                value={form.zoneId}
+                onChange={(e) => set("zoneId", e.target.value)}
+              >
+                <option value="">Aucune</option>
+                {(zones ?? []).map((z) => (
+                  <option key={z.id} value={z.id}>
+                    {z.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="edit-slot">
+                Créneau préféré
+              </label>
+              <input
+                id="edit-slot"
+                className={inputCls}
+                maxLength={20}
+                value={form.preferredTimeSlot}
+                onChange={(e) => set("preferredTimeSlot", e.target.value)}
+                placeholder="08:00-10:00"
+              />
+            </div>
+            <label className="flex min-h-11 items-center gap-3 sm:col-span-2">
+              <input
+                type="checkbox"
+                className="h-5 w-5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                checked={form.isActive}
+                onChange={(e) => set("isActive", e.target.checked)}
+              />
+              <span className="text-sm text-gray-700">Client actif</span>
+            </label>
+          </div>
+        </Card>
+
+        {/* ─── Commercial ─── */}
+        <Card title="Commercial">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Metric label="Chiffre d'affaires" value={formatPrice(client.revenueCents)} />
+            <Metric label="Commandes" value={String(client.ordersCount)} />
+            <Metric label="Panier moyen" value={formatPrice(averageBasketCents)} />
+            <Metric
+              label="Dernière commande"
+              value={client.lastOrderAt ? formatDate(client.lastOrderAt) : "—"}
+            />
+          </div>
+
+          <div className="mt-5 space-y-4">
+            <div>
+              <span className={labelCls}>Appréciation</span>
+              <RatingStars
+                value={form.rating}
+                onChange={(value) => {
+                  set("rating", value);
+                  updateMutation.mutate({ rating: value });
+                }}
+              />
+            </div>
+
+            <div>
+              <label className={labelCls} htmlFor="edit-requirements">
+                Exigences particulières
+              </label>
+              <textarea
+                id="edit-requirements"
+                rows={3}
+                className={inputCls}
+                value={form.requirements}
+                onChange={(e) => set("requirements", e.target.value)}
+                placeholder="Livraison par l'arrière, ne pas sonner avant 9h..."
+              />
+              <div className="mt-2 flex justify-end">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  loading={updateMutation.isPending}
+                  disabled={form.requirements === (client.requirements ?? "")}
+                  onClick={() => updateMutation.mutate({ requirements: form.requirements })}
+                >
+                  Enregistrer les exigences
+                </Button>
               </div>
-              <div>
-                <p className="text-xs text-gray-500">Téléphone</p>
-                <p className="text-sm font-medium">{client.phone || "-"}</p>
+            </div>
+          </div>
+        </Card>
+
+        {/* ─── Abonnement ─── */}
+        <Card
+          title="Abonnement"
+          actions={
+            subscription && subscription.status !== "CANCELLED" ? (
+              <div className="flex flex-wrap gap-2">
+                {subscription.status === "PAUSED" ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={subMutation.isPending}
+                    onClick={() => subMutation.mutate({ type: "resume" })}
+                  >
+                    <PlayCircle className="h-4 w-4" aria-hidden="true" />
+                    Reprendre
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={subMutation.isPending}
+                    onClick={() => subMutation.mutate({ type: "pause" })}
+                  >
+                    <PauseCircle className="h-4 w-4" aria-hidden="true" />
+                    Mettre en pause
+                  </Button>
+                )}
+                <Button size="sm" variant="danger" onClick={() => setConfirmCancelSub(true)}>
+                  <XCircle className="h-4 w-4" aria-hidden="true" />
+                  Résilier
+                </Button>
               </div>
+            ) : (
+              <Button size="sm" onClick={() => setLinkSubModal(true)}>
+                Lier un abonnement
+              </Button>
+            )
+          }
+        >
+          {!subscription ? (
+            <p className="text-sm text-gray-400">Aucun abonnement lié à ce client.</p>
+          ) : (
+            <div className="flex flex-wrap gap-6 text-sm">
               <div>
-                <p className="text-xs text-gray-500">Type d&apos;hébergement</p>
-                <p className="text-sm font-medium">{client.accommodationType}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Zone</p>
-                <p className="text-sm font-medium">{client.zoneId || "-"}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Seuil d&apos;alerte stock</p>
-                <p className="text-sm font-medium">{client.stockAlertThreshold}</p>
+                <p className="text-xs text-gray-500">Formule</p>
+                <Badge variant={rangeBadgeVariant[subscription.plan] ?? "neutral"}>
+                  {subscription.plan}
+                </Badge>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Statut</p>
-                <Badge variant={client.isActive ? "success" : "neutral"}>
-                  {client.isActive ? "Actif" : "Inactif"}
+                <Badge variant={subStatus?.variant ?? "neutral"}>
+                  {subStatus?.label ?? subscription.status}
                 </Badge>
               </div>
+              {subscription.currentPeriodEnd && (
+                <div>
+                  <p className="text-xs text-gray-500">Période en cours jusqu&apos;au</p>
+                  <p className="font-medium text-gray-900">
+                    {formatDate(subscription.currentPeriodEnd)}
+                  </p>
+                </div>
+              )}
+              {subscription.committedUntil && (
+                <div>
+                  <p className="text-xs text-gray-500">Engagement jusqu&apos;au</p>
+                  <p className="font-medium text-gray-900">
+                    {formatDate(subscription.committedUntil)}
+                  </p>
+                </div>
+              )}
             </div>
-          </Card>
+          )}
+        </Card>
 
-          {/* Jauges de stock */}
+        {/* ─── Timeline des commandes ─── */}
+        <Card
+          title="Commandes"
+          actions={
+            <Button size="sm" variant="secondary" onClick={() => setOrderModal(true)}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Nouvelle
+            </Button>
+          }
+        >
+          {orders.length === 0 ? (
+            <p className="text-sm text-gray-400">Aucune commande pour ce client.</p>
+          ) : (
+            <ol className="space-y-4">
+              {orders.map((order) => {
+                const sc = orderStatusConfig[order.status];
+                return (
+                  <li key={order.id} className="relative flex gap-3 pl-1">
+                    {/* Puce + trait de timeline */}
+                    <div className="flex flex-col items-center">
+                      <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-primary-500" />
+                      <span className="mt-1 w-px flex-1 bg-gray-200" />
+                    </div>
+                    <Link
+                      href={`/commandes/${order.id}`}
+                      className="min-w-0 flex-1 rounded-lg border border-gray-100 p-3 hover:bg-gray-50"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-medium text-gray-900">{order.orderNumber}</span>
+                        <Badge variant={sc?.variant ?? "neutral"}>
+                          {sc?.label ?? order.status}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Livraison le {formatDate(order.deliveryDate)}
+                        {order.timeSlot ? ` — ${order.timeSlot}` : ""}
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap items-end justify-between gap-2">
+                        <p className="min-w-0 text-xs text-gray-600">
+                          {order.items.map((i) => `${i.quantity}× ${i.product.name}`).join(", ")}
+                        </p>
+                        <span className="shrink-0 font-semibold text-gray-900 tabular-nums">
+                          {formatPrice(order.totalCents)}
+                        </span>
+                      </div>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </Card>
+
+        {/* ─── Stock + notes ─── */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Card title="Niveaux de stock">
             {client.stocks.length === 0 ? (
               <p className="text-sm text-gray-400">Aucun stock enregistré</p>
@@ -252,102 +655,137 @@ export default function ClientDetailPage() {
                 ))}
               </div>
             )}
-          </Card>
-        </div>
 
-        {/* Abonnement */}
-        {client.subscription && (
-          <Card title="Abonnement">
-            <div className="flex flex-wrap gap-6 text-sm">
-              <div>
-                <p className="text-xs text-gray-500">Formule</p>
-                <Badge variant={rangeBadgeVariant[client.subscription.plan] ?? "neutral"}>
-                  {client.subscription.plan}
-                </Badge>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Statut</p>
-                {(() => {
-                  const s = statusConfig[client.subscription.status];
-                  return (
-                    <Badge variant={s?.variant ?? "neutral"}>
-                      {s?.label ?? client.subscription.status}
-                    </Badge>
-                  );
-                })()}
+            <div className="mt-5 border-t border-gray-100 pt-4">
+              <label className={labelCls} htmlFor="edit-threshold">
+                Seuil d&apos;alerte stock
+              </label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  id="edit-threshold"
+                  type="number"
+                  min={0}
+                  max={100}
+                  inputMode="numeric"
+                  className={inputCls}
+                  value={form.stockAlertThreshold}
+                  onChange={(e) => set("stockAlertThreshold", Number(e.target.value))}
+                />
+                <Button
+                  variant="secondary"
+                  loading={updateMutation.isPending}
+                  disabled={form.stockAlertThreshold === client.stockAlertThreshold}
+                  onClick={() =>
+                    updateMutation.mutate({ stockAlertThreshold: form.stockAlertThreshold })
+                  }
+                  className="w-full sm:w-auto"
+                >
+                  Enregistrer
+                </Button>
               </div>
             </div>
           </Card>
-        )}
 
-        {/* Historique des commandes */}
-        <Card title="Historique des commandes">
-          {orders.length === 0 ? (
-            <p className="text-sm text-gray-400">Aucune commande</p>
-          ) : (
-            <Table>
-              <Thead>
-                <tr>
-                  <Th>N° Commande</Th>
-                  <Th>Date livraison</Th>
-                  <Th>Produits</Th>
-                  <Th>Statut</Th>
-                  <Th>Total</Th>
-                </tr>
-              </Thead>
-              <tbody>
-                {orders.map((order) => {
-                  const s = statusConfig[order.status];
-                  return (
-                    <Tr key={order.id}>
-                      <Td className="font-medium">{order.orderNumber}</Td>
-                      <Td>{formatDate(order.deliveryDate)}</Td>
-                      <Td>
-                        <div className="space-y-0.5">
-                          {order.items.map((item) => (
-                            <p key={item.id} className="text-xs text-gray-600">
-                              {item.quantity}x {item.product.name}
-                            </p>
-                          ))}
-                        </div>
-                      </Td>
-                      <Td>
-                        <Badge variant={s?.variant ?? "neutral"}>{s?.label ?? order.status}</Badge>
-                      </Td>
-                      <Td>
-                        <span className="font-semibold">{formatPrice(order.totalCents)}</span>
-                      </Td>
-                    </Tr>
-                  );
-                })}
-              </tbody>
-            </Table>
-          )}
-        </Card>
-
-        {/* Notes */}
-        <Card
-          title="Notes"
-          actions={
-            <Button
-              size="sm"
-              loading={notesMutation.isPending}
-              onClick={() => notesMutation.mutate(currentNotes)}
-              disabled={currentNotes === (client.notes ?? "")}
-            >
-              Enregistrer
-            </Button>
-          }
-        >
-          <textarea
-            rows={4}
-            value={currentNotes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 p-3 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-            placeholder="Notes internes sur ce client..."
-          />
-        </Card>
+          <Card
+            title="Notes internes"
+            actions={
+              <Button
+                size="sm"
+                loading={updateMutation.isPending}
+                disabled={form.notes === (client.notes ?? "")}
+                onClick={() => updateMutation.mutate({ notes: form.notes })}
+              >
+                Enregistrer
+              </Button>
+            }
+          >
+            <textarea
+              rows={8}
+              className={inputCls}
+              value={form.notes}
+              onChange={(e) => set("notes", e.target.value)}
+              placeholder="Notes internes sur ce client..."
+              aria-label="Notes internes"
+            />
+          </Card>
+        </div>
       </div>
+
+      {/* ─── Création de commande ─── */}
+      <Modal
+        open={orderModal}
+        onClose={() => setOrderModal(false)}
+        title="Nouvelle commande"
+        className="max-w-2xl"
+      >
+        <OrderForm
+          clientId={client.id}
+          clientName={client.companyName ?? client.name}
+          onCancel={() => setOrderModal(false)}
+          onSuccess={(order) => {
+            setOrderModal(false);
+            router.push(`/commandes/${order.id}`);
+          }}
+        />
+      </Modal>
+
+      {/* ─── Liaison d'abonnement ─── */}
+      <Modal open={linkSubModal} onClose={() => setLinkSubModal(false)} title="Lier un abonnement">
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (subPlan) subMutation.mutate({ type: "link", plan: subPlan });
+          }}
+        >
+          <div>
+            <label className={labelCls} htmlFor="sub-plan">
+              Formule
+            </label>
+            <select
+              id="sub-plan"
+              className={inputCls}
+              value={subPlan}
+              onChange={(e) => setSubPlan(e.target.value)}
+              required
+            >
+              <option value="">Sélectionner une formule...</option>
+              <option value="ESSENTIELLE">Essentielle</option>
+              <option value="CONFORT">Confort</option>
+              <option value="PRESTIGE">Prestige</option>
+            </select>
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setLinkSubModal(false)}
+              className="w-full sm:w-auto"
+            >
+              Annuler
+            </Button>
+            <Button
+              type="submit"
+              loading={subMutation.isPending}
+              disabled={!subPlan}
+              className="w-full sm:w-auto"
+            >
+              Lier
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={confirmCancelSub}
+        onClose={() => setConfirmCancelSub(false)}
+        onConfirm={() => subMutation.mutate({ type: "cancel" })}
+        loading={subMutation.isPending}
+        variant="danger"
+        title="Résilier l'abonnement ?"
+        description="L'abonnement de ce client sera résilié. Un engagement en cours peut bloquer l'opération."
+        confirmLabel="Résilier"
+      />
     </>
   );
 }

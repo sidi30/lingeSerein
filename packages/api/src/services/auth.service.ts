@@ -121,6 +121,17 @@ export class AuthService {
       throw new AccountLockedError();
     }
 
+    // Client sans compte de connexion (créé par l'admin, passwordHash null).
+    // Message STRICTEMENT identique à celui d'un email inconnu : sinon on
+    // distingue « email connu sans accès » de « email inconnu », ce qui donne
+    // un oracle d'énumération. bcrypt.compare(x, null) lèverait de son côté une
+    // exception → 500 au lieu de 401, qui serait le même oracle en pire.
+    // On n'incrémente PAS loginAttempts : il n'y a pas de mot de passe à forcer,
+    // et cela verrouillerait un compte que personne ne peut utiliser.
+    if (!user.passwordHash) {
+      throw new UnauthorizedError("Email ou mot de passe incorrect");
+    }
+
     // Vérifier le mot de passe
     const passwordValid = await bcrypt.compare(params.password, user.passwordHash);
 
@@ -309,6 +320,13 @@ export class AuthService {
 
     if (!user) {
       throw new UnauthorizedError("Compte introuvable");
+    }
+
+    // Un compte sans mot de passe ne peut pas en « changer » : ce chemin exige
+    // d'être authentifié, donc il est en principe inatteignable, mais bcrypt
+    // planterait sur un hash null plutôt que de renvoyer une erreur propre.
+    if (!user.passwordHash) {
+      throw new AppError(401, "INVALID_CURRENT_PASSWORD", "Mot de passe actuel incorrect");
     }
 
     // Vérifier le mot de passe actuel — message volontairement générique (anti-énumération)

@@ -19,6 +19,7 @@ import { useAuth } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import type { UserDTO, UserRole, DeliveryZoneDTO } from "@/lib/types";
 import { Copy, CheckCircle2, UserX, UserCheck, KeyRound, Trash2 } from "lucide-react";
+import { EmailText } from "@/components/ui/email-text";
 
 type BadgeVariant = "default" | "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -142,7 +143,9 @@ export default function UtilisateurDetailPage() {
     values: user
       ? {
           name: user.name,
-          email: user.email,
+          // email est nullable côté API (clients hors-ligne) ; le formulaire
+          // travaille sur une chaîne, l'absence devient un champ vide.
+          email: user.email ?? "",
           phone: user.phone ?? "",
           zoneId: user.zoneId ?? "",
           role:
@@ -376,7 +379,9 @@ export default function UtilisateurDetailPage() {
             <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 text-sm">
               <div>
                 <dt className="text-xs text-gray-500">Email</dt>
-                <dd className="font-medium text-gray-900">{user.email}</dd>
+                <dd className="font-medium text-gray-900">
+                  <EmailText email={user.email} />
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-gray-500">Téléphone</dt>

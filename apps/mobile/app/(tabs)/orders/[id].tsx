@@ -351,7 +351,8 @@ export default function OrderDetailScreen() {
             Client
           </Text>
           <InfoRow label="Nom" value={order.user.name} />
-          <InfoRow label="Email" value={order.user.email} />
+          {/* E-mail facultatif (client créé sur le terrain, sans compte) */}
+          <InfoRow label="Email" value={order.user.email ?? "Non renseigné"} />
           {order.user.phone && <InfoRow label="Téléphone" value={order.user.phone} />}
           {order.user.zone && <InfoRow label="Zone" value={order.user.zone.name} />}
         </Card>

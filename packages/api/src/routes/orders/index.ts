@@ -57,9 +57,12 @@ export default async function orderRoutes(app: FastifyInstance): Promise<void> {
         throw new ValidationError(parsed.error.flatten().fieldErrors as Record<string, string[]>);
       }
 
+      // Le client est à la fois propriétaire et acteur ; origine MOBILE.
       const order = await service.create(
         parsed.data,
         request.user.sub,
+        request.user.sub,
+        { source: "MOBILE" },
         request.ip,
         request.headers["user-agent"],
       );

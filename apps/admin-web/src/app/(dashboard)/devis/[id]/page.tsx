@@ -16,7 +16,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/lib/toast";
 import { formatPrice, formatDate } from "@/lib/format";
 import { QUOTE_TRANSITIONS, QUOTE_EDITABLE, quoteToDevisData } from "@lingengo/shared";
-import type { QuoteDTO, QuoteStatus, ProductDTO } from "@/lib/types";
+import type {
+  ClientListDTO,
+  PaginatedResponse,
+  QuoteDTO,
+  QuoteStatus,
+  ProductDTO,
+} from "@/lib/types";
 import {
   Download,
   Copy,
@@ -26,9 +32,13 @@ import {
   AlertCircle,
   CheckCircle2,
   FileSignature,
+  Search,
+  UserPlus,
 } from "lucide-react";
 import { DevisForm } from "@/components/devis/devis-form";
 import { ContractModal } from "@/components/devis/contract-modal";
+import { ClientCreateModal } from "@/components/clients/client-create-modal";
+import { EmailText } from "@/components/ui/email-text";
 
 type BadgeVariant = "default" | "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -57,6 +67,8 @@ export default function DevisDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [convertModal, setConvertModal] = useState(false);
   const [clientRequiredModal, setClientRequiredModal] = useState(false);
+  const [createClientModal, setCreateClientModal] = useState(false);
+  const [clientSearch, setClientSearch] = useState("");
   const [contractModal, setContractModal] = useState(false);
 
   // Mapping ligne → produit pour la conversion
@@ -72,6 +84,37 @@ export default function DevisDetailPage() {
     queryKey: ["products-for-convert"],
     queryFn: () => api.get<ProductDTO[]>("/products"),
     enabled: convertModal,
+  });
+
+  // Candidats au rattachement. Pré-rempli avec le nom du devis pour que la
+  // liste soit déjà pertinente à l'ouverture de la modale.
+  const { data: clientCandidatesData } = useQuery({
+    queryKey: ["clients-for-attach", clientSearch, quote?.clientNom],
+    queryFn: () =>
+      api.getRaw<PaginatedResponse<ClientListDTO>>("/clients", {
+        page: 1,
+        limit: 10,
+        search: clientSearch || quote?.clientNom || undefined,
+      }),
+    enabled: clientRequiredModal,
+  });
+
+  const clientCandidates = clientCandidatesData?.data ?? [];
+
+  // Rattachement : la FK Quote.userId existe et le schéma zod l'accepte déjà.
+  const attachMutation = useMutation({
+    mutationFn: (userId: string) => api.patch<QuoteDTO>(`/quotes/${id}`, { userId }),
+    onSuccess: () => {
+      toast("Devis rattaché au client");
+      setClientRequiredModal(false);
+      setClientSearch("");
+      queryClient.invalidateQueries({ queryKey: ["quote", id] });
+      queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      // On rouvre la conversion : c'est ce que l'artisan voulait faire au départ.
+      setConvertModal(true);
+    },
+    onError: (err: unknown) =>
+      toast(err instanceof Error ? err.message : "Erreur lors du rattachement", "error"),
   });
 
   // Changement de statut
@@ -498,7 +541,7 @@ export default function DevisDetailPage() {
         </div>
       </Modal>
 
-      {/* Modal client requis */}
+      {/* Modal client requis — rattacher ou créer, sans passer par l'édition du devis */}
       <Modal
         open={clientRequiredModal}
         onClose={() => setClientRequiredModal(false)}
@@ -509,24 +552,90 @@ export default function DevisDetailPage() {
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-warning-500" aria-hidden="true" />
             <p className="text-sm text-gray-700">
               Ce devis doit être lié à un compte client avant d&apos;être converti en commande.
-              Modifiez le devis pour sélectionner ou créer un compte client.
             </p>
           </div>
-          <div className="flex justify-end gap-3">
-            <Button variant="secondary" onClick={() => setClientRequiredModal(false)}>
+
+          {/* Rattacher à un client existant */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-700" htmlFor="attach-search">
+              Rattacher à un client existant
+            </label>
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                aria-hidden="true"
+              />
+              <input
+                id="attach-search"
+                type="text"
+                className="w-full rounded-lg border border-gray-300 py-2.5 pl-9 pr-3 text-base focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 sm:py-2 sm:text-sm"
+                placeholder="Nom, établissement, email..."
+                value={clientSearch}
+                onChange={(e) => setClientSearch(e.target.value)}
+              />
+            </div>
+            <ul className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-gray-200">
+              {clientCandidates.length === 0 ? (
+                <li className="px-3 py-2 text-xs text-gray-400">Aucun client trouvé</li>
+              ) : (
+                clientCandidates.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      className="flex min-h-11 w-full flex-col items-start px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50"
+                      disabled={attachMutation.isPending}
+                      onClick={() => attachMutation.mutate(c.id)}
+                    >
+                      <span className="text-sm font-medium text-gray-900">
+                        {c.companyName ?? c.name}
+                      </span>
+                      <EmailText email={c.email} className="text-xs text-gray-500" />
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+
+          <div className="flex flex-col-reverse gap-2 border-t border-gray-100 pt-4 sm:flex-row sm:justify-between">
+            <Button
+              variant="secondary"
+              onClick={() => setClientRequiredModal(false)}
+              className="w-full sm:w-auto"
+            >
               Fermer
             </Button>
             <Button
               onClick={() => {
                 setClientRequiredModal(false);
-                setEditMode(true);
+                setCreateClientModal(true);
               }}
+              className="w-full sm:w-auto"
             >
-              Modifier le devis
+              <UserPlus className="h-4 w-4" aria-hidden="true" />
+              Créer le client depuis ce devis
             </Button>
           </div>
         </div>
       </Modal>
+
+      {/* Création du client pré-remplie depuis le devis, puis rattachement */}
+      <ClientCreateModal
+        open={createClientModal}
+        onClose={() => setCreateClientModal(false)}
+        title="Créer le client depuis ce devis"
+        initialValues={{
+          name: quote.clientNom,
+          email: quote.clientEmail ?? "",
+          phone: quote.clientTel ?? "",
+          address: quote.clientAdresse ?? "",
+          source: "DEVIS",
+        }}
+        onCreated={(client) => {
+          setCreateClientModal(false);
+          attachMutation.mutate(client.id);
+        }}
+      />
 
       {/* Confirmation suppression */}
       <ConfirmDialog

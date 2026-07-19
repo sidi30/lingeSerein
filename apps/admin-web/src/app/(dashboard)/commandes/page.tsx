@@ -12,8 +12,12 @@ import { Table, Thead, Th, Td, Tr } from "@/components/ui/table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonTable } from "@/components/ui/skeleton";
+import { EmailText } from "@/components/ui/email-text";
+import { Modal } from "@/components/ui/modal";
+import { OrderForm } from "@/components/orders/order-form";
 import { useState } from "react";
-import { ClipboardList, ArrowRight } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ClipboardList, ArrowRight, Plus } from "lucide-react";
 
 interface OrderItem {
   id: string;
@@ -35,7 +39,7 @@ interface Order {
   timeSlot: string;
   specialNotes: string | null;
   items: OrderItem[];
-  user: { id: string; name: string; email: string };
+  user: { id: string; name: string; email: string | null };
 }
 
 interface OrdersResponse {
@@ -81,10 +85,12 @@ function formatDate(dateStr: string): string {
 
 export default function CommandesPage() {
   const { toast } = useToast();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["orders", page, statusFilter, search],
@@ -113,7 +119,15 @@ export default function CommandesPage() {
 
   return (
     <>
-      <Header title="Commandes" />
+      <Header
+        title="Commandes"
+        actions={
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nouvelle commande
+          </Button>
+        }
+      />
 
       <div className="space-y-4 p-4 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -199,7 +213,7 @@ export default function CommandesPage() {
                       <Td>
                         <div>
                           <p className="font-medium text-gray-900">{order.user.name}</p>
-                          <p className="text-xs text-gray-500">{order.user.email}</p>
+                          <EmailText email={order.user.email} className="text-xs text-gray-500" />
                         </div>
                       </Td>
                       <Td>
@@ -260,6 +274,22 @@ export default function CommandesPage() {
           </>
         )}
       </div>
+
+      {/* Même formulaire que la fiche client, sans clientId → sélecteur intégré */}
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Nouvelle commande"
+        className="max-w-2xl"
+      >
+        <OrderForm
+          onCancel={() => setCreateOpen(false)}
+          onSuccess={(order) => {
+            setCreateOpen(false);
+            router.push(`/commandes/${order.id}`);
+          }}
+        />
+      </Modal>
     </>
   );
 }

@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmailText } from "@/components/ui/email-text";
+import type { PaginatedResponse } from "@/lib/types";
 import { useState, useMemo } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -36,12 +38,8 @@ interface RoundsResponse {
 interface ClientOption {
   id: string;
   name: string;
-  email: string;
-}
-
-interface ClientsResponse {
-  data: ClientOption[];
-  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  companyName?: string | null;
+  email: string | null;
 }
 
 const dayNames = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -95,10 +93,13 @@ export default function PlanningPage() {
 
   const rounds = roundsData?.data ?? [];
 
-  // Fetch clients for multi-select
+  // Fetch clients for multi-select.
+  // `pageSize` n'existe pas dans le zod de l'API : il était silencieusement
+  // ignoré et la liste retombait sur le défaut (20 clients). Le paramètre
+  // s'appelle `limit`, plafonné à 100 côté schéma.
   const { data: clientsData } = useQuery({
     queryKey: ["clients", "all"],
-    queryFn: () => api.get<ClientsResponse>("/clients", { pageSize: 200 }),
+    queryFn: () => api.getRaw<PaginatedResponse<ClientOption>>("/clients", { page: 1, limit: 100 }),
   });
 
   const clients = clientsData?.data ?? [];
@@ -263,16 +264,18 @@ export default function PlanningPage() {
                 clients.map((c) => (
                   <label
                     key={c.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50"
+                    className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50"
                   >
                     <input
                       type="checkbox"
                       checked={form.clientIds.includes(c.id)}
                       onChange={() => toggleClient(c.id)}
-                      className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      className="h-5 w-5 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                     />
-                    <span className="text-sm text-gray-700">{c.name}</span>
-                    <span className="text-xs text-gray-400">{c.email}</span>
+                    <span className="min-w-0 truncate text-sm text-gray-700">
+                      {c.companyName ?? c.name}
+                    </span>
+                    <EmailText email={c.email} className="text-xs text-gray-400" />
                   </label>
                 ))
               )}

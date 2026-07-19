@@ -117,6 +117,35 @@ export async function buildApp() {
       return reply.status(error.statusCode).send(error.toJSON());
     }
 
+    // Violations de contraintes remontées par la base. Sans ce mapping, un
+    // double-clic sur « Créer un client » (deux insertions concurrentes avec le
+    // même email) ou une note hors bornes renvoie un 500 « Erreur interne du
+    // serveur » : l'admin ne peut ni comprendre ni corriger.
+    const dbCode = (error as { code?: string }).code;
+    if (dbCode === "P2002") {
+      const target = (error as { meta?: { target?: string[] } }).meta?.target;
+      const isEmail = Array.isArray(target) && target.some((t) => t.includes("email"));
+      return reply.status(409).send({
+        success: false,
+        error: {
+          code: isEmail ? "EMAIL_ALREADY_EXISTS" : "DUPLICATE_VALUE",
+          message: isEmail
+            ? "Cet email est déjà utilisé par un autre compte."
+            : "Cette valeur existe déjà.",
+        },
+      });
+    }
+    // 23514 = CHECK violation (users_rating_range, users_password_requires_email)
+    if (dbCode === "P2010" || dbCode === "23514") {
+      return reply.status(422).send({
+        success: false,
+        error: {
+          code: "CONSTRAINT_VIOLATION",
+          message: "Valeur refusée par la base (note hors 1-5, ou mot de passe sans email).",
+        },
+      });
+    }
+
     // Erreurs Fastify (validation, rate limit, etc.)
     const fastifyError = error as FastifyError;
     if (fastifyError.statusCode) {

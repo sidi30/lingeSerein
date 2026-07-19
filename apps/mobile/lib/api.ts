@@ -15,9 +15,30 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Code machine renvoyé par l'API (AppError.code), ex. "CLIENT_DUPLICATE_PHONE". */
+    public code?: string,
+    /** Détails structurés (AppError.details) — Record<string, string[]>. */
+    public details?: Record<string, string[]>,
   ) {
     super(message);
   }
+}
+
+/**
+ * Extrait un id d'entité des `details` d'une ApiError.
+ * L'API sérialise details en Record<string, string[]> ; on tolère plusieurs
+ * noms de clé pour ne pas casser si le backend en change un.
+ */
+export function extractDetailId(
+  details: Record<string, string[]> | undefined,
+  keys: string[],
+): string | null {
+  if (!details) return null;
+  for (const k of keys) {
+    const v = details[k];
+    if (Array.isArray(v) && typeof v[0] === "string" && v[0].length > 0) return v[0];
+  }
+  return null;
 }
 
 // ─── Refresh token (single-flight) ───────────────────────────────
@@ -103,9 +124,11 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: { message?: string; code?: string; details?: Record<string, string[]> };
+    };
     const msg = body?.error?.message ?? `API error: ${res.status}`;
-    throw new ApiError(res.status, msg);
+    throw new ApiError(res.status, msg, body?.error?.code, body?.error?.details);
   }
 
   return res.json() as Promise<T>;
@@ -164,7 +187,14 @@ export interface Order {
   cancelledReason: string | null;
   createdAt: string;
   items: OrderItem[];
-  user?: { id: string; name: string; email: string; phone?: string; zone?: { name: string } };
+  user?: {
+    id: string;
+    name: string;
+    /** null : client créé sans compte (terrain/marché) — cf. User.email nullable */
+    email: string | null;
+    phone?: string;
+    zone?: { name: string };
+  };
   statusHistory?: StatusHistoryEntry[];
 }
 
@@ -276,7 +306,8 @@ export interface Notification {
 
 export interface UserProfile {
   id: string;
-  email: string;
+  /** null : compte sans e-mail (client créé sur le terrain) */
+  email: string | null;
   name: string;
   role: string;
   accommodationType: string | null;
@@ -286,37 +317,93 @@ export interface UserProfile {
   createdAt: string;
 }
 
+// ─── CRM client ───────────────────────────────────────────────────
+
+/** Miroir de l'enum Prisma ClientSource. */
+export type ClientSource = "APP" | "ADMIN" | "BOUCHE_A_OREILLE" | "MARCHE" | "DEVIS" | "SITE_WEB";
+
+export const CLIENT_SOURCES: { value: ClientSource; label: string }[] = [
+  { value: "MARCHE", label: "Marché" },
+  { value: "BOUCHE_A_OREILLE", label: "Bouche à oreille" },
+  { value: "ADMIN", label: "Saisie manuelle" },
+  { value: "DEVIS", label: "Devis" },
+  { value: "SITE_WEB", label: "Site web" },
+  { value: "APP", label: "Application" },
+];
+
+export const CLIENT_SOURCE_LABELS: Record<ClientSource, string> = {
+  APP: "Application",
+  ADMIN: "Saisie manuelle",
+  BOUCHE_A_OREILLE: "Bouche à oreille",
+  MARCHE: "Marché",
+  DEVIS: "Devis",
+  SITE_WEB: "Site web",
+};
+
+/**
+ * Sous-titre d'une ligne client : e-mail si présent, sinon téléphone,
+ * sinon mention explicite. Ne renvoie JAMAIS "" ni "null".
+ */
+export function clientSubtitle(c: {
+  email?: string | null;
+  phone?: string | null;
+  city?: string | null;
+}): string {
+  if (c.email) return c.email;
+  if (c.phone) return c.phone;
+  if (c.city) return c.city;
+  return "Aucun contact enregistré";
+}
+
 // ─── GET /clients list item (no stockSummary, no zone object) ────
 export interface ClientListItem {
   id: string;
   name: string;
-  email: string;
+  companyName: string | null;
+  /** null : client créé sans compte (pas d'accès à l'app) */
+  email: string | null;
   phone: string | null;
+  city: string | null;
+  postalCode: string | null;
   accommodationType: string | null;
   isActive: boolean;
   zoneId: string | null;
   stockAlertThreshold: number;
+  rating: number | null;
+  requirements: string | null;
   notes: string | null;
+  source: ClientSource;
   createdAt: string;
   subscription: { plan: string | null; status: string } | null;
   /** stocks array from joined ClientStock rows */
   stocks: ClientStock[];
+  ordersCount: number;
+  revenueCents: number;
+  lastOrderAt: string | null;
+  hasAppAccess: boolean;
 }
 
 // ─── GET /clients/:id detail ──────────────────────────────────────
 export interface ClientDetail {
   id: string;
   name: string;
-  email: string;
+  companyName: string | null;
+  /** null : client créé sans compte (pas d'accès à l'app) */
+  email: string | null;
   phone: string | null;
   address: string | null;
+  city: string | null;
+  postalCode: string | null;
   accommodationType: string | null;
   isActive: boolean;
   isEmailVerified: boolean;
   zoneId: string | null;
   stockAlertThreshold: number;
   preferredTimeSlot: string | null;
+  rating: number | null;
+  requirements: string | null;
   notes: string | null;
+  source: ClientSource;
   createdAt: string;
   updatedAt: string;
   /** Single subscription with products */
@@ -329,7 +416,7 @@ export interface ClientDetail {
       product: { id: string; name: string; range: string | null; priceCents: number };
     }>;
   } | null;
-  /** Last 10 orders */
+  /** 50 dernières commandes */
   orders: Array<{
     id: string;
     orderNumber: string;
@@ -339,6 +426,10 @@ export interface ClientDetail {
     createdAt: string;
   }>;
   stocks: ClientStock[];
+  ordersCount: number;
+  revenueCents: number;
+  lastOrderAt: string | null;
+  hasAppAccess: boolean;
 }
 
 // ─── GET /stock/operator — rows per gamme ────────────────────────
@@ -356,7 +447,7 @@ export interface OperatorStock {
 export interface ClientStockRow {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   accommodationType: string | null;
   zoneId: string | null;
   stockAlertThreshold: number;
@@ -735,6 +826,55 @@ export function useClient(id: string) {
       return res.data;
     },
     enabled: !!token && !!id && (role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN"),
+  });
+}
+
+/** Corps de POST /clients — miroir strict du contrat d'API. */
+export interface CreateClientInput {
+  name: string;
+  companyName?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  postalCode?: string;
+  accommodationType?: string;
+  zoneId?: string;
+  preferredTimeSlot?: string;
+  rating?: number;
+  requirements?: string;
+  notes?: string;
+  source?: ClientSource;
+  /** true → crée un accès applicatif et renvoie un mot de passe temporaire */
+  grantAppAccess?: boolean;
+  /** true → passe outre la détection de doublon (409 CLIENT_DUPLICATE_PHONE) */
+  force?: boolean;
+}
+
+export interface CreateClientResult {
+  client: ClientDetail;
+  temporaryPassword?: string;
+}
+
+/**
+ * POST /clients — création d'un client depuis le terrain (admin).
+ * Un 409 CLIENT_DUPLICATE_PHONE remonte tel quel : l'appelant décide s'il
+ * ouvre la fiche existante ou s'il rejoue avec `force: true`.
+ */
+export function useCreateClient() {
+  const qc = useQueryClient();
+  return useMutation<CreateClientResult, ApiError, CreateClientInput>({
+    mutationFn: async (input) => {
+      const res = await apiFetch<ApiRes<CreateClientResult>>("/clients", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clients"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard-kpis"] });
+    },
   });
 }
 

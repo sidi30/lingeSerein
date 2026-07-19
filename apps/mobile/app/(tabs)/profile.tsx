@@ -372,7 +372,7 @@ export default function ProfileScreen() {
           </Text>
         </View>
         <Text style={styles.name}>{user?.name}</Text>
-        <Text style={styles.email}>{user?.email}</Text>
+        <Text style={styles.email}>{user?.email ?? "Aucun e-mail renseigné"}</Text>
         {user?.accommodationType && (
           <Badge label={ACCOMMODATION_LABELS[user.accommodationType] ?? user.accommodationType} />
         )}

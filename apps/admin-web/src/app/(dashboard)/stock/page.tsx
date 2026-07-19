@@ -37,7 +37,7 @@ interface ClientStockItem {
 interface ClientStockEntry {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   accommodationType: string;
   zoneId: string;
   stockAlertThreshold: number;
@@ -132,7 +132,7 @@ export default function StockPage() {
 
   const clientOptions = clientStock.map((cs) => ({
     value: cs.id,
-    label: `${cs.name} (${cs.email})`,
+    label: cs.email ? `${cs.name} (${cs.email})` : cs.name,
   }));
 
   return (

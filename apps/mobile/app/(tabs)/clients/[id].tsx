@@ -10,7 +10,7 @@ import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/Button";
 import { SectionHeader } from "@/components/SectionHeader";
-import { useClient, formatCents, formatDate } from "@/lib/api";
+import { useClient, formatCents, formatDate, CLIENT_SOURCE_LABELS } from "@/lib/api";
 import { colors, font, spacing, radius } from "@/lib/theme";
 
 const ACCOMMODATION_LABELS: Record<string, string> = {
@@ -104,7 +104,15 @@ export default function ClientDetailScreen() {
           <Text style={styles.avatarText}>{initials}</Text>
         </View>
         <Text style={styles.name}>{client.name}</Text>
-        <Text style={styles.email}>{client.email}</Text>
+        {/* E-mail facultatif : repli sur le téléphone, puis mention explicite */}
+        {client.email ? (
+          <Text style={styles.email}>{client.email}</Text>
+        ) : client.phone ? (
+          <Text style={styles.email}>{client.phone}</Text>
+        ) : (
+          <Text style={[styles.email, styles.emailMissing]}>Aucun e-mail renseigné</Text>
+        )}
+        {client.companyName ? <Text style={styles.company}>{client.companyName}</Text> : null}
         <View style={styles.headerBadges}>
           {client.accommodationType && (
             <Badge
@@ -181,6 +189,19 @@ export default function ClientDetailScreen() {
         <InfoRow label="Creneau prefere" value={client.preferredTimeSlot ?? "Non defini"} />
         <InfoRow label="Seuil d'alerte" value={`${client.stockAlertThreshold ?? 30}%`} />
         {client.address && <InfoRow label="Adresse" value={client.address} />}
+        {(client.postalCode ?? client.city) && (
+          <InfoRow
+            label="Ville"
+            value={[client.postalCode, client.city].filter(Boolean).join(" ")}
+          />
+        )}
+        {client.source && (
+          <InfoRow label="Origine" value={CLIENT_SOURCE_LABELS[client.source] ?? client.source} />
+        )}
+        {typeof client.rating === "number" && (
+          <InfoRow label="Appréciation" value={`${client.rating}/5`} />
+        )}
+        {client.requirements && <InfoRow label="Exigences" value={client.requirements} />}
         {client.notes && <InfoRow label="Notes" value={client.notes} />}
       </Card>
 
@@ -269,6 +290,15 @@ const styles = StyleSheet.create({
   email: {
     fontSize: font.sizes.sm,
     color: colors.textSecondary,
+  },
+  emailMissing: {
+    color: colors.textTertiary,
+    fontStyle: "italic",
+  },
+  company: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.semibold,
+    color: colors.accent,
   },
   headerBadges: {
     flexDirection: "row",

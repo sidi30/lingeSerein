@@ -1,117 +1,179 @@
 "use client";
 
+/**
+ * Liste des clients (CRM).
+ *
+ * Mobile-first : cartes empilées en dessous de lg, tableau au-delà — un tableau
+ * à 6 colonnes déborde forcément à 390px.
+ */
+
+import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { Plus, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { Header } from "@/components/header";
+import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
+import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Table, Thead, Th, Td, Tr } from "@/components/ui/table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonTable } from "@/components/ui/skeleton";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { Users } from "lucide-react";
+import { EmailText } from "@/components/ui/email-text";
+import { RatingStars } from "@/components/clients/rating-stars";
+import { ClientCreateModal } from "@/components/clients/client-create-modal";
+import { formatPrice } from "@/lib/format";
+import {
+  CLIENT_SOURCE_LABELS,
+  type ClientListDTO,
+  type ClientSource,
+  type DeliveryZoneDTO,
+  type PaginatedResponse,
+} from "@/lib/types";
 
-interface ClientStock {
-  productRange: string;
-  cleanSets: number;
-  dirtySets: number;
-  totalInCirculation: number;
-}
+const statusOptions = [
+  { value: "", label: "Tous les statuts" },
+  { value: "active", label: "Actifs" },
+  { value: "inactive", label: "Inactifs" },
+];
 
-interface ClientSubscription {
-  plan: string;
-  status: string;
-}
+const sourceOptions = [
+  { value: "", label: "Toutes les origines" },
+  ...(Object.keys(CLIENT_SOURCE_LABELS) as ClientSource[]).map((s) => ({
+    value: s,
+    label: CLIENT_SOURCE_LABELS[s],
+  })),
+];
 
-interface Client {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  accommodationType: string;
-  isActive: boolean;
-  zoneId: string;
-  stockAlertThreshold: number;
-  notes: string;
-  subscription: ClientSubscription | null;
-  stocks: ClientStock[];
-}
-
-interface ClientsResponse {
-  data: Client[];
-  pagination: { page: number; pageSize: number; total: number; totalPages: number };
-}
-
-const rangeBadgeVariant: Record<string, "info" | "default" | "warning"> = {
-  CONFORT: "info",
-  HOTEL: "default",
-  PRESTIGE: "warning",
-};
-
-const accommodationLabels: Record<string, string> = {
-  HOTEL: "H\u00f4tel",
-  GITE: "G\u00eete",
-  AIRBNB: "Airbnb",
-  AUBERGE: "Auberge",
-  AUTRE: "Autre",
-};
-
-function stockLevelColor(clean: number, total: number): string {
-  if (total === 0) return "bg-gray-300";
-  const ratio = clean / total;
-  if (ratio >= 0.5) return "bg-success-500";
-  if (ratio >= 0.25) return "bg-warning-500";
-  return "bg-danger-500";
-}
-
-function stockLevelTextColor(clean: number, total: number): string {
-  if (total === 0) return "text-gray-500";
-  const ratio = clean / total;
-  if (ratio >= 0.5) return "text-success-600";
-  if (ratio >= 0.25) return "text-warning-600";
-  return "text-danger-600";
+function AccessBadge({ hasAppAccess }: { hasAppAccess: boolean }) {
+  return hasAppAccess ? (
+    <Badge variant="info">app</Badge>
+  ) : (
+    <Badge variant="neutral">hors-ligne</Badge>
+  );
 }
 
 export default function ClientsPage() {
   const router = useRouter();
   const [search, setSearch] = useState("");
+  const [searchDebounced, setSearchDebounced] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const handleSearch = useCallback((value: string) => {
+    setSearch(value);
+    const t = setTimeout(() => {
+      setSearchDebounced(value);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  const { data: zones } = useQuery({
+    queryKey: ["settings", "zones"],
+    queryFn: () => api.get<DeliveryZoneDTO[]>("/settings/zones"),
+  });
+
+  const zoneOptions = [
+    { value: "", label: "Toutes les zones" },
+    ...(zones ?? []).map((z) => ({ value: z.id, label: z.name })),
+  ];
 
   const { data, isLoading } = useQuery({
-    queryKey: ["clients", page, search],
+    queryKey: ["clients", page, searchDebounced, statusFilter, zoneFilter, sourceFilter],
     queryFn: () =>
-      api.get<ClientsResponse>("/clients", { page, pageSize: 20, search: search || undefined }),
+      api.getRaw<PaginatedResponse<ClientListDTO>>("/clients", {
+        page,
+        limit: 20,
+        search: searchDebounced || undefined,
+        status: statusFilter || undefined,
+        zoneId: zoneFilter || undefined,
+        source: sourceFilter || undefined,
+      }),
   });
 
   const clients = data?.data ?? [];
   const pagination = data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
+  const hasFilters = !!(searchDebounced || statusFilter || zoneFilter || sourceFilter);
+
+  const resetFilters = () => {
+    setSearch("");
+    setSearchDebounced("");
+    setStatusFilter("");
+    setZoneFilter("");
+    setSourceFilter("");
+    setPage(1);
+  };
 
   return (
     <>
-      <Header title="Clients" />
+      <Header
+        title="Clients"
+        actions={
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nouveau client
+          </Button>
+        }
+      />
 
       <div className="space-y-4 p-4 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="w-full max-w-xs">
-            <SearchInput
-              placeholder="Rechercher un client..."
-              value={search}
+        {/* ─── Filtres ─── */}
+        <div className="space-y-3">
+          <SearchInput
+            placeholder="Établissement, ville, email, téléphone..."
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            onClear={() => handleSearch("")}
+          />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Select
+              options={statusOptions}
+              value={statusFilter}
+              aria-label="Filtrer par statut"
               onChange={(e) => {
-                setSearch(e.target.value);
+                setStatusFilter(e.target.value);
                 setPage(1);
               }}
-              onClear={() => {
-                setSearch("");
+            />
+            <Select
+              options={zoneOptions}
+              value={zoneFilter}
+              aria-label="Filtrer par zone"
+              onChange={(e) => {
+                setZoneFilter(e.target.value);
+                setPage(1);
+              }}
+            />
+            <Select
+              options={sourceOptions}
+              value={sourceFilter}
+              aria-label="Filtrer par origine"
+              onChange={(e) => {
+                setSourceFilter(e.target.value);
                 setPage(1);
               }}
             />
           </div>
-          <p className="text-sm text-gray-500">
-            {pagination?.total ?? 0} client{(pagination?.total ?? 0) > 1 ? "s" : ""}
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-500">
+              {pagination?.total ?? 0} client{(pagination?.total ?? 0) > 1 ? "s" : ""}
+            </p>
+            {hasFilters && (
+              <button
+                onClick={resetFilters}
+                className="min-h-11 px-2 text-xs text-primary-600 hover:underline sm:min-h-0"
+              >
+                Réinitialiser les filtres
+              </button>
+            )}
+          </div>
         </div>
 
         {isLoading ? (
@@ -119,89 +181,106 @@ export default function ClientsPage() {
         ) : clients.length === 0 ? (
           <EmptyState
             icon={<Users className="h-12 w-12" />}
-            title={search ? "Aucun client trouvé" : "Aucun client enregistré"}
+            title={hasFilters ? "Aucun client trouvé" : "Aucun client enregistré"}
             description={
-              search
-                ? `Aucun résultat pour « ${search} »`
-                : "Les clients apparaîtront ici après leur inscription."
+              hasFilters
+                ? "Essayez de modifier vos filtres."
+                : "Créez votre premier client pour commencer."
             }
+            action={<Button onClick={() => setCreateOpen(true)}>Nouveau client</Button>}
           />
         ) : (
           <>
-            <Table>
-              <Thead>
-                <tr>
-                  <Th>Nom</Th>
-                  <Th>Email</Th>
-                  <Th>Type</Th>
-                  <Th>Gamme</Th>
-                  <Th>Stock</Th>
-                  <Th>Statut</Th>
-                </tr>
-              </Thead>
-              <tbody>
-                {clients.map((client) => {
-                  const primaryStock = client.stocks.length > 0 ? client.stocks[0] : null;
-                  const cleanSets = primaryStock?.cleanSets ?? 0;
-                  const totalInCirculation = primaryStock?.totalInCirculation ?? 0;
-                  const stockPct =
-                    totalInCirculation > 0 ? Math.round((cleanSets / totalInCirculation) * 100) : 0;
+            {/* ─── Cartes (mobile) ─── */}
+            <ul className="space-y-3 lg:hidden">
+              {clients.map((client) => (
+                <li key={client.id}>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/clients/${client.id}`)}
+                    className="w-full rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm active:bg-gray-50"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-gray-900">
+                          {client.companyName ?? client.name}
+                        </p>
+                        <p className="truncate text-xs text-gray-500">
+                          {client.city ?? "Ville non renseignée"}
+                        </p>
+                      </div>
+                      <AccessBadge hasAppAccess={client.hasAppAccess} />
+                    </div>
 
-                  return (
+                    <div className="mt-3 flex items-end justify-between gap-3">
+                      <div>
+                        <p className="text-xs text-gray-500">
+                          {client.ordersCount} commande{client.ordersCount > 1 ? "s" : ""}
+                        </p>
+                        <p className="text-sm font-bold text-gray-900 tabular-nums">
+                          {formatPrice(client.revenueCents)}
+                        </p>
+                      </div>
+                      <RatingStars value={client.rating} size="sm" />
+                    </div>
+
+                    <div className="mt-2 border-t border-gray-100 pt-2">
+                      <EmailText email={client.email} className="text-xs text-gray-500" />
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            {/* ─── Tableau (desktop) ─── */}
+            <div className="hidden lg:block">
+              <Table>
+                <Thead>
+                  <tr>
+                    <Th>Établissement</Th>
+                    <Th>Ville</Th>
+                    <Th>Commandes</Th>
+                    <Th>CA</Th>
+                    <Th>Accès</Th>
+                    <Th>Note</Th>
+                  </tr>
+                </Thead>
+                <tbody>
+                  {clients.map((client) => (
                     <Tr key={client.id} onClick={() => router.push(`/clients/${client.id}`)}>
                       <Td>
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 text-xs font-semibold text-primary-600">
-                            {client.name.charAt(0).toUpperCase()}
+                            {(client.companyName ?? client.name).charAt(0).toUpperCase()}
                           </div>
-                          <span className="font-medium text-gray-900">{client.name}</span>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-gray-900">
+                              {client.companyName ?? client.name}
+                            </p>
+                            <EmailText email={client.email} className="text-xs text-gray-500" />
+                          </div>
                         </div>
-                      </Td>
-                      <Td>
-                        <span className="text-gray-600">{client.email}</span>
                       </Td>
                       <Td>
                         <span className="text-sm text-gray-600">
-                          {accommodationLabels[client.accommodationType] ??
-                            client.accommodationType}
+                          {client.city ?? <span className="text-gray-300">&mdash;</span>}
                         </span>
                       </Td>
-                      <Td>
-                        {primaryStock ? (
-                          <Badge
-                            variant={rangeBadgeVariant[primaryStock.productRange] ?? "neutral"}
-                          >
-                            {primaryStock.productRange}
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-gray-400">&mdash;</span>
-                        )}
+                      <Td className="tabular-nums">{client.ordersCount}</Td>
+                      <Td className="font-semibold tabular-nums">
+                        {formatPrice(client.revenueCents)}
                       </Td>
                       <Td>
-                        <div className="flex items-center gap-2">
-                          <div className="h-2 w-16 rounded-full bg-gray-200">
-                            <div
-                              className={`h-2 rounded-full transition-all ${stockLevelColor(cleanSets, totalInCirculation)}`}
-                              style={{ width: `${Math.min(stockPct, 100)}%` }}
-                            />
-                          </div>
-                          <span
-                            className={`text-xs font-semibold ${stockLevelTextColor(cleanSets, totalInCirculation)}`}
-                          >
-                            {stockPct}%
-                          </span>
-                        </div>
+                        <AccessBadge hasAppAccess={client.hasAppAccess} />
                       </Td>
                       <Td>
-                        <Badge variant={client.isActive ? "success" : "neutral"}>
-                          {client.isActive ? "Actif" : "Inactif"}
-                        </Badge>
+                        <RatingStars value={client.rating} size="sm" />
                       </Td>
                     </Tr>
-                  );
-                })}
-              </tbody>
-            </Table>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
 
             <Pagination
               page={page}
@@ -213,6 +292,8 @@ export default function ClientsPage() {
           </>
         )}
       </div>
+
+      <ClientCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </>
   );
 }

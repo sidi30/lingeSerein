@@ -1,15 +1,15 @@
-import { useState, useCallback, memo } from "react";
+import { useEffect, useState, useCallback, memo } from "react";
 import { View, Text, TextInput, FlatList, Pressable, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { Card } from "@/components/Card";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
-import { useClients } from "@/lib/api";
+import { useClients, clientSubtitle } from "@/lib/api";
 import type { ClientListItem } from "@/lib/api";
-import { colors, font, spacing, radius, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
+import { colors, font, spacing, radius, shadow, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
 import { useDebounce } from "@/lib/useDebounce";
 
 const ClientRow = memo(function ClientRow({
@@ -26,7 +26,14 @@ const ClientRow = memo(function ClientRow({
     .toUpperCase()
     .slice(0, 2);
 
-  const hasLowStock = client.stocks.some((s) => s.totalInCirculation > 0 && s.cleanSets < 3);
+  const hasLowStock = (client.stocks ?? []).some(
+    (s) => s.totalInCirculation > 0 && s.cleanSets < 3,
+  );
+
+  // E-mail facultatif depuis la refonte CRM : on retombe sur le téléphone,
+  // puis la ville, puis une mention explicite — jamais un sous-titre vide.
+  const subtitle = clientSubtitle(client);
+  const hasContact = Boolean(client.email ?? client.phone ?? client.city);
 
   return (
     <Animated.View entering={FadeInDown.delay(Math.min(index, 10) * 40).springify()}>
@@ -53,8 +60,13 @@ const ClientRow = memo(function ClientRow({
                 </View>
               )}
             </View>
-            <Text style={styles.email} numberOfLines={1}>
-              {client.email}
+            {client.companyName ? (
+              <Text style={styles.company} numberOfLines={1}>
+                {client.companyName}
+              </Text>
+            ) : null}
+            <Text style={[styles.email, !hasContact && styles.emailMissing]} numberOfLines={1}>
+              {subtitle}
             </Text>
             <View style={styles.metaRow}>
               {client.accommodationType && (
@@ -63,7 +75,7 @@ const ClientRow = memo(function ClientRow({
               {client.isActive === false && (
                 <Text style={[styles.meta, { color: colors.error }]}>· Inactif</Text>
               )}
-              {client.stocks.length > 0 && (
+              {(client.stocks?.length ?? 0) > 0 && (
                 <Text style={styles.meta}>
                   · {client.stocks.reduce((acc, s) => acc + s.totalInCirculation, 0)} sets
                 </Text>
@@ -89,7 +101,18 @@ function ClientListSkeleton() {
 }
 
 export default function ClientsListScreen() {
-  const [search, setSearch] = useState("");
+  // `q` : recherche pré-remplie (ex. retour d'un 409 doublon téléphone sans id).
+  const params = useLocalSearchParams<{ q?: string | string[] }>();
+  const initialSearch = Array.isArray(params.q) ? (params.q[0] ?? "") : (params.q ?? "");
+  const [search, setSearch] = useState(initialSearch);
+
+  // `index` et `new` vivent dans le même Stack : revenir depuis `new` dépile
+  // l'écran sans le remonter, donc l'initialiseur de useState ci-dessus n'est
+  // PAS rejoué. Sans cet effet, le bouton « Rechercher » du dialogue de doublon
+  // ramène sur la liste complète, champ vide, sans le moindre message.
+  useEffect(() => {
+    if (initialSearch) setSearch(initialSearch);
+  }, [initialSearch]);
   const debouncedSearch = useDebounce(search, 300);
   const { data, isLoading, refetch, isRefetching } = useClients(debouncedSearch || undefined);
   const insets = useSafeAreaInsets();
@@ -149,12 +172,23 @@ export default function ClientsListScreen() {
               description={
                 search
                   ? `Aucun client correspondant à "${search}"`
-                  : "Les clients apparaîtront ici."
+                  : "Ajoutez votre premier client avec le bouton +."
               }
             />
           }
         />
       )}
+
+      {/* Création rapide — cas d'usage terrain (client rencontré sur un marché) */}
+      <Pressable
+        onPress={() => router.push("/(tabs)/clients/new")}
+        style={[styles.fab, { bottom: TAB_BAR_BASE_HEIGHT + insets.bottom + spacing.lg }]}
+        accessibilityRole="button"
+        accessibilityLabel="Nouveau client"
+        accessibilityHint="Ouvre le formulaire de création d'un client"
+      >
+        <Ionicons name="person-add" size={24} color={colors.textInverse} />
+      </Pressable>
     </View>
   );
 }
@@ -229,9 +263,29 @@ const styles = StyleSheet.create({
     fontWeight: font.weights.semibold,
     color: colors.warningText,
   },
+  company: {
+    fontSize: font.sizes.xs,
+    fontWeight: font.weights.semibold,
+    color: colors.accent,
+  },
   email: {
     fontSize: font.sizes.sm,
     color: colors.textSecondary,
+  },
+  emailMissing: {
+    color: colors.textTertiary,
+    fontStyle: "italic",
+  },
+  fab: {
+    position: "absolute",
+    right: spacing.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.lg,
   },
   metaRow: {
     flexDirection: "row",

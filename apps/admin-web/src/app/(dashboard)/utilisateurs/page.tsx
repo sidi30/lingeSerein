@@ -17,6 +17,7 @@ import { SkeletonTable } from "@/components/ui/skeleton";
 import { Plus, UserCog } from "lucide-react";
 import { formatDate } from "@/lib/format";
 import type { PaginatedResponse, UserDTO, UserRole } from "@/lib/types";
+import { EmailText } from "@/components/ui/email-text";
 
 const roleOptions = [
   { value: "", label: "Tous les rôles" },
@@ -198,7 +199,7 @@ export default function UtilisateursPage() {
                         </div>
                       </Td>
                       <Td>
-                        <span className="text-gray-600">{user.email}</span>
+                        <EmailText email={user.email} className="text-gray-600" />
                       </Td>
                       <Td>
                         <Badge variant={rc.variant}>{rc.label}</Badge>

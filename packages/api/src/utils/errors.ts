@@ -51,6 +51,46 @@ export class ConflictError extends AppError {
   }
 }
 
+/**
+ * 409 sur création d'un client dont le téléphone est déjà porté par un autre
+ * client du même opérateur. Le corps expose l'existant pour que l'UI propose
+ * « ouvrir la fiche » ou « créer quand même » (force: true).
+ */
+export class DuplicateClientError extends AppError {
+  constructor(
+    public readonly existingClientId: string,
+    public readonly existingClientName: string,
+  ) {
+    super(
+      409,
+      "CLIENT_DUPLICATE_PHONE",
+      `Un client avec ce téléphone existe déjà : ${existingClientName}`,
+    );
+  }
+
+  override toJSON() {
+    return {
+      success: false as const,
+      error: {
+        code: this.code,
+        message: this.message,
+        // `details` est OBLIGATOIRE ici : les clients HTTP (admin-web et mobile)
+        // ne lisent que `body.error.details`. Sans lui, l'id du doublon n'arrive
+        // jamais jusqu'à l'interface et le bouton « Ouvrir la fiche existante »
+        // ne peut pas exister — l'admin n'a plus que « créer quand même », ce
+        // qui produit exactement le doublon qu'on cherchait à éviter.
+        details: {
+          clientId: [this.existingClientId],
+          clientName: [this.existingClientName],
+        },
+        // Conservés à la racine pour les appelants qui les liraient déjà.
+        existingClientId: this.existingClientId,
+        name: this.existingClientName,
+      },
+    };
+  }
+}
+
 export class ValidationError extends AppError {
   constructor(details: Record<string, string[]>) {
     super(400, "VALIDATION_ERROR", "Données invalides", details);

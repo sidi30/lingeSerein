@@ -117,6 +117,16 @@ enum InvoiceStatus {
   REFUNDED
 }
 
+/// Origine d'un client — distingue les comptes app des clients saisis à la main
+enum ClientSource {
+  APP
+  ADMIN
+  BOUCHE_A_OREILLE
+  MARCHE
+  DEVIS
+  SITE_WEB
+}
+
 enum NotificationType {
   // Activité commerciale — alimente les badges "non lus" de l'admin
   QUOTE_CREATED
@@ -210,11 +220,11 @@ model User {
   id                  String             @id @default(uuid()) @db.Uuid
   operatorId          String             @map("operator_id") @db.Uuid
   zoneId              String?            @map("zone_id") @db.Uuid
-  email               String             @unique @db.VarChar(320)
-  passwordHash        String             @map("password_hash") @db.Text
+  email               String?            @unique @db.VarChar(320) // null = client sans compte (créé par l'admin)
+  passwordHash        String?            @map("password_hash") @db.Text // null = inconnectable
   name                String             @db.VarChar(200)
-  phone               String?            @db.VarChar(20) // chiffré AES-256
-  address             String?            @db.Text // chiffré AES-256
+  phone               String?            @db.VarChar(20)
+  address             String?            @db.Text
   accommodationType   AccommodationType? @map("accommodation_type")
   role                Role               @default(ROLE_CLIENT)
   isActive            Boolean            @default(true) @map("is_active")
@@ -229,6 +239,12 @@ model User {
   stockAlertThreshold Int                @default(30) @map("stock_alert_threshold") // pourcentage
   preferredTimeSlot   String?            @map("preferred_time_slot") @db.VarChar(20) // ex: "08:00-10:00"
   stripeCustomerId    String?            @unique @map("stripe_customer_id") @db.VarChar(255)
+  companyName         String?            @map("company_name") @db.VarChar(200) // établissement (distinct du contact)
+  city                String?            @db.VarChar(120)
+  postalCode          String?            @map("postal_code") @db.VarChar(10)
+  rating              Int?               @db.SmallInt // appréciation interne 1-5 (CHECK en base)
+  requirements        String?            @db.Text // exigences particulières du client
+  source              ClientSource       @default(APP)
   notes               String?            @db.Text // notes internes (admin)
   createdAt           DateTime           @default(now()) @map("created_at")
   updatedAt           DateTime           @updatedAt @map("updated_at")
@@ -256,6 +272,8 @@ model User {
   @@index([operatorId])
   @@index([zoneId])
   @@index([stripeCustomerId])
+  @@index([operatorId, role, deletedAt])
+  @@index([companyName])
   @@map("users")
 }
 

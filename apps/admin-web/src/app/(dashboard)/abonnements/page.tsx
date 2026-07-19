@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonTable } from "@/components/ui/skeleton";
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { EmailText } from "@/components/ui/email-text";
 
 interface SubscriptionProduct {
   quantity: number;
@@ -33,7 +34,7 @@ interface Subscription {
   user: {
     id: string;
     name: string;
-    email: string;
+    email: string | null;
     accommodationType: string;
   };
   products: SubscriptionProduct[];
@@ -209,7 +210,7 @@ export default function AbonnementsPage() {
                       <Td>
                         <div>
                           <p className="font-medium text-gray-900">{sub.user.name}</p>
-                          <p className="text-xs text-gray-500">{sub.user.email}</p>
+                          <EmailText email={sub.user.email} className="text-xs text-gray-500" />
                         </div>
                       </Td>
                       <Td>

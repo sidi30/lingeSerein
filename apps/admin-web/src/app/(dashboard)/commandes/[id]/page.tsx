@@ -16,6 +16,7 @@ import { useToast } from "@/lib/toast";
 import { formatPrice, formatDate, formatDateTime } from "@/lib/format";
 import { ORDER_TRANSITIONS } from "@lingengo/shared";
 import type { OrderDetailDTO, OrderStatus } from "@/lib/types";
+import { EmailText } from "@/components/ui/email-text";
 import {
   CheckCircle2,
   XCircle,
@@ -194,7 +195,9 @@ export default function CommandeDetailPage() {
                 <User className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
                 <div>
                   <dd className="font-medium text-gray-900">{order.user.name}</dd>
-                  <dd className="text-gray-500">{order.user.email}</dd>
+                  <dd className="text-gray-500">
+                    <EmailText email={order.user.email} />
+                  </dd>
                   {order.user.phone && <dd className="text-gray-500">{order.user.phone}</dd>}
                 </div>
               </div>
