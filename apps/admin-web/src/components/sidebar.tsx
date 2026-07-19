@@ -4,8 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { useUnreadCounts } from "@/lib/notifications";
 import {
   LayoutDashboard,
   Users,
@@ -22,7 +21,6 @@ import {
   Settings,
   ShoppingCart,
 } from "lucide-react";
-import type { PaginatedResponse, OrderListDTO } from "@/lib/types";
 
 interface NavItem {
   label: string;
@@ -36,19 +34,10 @@ interface NavGroup {
   items: NavItem[];
 }
 
-function usePendingOrdersCount() {
-  const { data } = useQuery({
-    queryKey: ["orders-badge"],
-    queryFn: () =>
-      api.getRaw<PaginatedResponse<OrderListDTO> & { meta?: { newCount?: number } }>("/orders", {
-        limit: 1,
-        page: 1,
-      }),
-    refetchInterval: 60_000, // rafraîchit toutes les 60s
-    staleTime: 30_000,
-  });
-  return (data?.meta as { newCount?: number } | undefined)?.newCount ?? 0;
-}
+// Le compteur de commandes lisait auparavant `meta.newCount` de /orders : c'était
+// un nombre de commandes PENDING, pas un « non lu ». Il ne retombait donc jamais
+// à zéro en consultant la page. Les badges viennent désormais du vrai système de
+// notifications (état lu/non-lu par utilisateur), cf. lib/notifications.ts.
 
 function SidebarBadge({ count }: { count: number }) {
   if (count === 0) return null;
@@ -66,7 +55,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const pendingCount = usePendingOrdersCount();
+  const unread = useUnreadCounts();
 
   const navGroups: NavGroup[] = [
     {
@@ -78,12 +67,17 @@ export function Sidebar() {
     {
       title: "Commercial",
       items: [
-        { label: "Devis", href: "/devis", icon: <FileText className="h-5 w-5" /> },
+        {
+          label: "Devis",
+          href: "/devis",
+          icon: <FileText className="h-5 w-5" />,
+          badgeCount: unread.devis,
+        },
         {
           label: "Commandes",
           href: "/commandes",
           icon: <ShoppingCart className="h-5 w-5" />,
-          badgeCount: pendingCount,
+          badgeCount: unread.commandes,
         },
         { label: "Clients", href: "/clients", icon: <Users className="h-5 w-5" /> },
         { label: "Abonnements", href: "/abonnements", icon: <RefreshCw className="h-5 w-5" /> },
@@ -93,14 +87,24 @@ export function Sidebar() {
       title: "Opérations",
       items: [
         { label: "Produits", href: "/produits", icon: <Package className="h-5 w-5" /> },
-        { label: "Stock", href: "/stock", icon: <Database className="h-5 w-5" /> },
+        {
+          label: "Stock",
+          href: "/stock",
+          icon: <Database className="h-5 w-5" />,
+          badgeCount: unread.stock,
+        },
         { label: "Planning", href: "/planning", icon: <CalendarDays className="h-5 w-5" /> },
       ],
     },
     {
       title: "Administration",
       items: [
-        { label: "Utilisateurs", href: "/utilisateurs", icon: <UserCog className="h-5 w-5" /> },
+        {
+          label: "Utilisateurs",
+          href: "/utilisateurs",
+          icon: <UserCog className="h-5 w-5" />,
+          badgeCount: unread.utilisateurs,
+        },
         { label: "Réglages", href: "/reglages", icon: <Settings className="h-5 w-5" /> },
       ],
     },
@@ -132,7 +136,7 @@ export function Sidebar() {
               href={item.href}
               onClick={() => setMobileOpen(false)}
               aria-current={isActive(item.href) ? "page" : undefined}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              className={`relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                 isActive(item.href)
                   ? "bg-primary-50 text-primary-700"
                   : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"

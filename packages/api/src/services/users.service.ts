@@ -9,6 +9,7 @@ import {
   UnprocessableEntityError,
 } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
+import { NotificationsService } from "./notifications.service.js";
 import type { CreateUserInput, UpdateUserInput, ListUsersQuery } from "../schemas/users.schema.js";
 
 // NOTE: softDelete est distinct de deactivate.
@@ -250,6 +251,15 @@ export class UsersService {
       ipAddress,
       userAgent,
     });
+
+    // Badge « Utilisateurs ». Comme l'audit : aucune donnée personnelle dans le
+    // corps de la notification (pas d'email, pas de téléphone), juste le rôle.
+    await new NotificationsService(this.prisma).notifyAdmins(
+      "USER_CREATED",
+      "Nouveau compte créé",
+      `Rôle ${dbRole}`,
+      { userId: user.id, href: `/utilisateurs/${user.id}` },
+    );
 
     return { user: toUserDto(user), temporaryPassword };
   }

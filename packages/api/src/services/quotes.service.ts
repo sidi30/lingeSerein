@@ -3,6 +3,7 @@ import { computeDevisTotals, QUOTE_TRANSITIONS, QUOTE_EDITABLE } from "@lingengo
 import type { QuoteStatus } from "@lingengo/shared";
 import { NotFoundError, ConflictError, UnprocessableEntityError } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
+import { NotificationsService } from "./notifications.service.js";
 import type {
   CreateQuoteInput,
   UpdateQuoteInput,
@@ -208,6 +209,15 @@ export class QuotesService {
           ipAddress,
           userAgent,
         });
+
+        // Badge « Devis » de l'admin. Best effort : notifyAdmins avale ses
+        // erreurs, un souci de notification ne doit pas perdre le devis.
+        await new NotificationsService(this.prisma).notifyAdmins(
+          "QUOTE_CREATED",
+          `Nouveau devis ${quote.numero}`,
+          `${quote.clientNom ?? "Client"} — ${(totals.totalTTC / 100).toFixed(2)} €`,
+          { quoteId: quote.id, numero: quote.numero, href: `/devis/${quote.id}` },
+        );
 
         return result;
       } catch (err: unknown) {

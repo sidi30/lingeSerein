@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Bell, ChevronDown, LogOut, KeyRound } from "lucide-react";
 import { ChangePasswordModal } from "@/components/shared/change-password-modal";
+import { useUnreadCounts } from "@/lib/notifications";
 
 interface HeaderProps {
   title: string;
@@ -16,6 +17,8 @@ export function Header({ title, actions }: HeaderProps) {
   const router = useRouter();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const unread = useUnreadCounts();
+  const totalUnread = Object.values(unread).reduce((sum, n) => sum + n, 0);
 
   const handleLogout = async () => {
     await logout();
@@ -38,9 +41,26 @@ export function Header({ title, actions }: HeaderProps) {
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {/* Notification bell */}
-          <button className="relative rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
-            <Bell className="h-5 w-5" />
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger-500" />
+          {/* La pastille était purement décorative (toujours affichée). Elle
+              reflète maintenant le total réel de non-lus, toutes sections
+              confondues, et disparaît quand tout est lu. */}
+          <button
+            className="relative rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            aria-label={
+              totalUnread > 0
+                ? `${totalUnread} notification${totalUnread > 1 ? "s" : ""} non lue${totalUnread > 1 ? "s" : ""}`
+                : "Aucune notification non lue"
+            }
+          >
+            <Bell className="h-5 w-5" aria-hidden="true" />
+            {totalUnread > 0 && (
+              <span
+                className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger-600 px-1 text-[10px] font-bold text-white"
+                aria-hidden="true"
+              >
+                {totalUnread > 9 ? "9+" : totalUnread}
+              </span>
+            )}
           </button>
 
           {/* User dropdown */}

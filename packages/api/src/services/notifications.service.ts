@@ -1,6 +1,26 @@
 import type { PrismaClient, Prisma, NotificationType, NotificationChannel } from "@prisma/client";
 import { NotFoundError } from "../utils/errors.js";
 
+/** Sections de l'admin portant un badge de non-lus. */
+export const NOTIFICATION_SECTIONS = ["devis", "commandes", "utilisateurs", "stock"] as const;
+export type NotificationSection = (typeof NOTIFICATION_SECTIONS)[number];
+
+/**
+ * Quels types alimentent quel badge. Source de vérité unique : `SECTION_BY_TYPE`
+ * en est dérivé, pour qu'ajouter un type ne puisse pas désynchroniser les deux
+ * sens de la correspondance.
+ */
+const TYPES_BY_SECTION: Record<NotificationSection, NotificationType[]> = {
+  devis: ["QUOTE_CREATED"],
+  commandes: ["ORDER_CREATED"],
+  utilisateurs: ["USER_CREATED"],
+  stock: ["STOCK_LOW"],
+};
+
+const SECTION_BY_TYPE = Object.fromEntries(
+  NOTIFICATION_SECTIONS.flatMap((section) => TYPES_BY_SECTION[section].map((t) => [t, section])),
+) as Partial<Record<NotificationType, NotificationSection>>;
+
 export class NotificationsService {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -98,5 +118,81 @@ export class NotificationsService {
         sentAt: new Date(),
       },
     });
+  }
+
+  /**
+   * Diffuse une notification à TOUS les administrateurs actifs.
+   * Utilisé aux points de création (devis, commande, compte) : l'événement
+   * concerne l'exploitation, pas un utilisateur en particulier.
+   *
+   * Volontairement « best effort » : une notification qui échoue ne doit
+   * JAMAIS faire échouer la création du devis ou de la commande sous-jacente.
+   */
+  async notifyAdmins(
+    type: NotificationType,
+    title: string,
+    body: string,
+    data: Record<string, unknown> = {},
+  ): Promise<number> {
+    try {
+      const admins = await this.prisma.user.findMany({
+        where: { role: { in: ["ROLE_ADMIN", "ROLE_SUPER_ADMIN"] }, isActive: true },
+        select: { id: true },
+      });
+      if (admins.length === 0) return 0;
+
+      const result = await this.prisma.notification.createMany({
+        data: admins.map((a) => ({
+          userId: a.id,
+          type,
+          title,
+          body,
+          data: data as Prisma.InputJsonValue,
+          sentAt: new Date(),
+        })),
+      });
+      return result.count;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Compteurs de non-lus par SECTION de l'admin (et non par type brut) :
+   * c'est ce que consomment les badges du menu latéral.
+   * Une seule requête groupée plutôt qu'un COUNT par section.
+   */
+  async unreadCountsBySection(userId: string): Promise<Record<NotificationSection, number>> {
+    const rows = await this.prisma.notification.groupBy({
+      by: ["type"],
+      where: { userId, readAt: null },
+      _count: { _all: true },
+    });
+
+    const counts: Record<NotificationSection, number> = {
+      devis: 0,
+      commandes: 0,
+      utilisateurs: 0,
+      stock: 0,
+    };
+    for (const row of rows) {
+      const section = SECTION_BY_TYPE[row.type];
+      if (section) counts[section] += row._count._all;
+    }
+    return counts;
+  }
+
+  /**
+   * Marque comme lues toutes les notifications non lues d'une section.
+   * Appelé quand l'admin ouvre la page correspondante — comportement « dossier
+   * de boîte mail » : on ouvre, le compteur retombe à zéro.
+   */
+  async markSectionAsRead(userId: string, section: NotificationSection) {
+    const types = TYPES_BY_SECTION[section];
+    const result = await this.prisma.notification.updateMany({
+      where: { userId, readAt: null, type: { in: types } },
+      data: { readAt: new Date() },
+    });
+    return { updated: result.count };
   }
 }

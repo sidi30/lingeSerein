@@ -31,6 +31,7 @@ export function Contact() {
       email: (form.elements.namedItem("email") as HTMLInputElement).value,
       phone: (form.elements.namedItem("phone") as HTMLInputElement).value,
       message: (form.elements.namedItem("message") as HTMLTextAreaElement).value,
+      website: (form.elements.namedItem("website") as HTMLInputElement).value, // honeypot
     };
 
     try {
@@ -258,6 +259,17 @@ export function Contact() {
                     Plus votre description est précise, plus notre devis sera juste.
                   </p>
                 </div>
+
+                {/* Honeypot anti-bot — invisible pour l'humain, rempli par les robots.
+                    Le mailer répond 200 sans envoyer si ce champ est renseigné. */}
+                <input
+                  type="text"
+                  name="website"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  aria-hidden
+                  className="hidden"
+                />
 
                 <label className="flex items-start gap-3 mb-6 text-sm text-gray-800 cursor-pointer">
                   <input

@@ -118,6 +118,10 @@ enum InvoiceStatus {
 }
 
 enum NotificationType {
+  // Activité commerciale — alimente les badges "non lus" de l'admin
+  QUOTE_CREATED
+  ORDER_CREATED
+  USER_CREATED
   STOCK_LOW
   DELIVERY_REMINDER
   DELIVERY_CONFIRMED

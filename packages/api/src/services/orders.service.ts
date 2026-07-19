@@ -2,9 +2,9 @@ import type { PrismaClient, Prisma } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 import { NotFoundError, AppError, UnprocessableEntityError } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
+import { NotificationsService } from "./notifications.service.js";
 import { ORDER_TRANSITIONS } from "@lingengo/shared";
 import type { OrderStatus } from "@lingengo/shared";
-import { NotificationsService } from "./notifications.service.js";
 import type {
   CreateOrderInput,
   ListOrdersQuery,
@@ -185,6 +185,14 @@ export class OrdersService {
       ipAddress,
       userAgent,
     });
+
+    // Badge « Commandes ». Best effort, ne peut pas faire échouer la commande.
+    await new NotificationsService(this.prisma).notifyAdmins(
+      "ORDER_CREATED",
+      `Nouvelle commande ${orderNumber}`,
+      `${items.length} article(s) — ${(totalCents / 100).toFixed(2)} €`,
+      { orderId: order.id, orderNumber, href: `/commandes/${order.id}` },
+    );
 
     return order;
   }

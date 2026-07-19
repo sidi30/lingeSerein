@@ -2,14 +2,25 @@
 
 import { useAuth } from "@/lib/auth";
 import { Sidebar } from "@/components/sidebar";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
+import { sectionForPathname, useMarkSectionRead } from "@/lib/notifications";
 
 const ADMIN_ROLES = ["ROLE_ADMIN", "ROLE_SUPER_ADMIN"];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, logout } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const markSectionRead = useMarkSectionRead();
+
+  // Ouvrir une section vide son badge — comportement « dossier de boîte mail ».
+  // Placé dans le layout : une seule implémentation pour toutes les sections,
+  // plutôt qu'un appel à recopier dans chaque page.
+  const section = user ? sectionForPathname(pathname) : null;
+  useEffect(() => {
+    if (section) markSectionRead(section);
+  }, [section, markSectionRead]);
 
   useEffect(() => {
     if (loading) return;
