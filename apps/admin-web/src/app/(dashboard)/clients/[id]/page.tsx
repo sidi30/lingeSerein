@@ -265,19 +265,27 @@ export default function ClientDetailPage() {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
 
   const saveIdentity = () => {
+    // Un champ vide doit partir en `null`, jamais en chaîne vide : le schéma
+    // valide `email` en .email(), `zoneId` en .uuid() et le type d'hébergement
+    // en enum. Envoyer "" faisait échouer l'enregistrement en 400 dès qu'un de
+    // ces champs était vide — donc TOUJOURS, pour un client sans email ni zone,
+    // c'est-à-dire exactement le client qu'on vient de rendre possible.
+    // Corollaire : c'est aussi ce qui permet enfin d'EFFACER une valeur.
+    const vide = (v: string) => (v.trim() === "" ? null : v.trim());
+
     updateMutation.mutate({
-      name: form.name,
-      companyName: form.companyName,
-      email: form.email,
-      phone: form.phone,
-      address: form.address,
-      city: form.city,
-      postalCode: form.postalCode,
-      accommodationType: form.accommodationType,
-      zoneId: form.zoneId,
-      preferredTimeSlot: form.preferredTimeSlot,
+      name: form.name.trim(),
+      companyName: vide(form.companyName),
+      email: vide(form.email),
+      phone: vide(form.phone),
+      address: vide(form.address),
+      city: vide(form.city),
+      postalCode: vide(form.postalCode),
+      accommodationType: vide(form.accommodationType),
+      zoneId: vide(form.zoneId),
+      preferredTimeSlot: vide(form.preferredTimeSlot),
       isActive: form.isActive,
-    });
+    } as Partial<EditableFields>);
   };
 
   const subscription = client.subscription;

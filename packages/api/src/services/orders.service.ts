@@ -16,7 +16,7 @@ export class OrdersService {
   constructor(private readonly prisma: PrismaClient) {}
 
   async list(query: ListOrdersQuery, userId?: string, isAdmin = false) {
-    const { page, limit, status, source, from, to } = query;
+    const { page, limit, status, source, from, to, search } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.OrderWhereInput = {
@@ -30,6 +30,17 @@ export class OrdersService {
               ...(from ? { gte: new Date(from) } : {}),
               ...(to ? { lte: new Date(to) } : {}),
             },
+          }
+        : {}),
+      // On cherche un numéro de commande OU un client (nom, établissement) :
+      // c'est ce que l'admin tape, jamais un identifiant technique.
+      ...(search
+        ? {
+            OR: [
+              { orderNumber: { contains: search, mode: "insensitive" as const } },
+              { user: { name: { contains: search, mode: "insensitive" as const } } },
+              { user: { companyName: { contains: search, mode: "insensitive" as const } } },
+            ],
           }
         : {}),
     };

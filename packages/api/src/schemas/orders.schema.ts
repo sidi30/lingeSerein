@@ -13,6 +13,9 @@ export const createOrderSchema = z.object({
 });
 
 export const listOrdersQuerySchema = z.object({
+  // La barre de recherche de l'admin envoyait `search` depuis toujours : le
+  // paramètre n'existait pas ici, il était ignoré en silence.
+  search: z.string().trim().min(1).max(200).optional(),
   status: z.enum(["PENDING", "CONFIRMED", "IN_DELIVERY", "DELIVERED", "CANCELLED"]).optional(),
   source: z.enum(["MOBILE", "QUOTE_CONVERSION", "MANUAL"]).optional(),
   from: z

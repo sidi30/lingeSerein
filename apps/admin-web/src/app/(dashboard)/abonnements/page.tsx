@@ -57,7 +57,10 @@ const statusOptions = [
   { value: "ACTIVE", label: "Actif" },
   { value: "PAUSED", label: "En pause" },
   { value: "CANCELLED", label: "Résilié" },
-  { value: "TRIAL", label: "Essai" },
+  // TRIAL n existe pas dans l enum de l API : le selectionner provoquait un
+  // 400 et la page affichait « Aucun abonnement ». PAST_DUE, lui, existait sans
+  // etre propose.
+  { value: "PAST_DUE", label: "Impayé" },
 ];
 
 const planBadgeVariant: Record<string, "info" | "default" | "warning"> = {

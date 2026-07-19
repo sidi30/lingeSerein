@@ -95,9 +95,11 @@ export default function CommandesPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["orders", page, statusFilter, search],
     queryFn: () =>
-      api.get<OrdersResponse>("/orders", {
+      // getRaw : `get` deballe deja `data`, la page lisait `.data` sur le tableau
+      // deja deballe -> undefined -> « Aucune commande » en toutes circonstances.
+      api.getRaw<OrdersResponse>("/orders", {
         page,
-        pageSize: 20,
+        limit: 20,
         status: statusFilter || undefined,
         search: search || undefined,
       }),

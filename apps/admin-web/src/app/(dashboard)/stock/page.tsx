@@ -88,7 +88,10 @@ export default function StockPage() {
 
   const { data: clientStockData, isLoading: csLoading } = useQuery({
     queryKey: ["stock", "clients"],
-    queryFn: () => api.get<ClientStockResponse>("/stock/clients"),
+    queryFn: () =>
+      // getRaw : sans ca le tableau « Stock par client » restait vide, et le
+      // selecteur de la modale d ajustement n avait aucun client a proposer.
+      api.getRaw<ClientStockResponse>("/stock/clients"),
   });
 
   const clientStock = clientStockData?.data ?? [];

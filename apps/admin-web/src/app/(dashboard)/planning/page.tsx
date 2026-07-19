@@ -85,9 +85,10 @@ export default function PlanningPage() {
   const { data: roundsData, isLoading } = useQuery({
     queryKey: ["deliveries", "rounds", weekOffset],
     queryFn: () =>
-      api.get<RoundsResponse>("/deliveries/rounds", {
-        startDate: dateKey(weekDates[0] ?? new Date()),
-        endDate: dateKey(weekDates[6] ?? new Date()),
+      // getRaw : meme piege que commandes/stock — la grille etait toujours vide.
+      api.getRaw<RoundsResponse>("/deliveries/rounds", {
+        from: dateKey(weekDates[0] ?? new Date()),
+        to: dateKey(weekDates[6] ?? new Date()),
       }),
   });
 
