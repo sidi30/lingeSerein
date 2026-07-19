@@ -184,21 +184,18 @@ export default function ClientDetailPage() {
       toast(err instanceof Error ? err.message : "Erreur lors de la mise à jour", "error"),
   });
 
-  // Abonnement : endpoints admin co-localisés sur la ressource client.
+  // Abonnement — les routes admin sont montées sous /subscriptions, PAS sous
+  // /clients/:id/subscription. Cet écran appelait la seconde forme : toutes les
+  // actions d'abonnement renvoyaient 404.
+  // Le changement de statut passe par trois routes distinctes (pause/resume/
+  // cancel), et non par un PATCH portant un champ `status`.
   const subMutation = useMutation({
     mutationFn: (
       action: { type: "link"; plan: string } | { type: "pause" | "resume" | "cancel" },
     ) =>
       action.type === "link"
-        ? api.post(`/clients/${id}/subscription`, { plan: action.plan })
-        : api.patch(`/clients/${id}/subscription`, {
-            status:
-              action.type === "pause"
-                ? "PAUSED"
-                : action.type === "resume"
-                  ? "ACTIVE"
-                  : "CANCELLED",
-          }),
+        ? api.post(`/subscriptions/clients/${id}`, { plan: action.plan })
+        : api.patch(`/subscriptions/clients/${id}/${action.type}`, {}),
     onSuccess: () => {
       toast("Abonnement mis à jour");
       setLinkSubModal(false);
