@@ -644,7 +644,7 @@ function AbonnementTab() {
           <legend className="text-xs font-semibold uppercase tracking-wider text-gray-500">
             Composition mensuelle incluse
           </legend>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className={labelCls} htmlFor="sub-kit-bain">
                 Kits Bain / mois *
@@ -681,7 +681,7 @@ function AbonnementTab() {
           <legend className="text-xs font-semibold uppercase tracking-wider text-gray-500">
             Conditions d&apos;engagement
           </legend>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className={labelCls} htmlFor="sub-engagement">
                 Engagement minimum (mois) *
@@ -747,7 +747,7 @@ export default function ReglagesPage() {
     <>
       <Header title="Réglages" />
 
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         {/* Onglets */}
         <div className="mb-6 border-b border-gray-200">
           <div

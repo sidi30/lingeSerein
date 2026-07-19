@@ -122,7 +122,7 @@ export default function PlanningPage() {
   const roundsByDate = useMemo(() => {
     const map: Record<string, Round[]> = {};
     rounds.forEach((r) => {
-      const key = (r.date.split("T")[0]) ?? "";
+      const key = r.date.split("T")[0] ?? "";
       if (!map[key]) map[key] = [];
       (map[key] as Round[]).push(r);
     });
@@ -144,10 +144,10 @@ export default function PlanningPage() {
     <>
       <Header title="Planning" />
 
-      <div className="space-y-6 p-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* Navigation semaine */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
             <Button variant="secondary" size="sm" onClick={() => setWeekOffset(weekOffset - 1)}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -169,7 +169,7 @@ export default function PlanningPage() {
 
         {/* Calendrier hebdomadaire */}
         {isLoading ? (
-          <div className="grid grid-cols-7 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
             {Array.from({ length: 7 }).map((_, i) => (
               <Skeleton key={i} className="h-40" />
             ))}
@@ -177,7 +177,9 @@ export default function PlanningPage() {
         ) : !hasAnyRounds ? (
           <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-12 text-center">
             <CalendarDays className="mx-auto h-12 w-12 text-gray-300" />
-            <h3 className="mt-4 text-sm font-semibold text-gray-900">Aucune tournée cette semaine</h3>
+            <h3 className="mt-4 text-sm font-semibold text-gray-900">
+              Aucune tournée cette semaine
+            </h3>
             <p className="mt-1 text-sm text-gray-500">
               Planifiez votre première tournée de livraison pour cette semaine.
             </p>
@@ -198,7 +200,9 @@ export default function PlanningPage() {
                     isToday ? "border-primary-300 bg-primary-50/30" : "border-gray-200 bg-white"
                   }`}
                 >
-                  <p className={`mb-2 text-xs font-semibold ${isToday ? "text-primary-600" : "text-gray-500"}`}>
+                  <p
+                    className={`mb-2 text-xs font-semibold ${isToday ? "text-primary-600" : "text-gray-500"}`}
+                  >
                     {dayNames[idx]} {date.getDate()}/{date.getMonth() + 1}
                   </p>
                   <div className="space-y-1.5">
@@ -212,7 +216,9 @@ export default function PlanningPage() {
                         className="w-full rounded-lg bg-gray-50 p-2 text-left text-xs hover:bg-gray-100"
                       >
                         <p className="font-medium text-gray-800">{r.driver}</p>
-                        <p className="text-gray-500">{r.stops.length} arrêt{r.stops.length > 1 ? "s" : ""}</p>
+                        <p className="text-gray-500">
+                          {r.stops.length} arrêt{r.stops.length > 1 ? "s" : ""}
+                        </p>
                       </button>
                     ))}
                   </div>
@@ -276,7 +282,11 @@ export default function PlanningPage() {
             <Button variant="secondary" type="button" onClick={() => setCreateOpen(false)}>
               Annuler
             </Button>
-            <Button type="submit" loading={createMutation.isPending} disabled={form.clientIds.length === 0}>
+            <Button
+              type="submit"
+              loading={createMutation.isPending}
+              disabled={form.clientIds.length === 0}
+            >
               Créer
             </Button>
           </div>
@@ -314,7 +324,10 @@ export default function PlanningPage() {
                   <p className="text-sm text-gray-400">Aucun arrêt</p>
                 ) : (
                   selectedRound.stops.map((stop) => (
-                    <div key={stop.id} className="flex items-center gap-3 rounded-lg border border-gray-100 p-3">
+                    <div
+                      key={stop.id}
+                      className="flex items-center gap-3 rounded-lg border border-gray-100 p-3"
+                    >
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">
                         {stop.order}
                       </span>

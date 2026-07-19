@@ -66,7 +66,10 @@ const planBadgeVariant: Record<string, "info" | "default" | "warning"> = {
   PRESTIGE: "warning",
 };
 
-const statusConfig: Record<string, { label: string; variant: "success" | "warning" | "danger" | "info" | "neutral" }> = {
+const statusConfig: Record<
+  string,
+  { label: string; variant: "success" | "warning" | "danger" | "info" | "neutral" }
+> = {
   ACTIVE: { label: "Actif", variant: "success" },
   PAUSED: { label: "En pause", variant: "warning" },
   CANCELLED: { label: "Résilié", variant: "danger" },
@@ -78,7 +81,11 @@ function formatPrice(cents: number): string {
 }
 
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+  return new Date(dateStr).toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function calculateMonthly(products: SubscriptionProduct[]): number {
@@ -112,7 +119,7 @@ export default function AbonnementsPage() {
     <>
       <Header title="Abonnements" />
 
-      <div className="space-y-4 p-6">
+      <div className="space-y-4 p-4 sm:p-6">
         {/* Filtres */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="w-full max-w-xs">
@@ -170,7 +177,11 @@ export default function AbonnementsPage() {
           <EmptyState
             icon={<RefreshCw className="h-12 w-12" />}
             title={hasFilters ? "Aucun abonnement trouvé" : "Aucun abonnement"}
-            description={hasFilters ? "Essayez de modifier vos filtres." : "Les abonnements de vos clients apparaîtront ici."}
+            description={
+              hasFilters
+                ? "Essayez de modifier vos filtres."
+                : "Les abonnements de vos clients apparaîtront ici."
+            }
           />
         ) : (
           <>
@@ -187,7 +198,10 @@ export default function AbonnementsPage() {
               </Thead>
               <tbody>
                 {subscriptions.map((sub) => {
-                  const status = statusConfig[sub.status] ?? { label: sub.status, variant: "neutral" as const };
+                  const status = statusConfig[sub.status] ?? {
+                    label: sub.status,
+                    variant: "neutral" as const,
+                  };
                   const monthlyCents = calculateMonthly(sub.products);
 
                   return (
@@ -199,9 +213,7 @@ export default function AbonnementsPage() {
                         </div>
                       </Td>
                       <Td>
-                        <Badge variant={planBadgeVariant[sub.plan] ?? "neutral"}>
-                          {sub.plan}
-                        </Badge>
+                        <Badge variant={planBadgeVariant[sub.plan] ?? "neutral"}>{sub.plan}</Badge>
                       </Td>
                       <Td>
                         <Badge variant={status.variant}>{status.label}</Badge>
@@ -222,7 +234,9 @@ export default function AbonnementsPage() {
                         </div>
                       </Td>
                       <Td>
-                        <span className="font-semibold text-gray-900">{formatPrice(monthlyCents)}</span>
+                        <span className="font-semibold text-gray-900">
+                          {formatPrice(monthlyCents)}
+                        </span>
                       </Td>
                     </Tr>
                   );

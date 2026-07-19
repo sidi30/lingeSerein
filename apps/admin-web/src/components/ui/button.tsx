@@ -14,7 +14,8 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles: Record<Variant, string> = {
   primary: "bg-primary-600 text-white hover:bg-primary-700 focus-visible:ring-primary-500",
-  secondary: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus-visible:ring-primary-500",
+  secondary:
+    "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus-visible:ring-primary-500",
   danger: "bg-danger-600 text-white hover:bg-danger-500 focus-visible:ring-danger-500",
   ghost: "bg-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-900",
 };
@@ -26,12 +27,16 @@ const sizeStyles: Record<Size, string> = {
 };
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ variant = "primary", size = "md", loading, disabled, className = "", children, ...props }, ref) => {
+  (
+    { variant = "primary", size = "md", loading, disabled, className = "", children, ...props },
+    ref,
+  ) => {
+    // min-h-11 : cible tactile de 44px sur mobile ; annulée dès sm pour garder la densité desktop
     return (
       <button
         ref={ref}
         disabled={disabled || loading}
-        className={`inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${variantStyles[variant]} ${sizeStyles[size]} ${className}`}
+        className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md font-medium sm:min-h-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${variantStyles[variant]} ${sizeStyles[size]} ${className}`}
         {...props}
       >
         {loading && <Loader2 className="h-4 w-4 animate-spin" />}

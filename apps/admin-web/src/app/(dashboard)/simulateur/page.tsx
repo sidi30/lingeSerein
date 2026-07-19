@@ -496,57 +496,60 @@ export default function DevisPage() {
               <div className="border-b border-gray-100 px-6 py-4">
                 <h3 className="text-sm font-semibold text-gray-900">Grille tarifaire</h3>
               </div>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-gray-50 text-gray-500">
-                    <th className="px-4 py-2.5 text-left font-medium">Gamme</th>
-                    {PALIER_LABELS.map((label, i) => (
-                      <th
-                        key={label}
-                        className={`px-3 py-2.5 text-center font-medium ${
-                          calculs.totalSets > 0 && i === calculs.palierIdx
-                            ? "bg-primary-100 text-primary-700"
-                            : ""
-                        }`}
-                      >
-                        {label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {GAMMES.map((gamme) => (
-                    <tr key={gamme.key} className="border-t border-gray-100">
-                      <td className="px-4 py-2.5 font-medium text-gray-900">{gamme.name}</td>
-                      {gamme.paliers.map((p, i) => (
-                        <td
-                          key={i}
-                          className={`px-3 py-2.5 text-center ${
+              {/* La grille a 5 colonnes de paliers : elle scrolle horizontalement sur mobile */}
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[520px] text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 text-gray-500">
+                      <th className="px-4 py-2.5 text-left font-medium">Gamme</th>
+                      {PALIER_LABELS.map((label, i) => (
+                        <th
+                          key={label}
+                          className={`px-3 py-2.5 text-center font-medium ${
                             calculs.totalSets > 0 && i === calculs.palierIdx
-                              ? "bg-primary-50 font-semibold text-primary-700"
-                              : "text-gray-600"
+                              ? "bg-primary-100 text-primary-700"
+                              : ""
                           }`}
                         >
-                          {formatEuro(p)} €
-                        </td>
+                          {label}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                  <tr className="border-t-2 border-gray-200">
-                    <td className="px-4 py-2.5 font-medium text-gray-900">Livraison</td>
-                    <td className="px-3 py-2.5 text-center text-gray-600">+5 €</td>
-                    <td className="px-3 py-2.5 text-center font-semibold text-primary-600">
-                      Offerte
-                    </td>
-                    <td className="px-3 py-2.5 text-center font-semibold text-primary-600">
-                      Offerte
-                    </td>
-                    <td className="px-3 py-2.5 text-center font-semibold text-primary-600">
-                      Offerte
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {GAMMES.map((gamme) => (
+                      <tr key={gamme.key} className="border-t border-gray-100">
+                        <td className="px-4 py-2.5 font-medium text-gray-900">{gamme.name}</td>
+                        {gamme.paliers.map((p, i) => (
+                          <td
+                            key={i}
+                            className={`px-3 py-2.5 text-center ${
+                              calculs.totalSets > 0 && i === calculs.palierIdx
+                                ? "bg-primary-50 font-semibold text-primary-700"
+                                : "text-gray-600"
+                            }`}
+                          >
+                            {formatEuro(p)} €
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                    <tr className="border-t-2 border-gray-200">
+                      <td className="px-4 py-2.5 font-medium text-gray-900">Livraison</td>
+                      <td className="px-3 py-2.5 text-center text-gray-600">+5 €</td>
+                      <td className="px-3 py-2.5 text-center font-semibold text-primary-600">
+                        Offerte
+                      </td>
+                      <td className="px-3 py-2.5 text-center font-semibold text-primary-600">
+                        Offerte
+                      </td>
+                      <td className="px-3 py-2.5 text-center font-semibold text-primary-600">
+                        Offerte
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Info coûts (visible uniquement pour l'admin, masqué à l'impression) */}

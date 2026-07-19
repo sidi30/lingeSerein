@@ -80,7 +80,10 @@ const rangeBadgeVariant: Record<string, "info" | "default" | "warning"> = {
   PRESTIGE: "warning",
 };
 
-const statusConfig: Record<string, { label: string; variant: "success" | "warning" | "danger" | "info" | "neutral" }> = {
+const statusConfig: Record<
+  string,
+  { label: string; variant: "success" | "warning" | "danger" | "info" | "neutral" }
+> = {
   PENDING: { label: "En attente", variant: "warning" },
   CONFIRMED: { label: "Confirmée", variant: "info" },
   IN_DELIVERY: { label: "En livraison", variant: "info" },
@@ -98,7 +101,17 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("fr-FR");
 }
 
-function GaugeBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+function GaugeBar({
+  label,
+  value,
+  max,
+  color,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  color: string;
+}) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   return (
     <div>
@@ -148,7 +161,7 @@ export default function ClientDetailPage() {
     return (
       <>
         <Header title="Client" />
-        <div className="space-y-6 p-6">
+        <div className="space-y-6 p-4 sm:p-6">
           <Skeleton className="h-48 w-full" />
           <Skeleton className="h-32 w-full" />
           <Skeleton className="h-64 w-full" />
@@ -161,7 +174,9 @@ export default function ClientDetailPage() {
     return (
       <>
         <Header title="Client" />
-        <div className="flex items-center justify-center p-12 text-gray-400">Client introuvable</div>
+        <div className="flex items-center justify-center p-12 text-gray-400">
+          Client introuvable
+        </div>
       </>
     );
   }
@@ -172,7 +187,7 @@ export default function ClientDetailPage() {
     <>
       <Header title={client.name} />
 
-      <div className="space-y-6 p-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* Informations client */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <Card title="Informations" className="lg:col-span-2">
@@ -297,9 +312,7 @@ export default function ClientDetailPage() {
                         </div>
                       </Td>
                       <Td>
-                        <Badge variant={s?.variant ?? "neutral"}>
-                          {s?.label ?? order.status}
-                        </Badge>
+                        <Badge variant={s?.variant ?? "neutral"}>{s?.label ?? order.status}</Badge>
                       </Td>
                       <Td>
                         <span className="font-semibold">{formatPrice(order.totalCents)}</span>

@@ -23,11 +23,11 @@ export function Pagination({
   const pages = getVisiblePages(page, totalPages);
 
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-sm text-gray-500">
         Page {page} sur {totalPages} &mdash; {total} {label}
       </p>
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center justify-center gap-1">
         <Button
           variant="secondary"
           size="sm"
@@ -47,7 +47,7 @@ export function Pagination({
             <button
               key={p}
               onClick={() => onPageChange(p as number)}
-              className={`flex h-8 min-w-8 items-center justify-center rounded-md px-2 text-sm font-medium transition-colors ${
+              className={`flex h-11 min-w-11 items-center justify-center rounded-md px-2 sm:h-8 sm:min-w-8 text-sm font-medium transition-colors ${
                 p === page ? "bg-primary-600 text-white" : "text-gray-600 hover:bg-gray-100"
               }`}
             >

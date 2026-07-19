@@ -24,13 +24,19 @@ export function Header({ title, actions }: HeaderProps) {
 
   return (
     <>
-      <header className="flex h-16 items-center justify-between border-b border-gray-200 bg-white px-6">
-        <div className="flex items-center gap-4 lg:pl-0 pl-12">
-          <h1 className="text-lg font-semibold text-gray-900">{title}</h1>
-          {actions && <div className="flex items-center gap-2">{actions}</div>}
-        </div>
+      {/* Mobile : titre + menu utilisateur sur une ligne, actions rejetées sur une 2e ligne
+          (order-last + w-full). À partir de lg tout revient sur une seule ligne de 64px. */}
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-gray-200 bg-white px-4 py-3 sm:px-6 lg:h-16 lg:flex-nowrap lg:py-0">
+        <h1 className="min-w-0 flex-1 truncate pl-12 text-lg font-semibold text-gray-900 lg:flex-none lg:pl-0">
+          {title}
+        </h1>
+        {actions && (
+          <div className="order-last flex w-full flex-wrap items-center gap-2 lg:order-none lg:w-auto lg:flex-1">
+            {actions}
+          </div>
+        )}
 
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           {/* Notification bell */}
           <button className="relative rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
             <Bell className="h-5 w-5" />

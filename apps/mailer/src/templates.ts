@@ -1,3 +1,11 @@
+/**
+ * Logo affiché en en-tête des emails : le fichier servi par la vitrine, donc
+ * exactement le même que la navbar du site. Surchargeable par env si l'asset
+ * déménage un jour (CDN dédié, bucket…) sans toucher au code.
+ */
+const LOGO_URL = process.env.LOGO_URL || "https://lingeserein.fr/images/logo_full.png";
+const LOGO_DISPLAY_WIDTH = 150;
+
 const BRAND = {
   forest: "#1B5E20",
   forestLight: "#2E7D32",
@@ -47,12 +55,18 @@ function layout(content: string): string {
       <td align="center">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
           <!-- Header -->
+          <!--
+            Bandeau CLAIR (et non vert for\u00eat comme avant) : le logo du site a un
+            texte vert fonc\u00e9, il serait illisible sur du vert. Le liser\u00e9 forest
+            en bas conserve la couleur de marque.
+            width explicite + display:block : sans \u00e7a Outlook r\u00e9serve une taille
+            arbitraire. L'alt sert de repli quand le client bloque les images.
+          -->
           <tr>
-            <td align="center" style="padding:30px 40px;background-color:${BRAND.forest};border-radius:16px 16px 0 0;">
-              <h1 style="margin:0;font-size:28px;font-weight:700;color:#ffffff;letter-spacing:1px;">
-                Linge Serein
-              </h1>
-              <p style="margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.7);letter-spacing:0.5px;">
+            <td align="center" style="padding:28px 40px 22px;background-color:#ffffff;border:1px solid #e5e7eb;border-bottom:3px solid ${BRAND.forest};border-radius:16px 16px 0 0;">
+              <img src="${LOGO_URL}" alt="Linge Serein" width="${LOGO_DISPLAY_WIDTH}"
+                   style="display:block;width:${LOGO_DISPLAY_WIDTH}px;height:auto;max-width:100%;border:0;outline:none;text-decoration:none;">
+              <p style="margin:10px 0 0;font-size:13px;color:${BRAND.gray};letter-spacing:0.5px;">
                 Votre linge, notre s\u00e9r\u00e9nit\u00e9
               </p>
             </td>

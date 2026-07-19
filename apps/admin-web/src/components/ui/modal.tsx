@@ -31,31 +31,38 @@ export function Modal({ open, onClose, title, children, className = "" }: ModalP
   if (!open) return null;
 
   return (
+    // L'overlay défile lui-même (overflow-y-auto) : sans ça, un contenu plus haut
+    // que l'écran débordait dans le vide et devenait inatteignable — body est en
+    // overflow:hidden et l'overlay est fixed, donc rien ne pouvait scroller.
+    // items-start sur mobile (la modale part du haut et on déroule), recentré
+    // dès sm où la hauteur ne manque plus.
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 animate-in fade-in"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/40 p-4 animate-in fade-in sm:items-center"
       role="presentation"
       onClick={(e) => {
         if (e.target === overlayRef.current) onClose();
       }}
     >
+      {/* max-h + flex-col : l'en-tête reste visible, seul le corps défile. */}
       <div
-        className={`w-full max-w-lg rounded-xl bg-white shadow-xl ${className}`}
+        className={`my-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col rounded-xl bg-white shadow-xl ${className}`}
         role="dialog"
         aria-modal="true"
       >
         {title && (
-          <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
             <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
             <button
               onClick={onClose}
-              className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              aria-label="Fermer"
+              className="-m-1 rounded-md p-3 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
         )}
-        <div className="p-6">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">{children}</div>
       </div>
     </div>
   );

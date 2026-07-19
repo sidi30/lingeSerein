@@ -92,3 +92,30 @@ test("devisClientConfirmationEmail échappe le nom et n'expose aucun détail", (
   // Le visiteur ne doit voir aucun montant/ligne de devis.
   assert.ok(!html.includes("Total TTC"), "aucun détail de devis dans la confirmation visiteur");
 });
+
+// Le logo est servi par la vitrine. Ce test verrouille sa présence dans les 5
+// emails, avec un alt (repli quand le client bloque les images distantes) et une
+// URL absolue en https — une URL relative ne veut rien dire dans un email.
+test("tous les emails affichent le logo du site avec un alt et une URL absolue", () => {
+  const htmls = [
+    notificationEmail(xss),
+    confirmationEmail(xss),
+    devisClientConfirmationEmail("Alice"),
+    devisNotificationEmail({
+      name: "Alice",
+      company: "Hotel Test",
+      email: "a@test.fr",
+      phone: "0102030405",
+      lignes: [{ designation: "Kit Bain", qty: 2, unitCents: 1200 }],
+      livraisonCents: 0,
+    }),
+  ];
+
+  for (const html of htmls) {
+    assert.ok(
+      html.includes('src="https://lingeserein.fr/images/logo_full.png"'),
+      "logo absent ou URL inattendue",
+    );
+    assert.ok(html.includes('alt="Linge Serein"'), "alt manquant (repli images bloquées)");
+  }
+});

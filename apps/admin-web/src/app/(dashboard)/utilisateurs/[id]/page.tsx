@@ -233,7 +233,7 @@ export default function UtilisateurDetailPage() {
     return (
       <>
         <Header title="Utilisateur" />
-        <div className="space-y-6 p-6">
+        <div className="space-y-6 p-4 sm:p-6">
           <Skeleton className="h-32 w-full" />
           <Skeleton className="h-48 w-full" />
         </div>

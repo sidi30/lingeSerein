@@ -251,7 +251,7 @@ function ProductModal({ open, product, onClose }: ProductModalProps) {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={labelCls} htmlFor="prod-kind">
               Type *
@@ -277,7 +277,7 @@ function ProductModal({ open, product, onClose }: ProductModalProps) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={labelCls} htmlFor="prod-price">
               Prix (€) *
@@ -467,7 +467,7 @@ export default function ProduitsPage() {
     <>
       <Header title="Produits" />
 
-      <div className="space-y-6 p-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* Barre d'actions */}
         <div className="flex items-center justify-between">
           <p className="text-sm text-gray-500">

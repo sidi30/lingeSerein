@@ -93,7 +93,7 @@ export default function ClientsPage() {
     <>
       <Header title="Clients" />
 
-      <div className="space-y-4 p-6">
+      <div className="space-y-4 p-4 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="w-full max-w-xs">
             <SearchInput
@@ -120,7 +120,11 @@ export default function ClientsPage() {
           <EmptyState
             icon={<Users className="h-12 w-12" />}
             title={search ? "Aucun client trouvé" : "Aucun client enregistré"}
-            description={search ? `Aucun résultat pour « ${search} »` : "Les clients apparaîtront ici après leur inscription."}
+            description={
+              search
+                ? `Aucun résultat pour « ${search} »`
+                : "Les clients apparaîtront ici après leur inscription."
+            }
           />
         ) : (
           <>
@@ -140,7 +144,8 @@ export default function ClientsPage() {
                   const primaryStock = client.stocks.length > 0 ? client.stocks[0] : null;
                   const cleanSets = primaryStock?.cleanSets ?? 0;
                   const totalInCirculation = primaryStock?.totalInCirculation ?? 0;
-                  const stockPct = totalInCirculation > 0 ? Math.round((cleanSets / totalInCirculation) * 100) : 0;
+                  const stockPct =
+                    totalInCirculation > 0 ? Math.round((cleanSets / totalInCirculation) * 100) : 0;
 
                   return (
                     <Tr key={client.id} onClick={() => router.push(`/clients/${client.id}`)}>
@@ -152,15 +157,20 @@ export default function ClientsPage() {
                           <span className="font-medium text-gray-900">{client.name}</span>
                         </div>
                       </Td>
-                      <Td><span className="text-gray-600">{client.email}</span></Td>
+                      <Td>
+                        <span className="text-gray-600">{client.email}</span>
+                      </Td>
                       <Td>
                         <span className="text-sm text-gray-600">
-                          {accommodationLabels[client.accommodationType] ?? client.accommodationType}
+                          {accommodationLabels[client.accommodationType] ??
+                            client.accommodationType}
                         </span>
                       </Td>
                       <Td>
                         {primaryStock ? (
-                          <Badge variant={rangeBadgeVariant[primaryStock.productRange] ?? "neutral"}>
+                          <Badge
+                            variant={rangeBadgeVariant[primaryStock.productRange] ?? "neutral"}
+                          >
                             {primaryStock.productRange}
                           </Badge>
                         ) : (
@@ -175,7 +185,9 @@ export default function ClientsPage() {
                               style={{ width: `${Math.min(stockPct, 100)}%` }}
                             />
                           </div>
-                          <span className={`text-xs font-semibold ${stockLevelTextColor(cleanSets, totalInCirculation)}`}>
+                          <span
+                            className={`text-xs font-semibold ${stockLevelTextColor(cleanSets, totalInCirculation)}`}
+                          >
                             {stockPct}%
                           </span>
                         </div>
@@ -191,7 +203,13 @@ export default function ClientsPage() {
               </tbody>
             </Table>
 
-            <Pagination page={page} totalPages={totalPages} total={pagination?.total ?? 0} label="clients" onPageChange={setPage} />
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              total={pagination?.total ?? 0}
+              label="clients"
+              onPageChange={setPage}
+            />
           </>
         )}
       </div>

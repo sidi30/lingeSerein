@@ -48,14 +48,16 @@ export function ConfirmDialog({
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      // overflow-y-auto : une description longue rendait les boutons Confirmer /
+      // Annuler inatteignables sur petit écran (body en overflow:hidden, overlay fixed).
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/40 p-4 sm:items-center"
       onClick={(e) => {
         if (e.target === overlayRef.current) onClose();
       }}
       role="presentation"
     >
       <div
-        className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl"
+        className="my-auto w-full max-w-sm rounded-xl bg-white p-6 shadow-xl"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
@@ -68,9 +70,13 @@ export function ConfirmDialog({
             </div>
           )}
           <div>
-            <h3 id="confirm-title" className="text-base font-semibold text-gray-900">{title}</h3>
+            <h3 id="confirm-title" className="text-base font-semibold text-gray-900">
+              {title}
+            </h3>
             {description && (
-              <p id="confirm-desc" className="mt-1 text-sm text-gray-500">{description}</p>
+              <p id="confirm-desc" className="mt-1 text-sm text-gray-500">
+                {description}
+              </p>
             )}
           </div>
         </div>
@@ -78,7 +84,12 @@ export function ConfirmDialog({
           <Button variant="secondary" size="sm" onClick={onClose} disabled={loading}>
             {cancelLabel}
           </Button>
-          <Button variant={variant === "danger" ? "danger" : "primary"} size="sm" onClick={onConfirm} loading={loading}>
+          <Button
+            variant={variant === "danger" ? "danger" : "primary"}
+            size="sm"
+            onClick={onConfirm}
+            loading={loading}
+          >
             {confirmLabel}
           </Button>
         </div>

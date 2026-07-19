@@ -94,7 +94,12 @@ export default function StockPage() {
   const clientStock = clientStockData?.data ?? [];
 
   const [adjustOpen, setAdjustOpen] = useState(false);
-  const [adjustForm, setAdjustForm] = useState({ userId: "", type: "clean", quantity: 0, reason: "" });
+  const [adjustForm, setAdjustForm] = useState({
+    userId: "",
+    type: "clean",
+    quantity: 0,
+    reason: "",
+  });
 
   const adjustMutation = useMutation({
     mutationFn: () => api.post("/stock/adjustment", adjustForm),
@@ -134,7 +139,7 @@ export default function StockPage() {
     <>
       <Header title="Stock" />
 
-      <div className="space-y-6 p-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* Stock opérateur */}
         <div>
           <h2 className="mb-4 text-base font-semibold text-gray-900">Stock opérateur par gamme</h2>
@@ -145,7 +150,10 @@ export default function StockPage() {
               ))}
             </div>
           ) : (operatorStock ?? []).length === 0 ? (
-            <EmptyState title="Aucun stock opérateur" description="Le stock sera visible après les premières livraisons." />
+            <EmptyState
+              title="Aucun stock opérateur"
+              description="Le stock sera visible après les premières livraisons."
+            />
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {(operatorStock ?? []).map((s) => {
@@ -161,7 +169,12 @@ export default function StockPage() {
                     }
                   >
                     <div className="space-y-3">
-                      {progressBar("Propres disponibles", s.cleanAvailable, total, "bg-success-500")}
+                      {progressBar(
+                        "Propres disponibles",
+                        s.cleanAvailable,
+                        total,
+                        "bg-success-500",
+                      )}
                       {progressBar("Sales en attente", s.dirtyPending, total, "bg-warning-500")}
                       {progressBar("En circulation", s.inCirculation, total, "bg-primary-500")}
                       {progressBar("Retirés", s.retired, total, "bg-gray-400")}
@@ -206,9 +219,10 @@ export default function StockPage() {
               {clientStock.map((cs) =>
                 cs.stocks.length > 0 ? (
                   cs.stocks.map((stock) => {
-                    const pct = stock.totalInCirculation > 0
-                      ? Math.round((stock.cleanSets / stock.totalInCirculation) * 100)
-                      : 0;
+                    const pct =
+                      stock.totalInCirculation > 0
+                        ? Math.round((stock.cleanSets / stock.totalInCirculation) * 100)
+                        : 0;
                     return (
                       <Tr key={stock.id}>
                         <Td className="font-medium">{cs.name}</Td>
@@ -235,7 +249,9 @@ export default function StockPage() {
                                 style={{ width: `${Math.min(pct, 100)}%` }}
                               />
                             </div>
-                            <span className={`text-xs font-semibold ${stockRatioTextColor(stock.cleanSets, stock.totalInCirculation)}`}>
+                            <span
+                              className={`text-xs font-semibold ${stockRatioTextColor(stock.cleanSets, stock.totalInCirculation)}`}
+                            >
                               {pct}%
                             </span>
                           </div>
@@ -277,7 +293,7 @@ export default function StockPage() {
             onChange={(e) => setAdjustForm({ ...adjustForm, userId: e.target.value })}
             required
           />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Select
               label="Type"
               options={adjustTypeOptions}
@@ -288,7 +304,9 @@ export default function StockPage() {
               label="Quantité (+/-)"
               type="number"
               value={adjustForm.quantity}
-              onChange={(e) => setAdjustForm({ ...adjustForm, quantity: parseInt(e.target.value) || 0 })}
+              onChange={(e) =>
+                setAdjustForm({ ...adjustForm, quantity: parseInt(e.target.value) || 0 })
+              }
               required
             />
           </div>

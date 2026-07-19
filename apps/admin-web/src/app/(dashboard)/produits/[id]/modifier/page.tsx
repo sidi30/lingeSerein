@@ -168,7 +168,7 @@ export default function ModifierProduitPage() {
     <>
       <Header title={`Modifier — ${product.name}`} />
 
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         {/* Fil d'Ariane */}
         <div className="mb-6 flex items-center gap-2 text-sm text-gray-500">
           <Link href="/produits" className="hover:text-primary-600 flex items-center gap-1">
@@ -226,7 +226,7 @@ export default function ModifierProduitPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className={labelCls} htmlFor="edit-kind">
                     Type *
@@ -252,7 +252,7 @@ export default function ModifierProduitPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className={labelCls} htmlFor="edit-price">
                     Prix (€) *

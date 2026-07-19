@@ -138,19 +138,31 @@ export default function DevisDetailPage() {
     },
   });
 
-  // Téléchargement PDF
+  // Téléchargement PDF.
+  // try/catch obligatoire : sans lui, un échec de génération rejetait la promesse
+  // dans le vide — le bouton semblait simplement mort, sans le moindre message.
   const handlePdf = async () => {
     if (!quote) return;
-    const { downloadDevisPdf } = await import("@lingengo/ui/devis-pdf");
-    const data = quoteToDevisData(quote);
-    await downloadDevisPdf(data);
+    try {
+      const { downloadDevisPdf } = await import("@lingengo/ui/devis-pdf");
+      const data = quoteToDevisData(quote);
+      await downloadDevisPdf(data);
+    } catch (err) {
+      console.error("Génération du PDF de devis échouée", err);
+      toast(
+        err instanceof Error
+          ? `PDF impossible à générer : ${err.message}`
+          : "PDF impossible à générer",
+        "error",
+      );
+    }
   };
 
   if (isLoading) {
     return (
       <>
         <Header title="Devis" />
-        <div className="space-y-6 p-6">
+        <div className="space-y-6 p-4 sm:p-6">
           <Skeleton className="h-32 w-full" />
           <Skeleton className="h-64 w-full" />
         </div>
@@ -232,7 +244,7 @@ export default function DevisDetailPage() {
         }
       />
 
-      <div className="space-y-6 p-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* Statut actuel + transitions */}
         <div className="flex flex-wrap items-center gap-4 rounded-xl border border-gray-200 bg-white p-4">
           <div className="flex items-center gap-2">
@@ -445,7 +457,7 @@ export default function DevisDetailPage() {
               Mapping lignes → produits catalogue
             </p>
             {quote.lignes.map((l) => (
-              <div key={l.id} className="grid grid-cols-2 gap-3 items-center">
+              <div key={l.id} className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-center">
                 <div>
                   <p className="text-sm font-medium text-gray-900">{l.designation}</p>
                   <p className="text-xs text-gray-500">

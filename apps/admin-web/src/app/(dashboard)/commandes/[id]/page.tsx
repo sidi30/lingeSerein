@@ -97,7 +97,7 @@ export default function CommandeDetailPage() {
     return (
       <>
         <Header title="Commande" />
-        <div className="space-y-6 p-6">
+        <div className="space-y-6 p-4 sm:p-6">
           <Skeleton className="h-24 w-full" />
           <Skeleton className="h-40 w-full" />
           <Skeleton className="h-64 w-full" />
@@ -149,7 +149,7 @@ export default function CommandeDetailPage() {
         }
       />
 
-      <div className="space-y-6 p-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* Statut */}
         <div className="flex flex-wrap items-center gap-4 rounded-xl border border-gray-200 bg-white p-4">
           <div className="flex items-center gap-2">

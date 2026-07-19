@@ -9,7 +9,15 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SkeletonCard, Skeleton } from "@/components/ui/skeleton";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import Link from "next/link";
 import {
   CircleDollarSign,
@@ -48,10 +56,30 @@ interface Alert {
 }
 
 const quickActions = [
-  { label: "Nouvelle commande", href: "/commandes", icon: <Plus className="h-4 w-4" />, color: "bg-primary-50 text-primary-600" },
-  { label: "Voir les clients", href: "/clients", icon: <Users className="h-4 w-4" />, color: "bg-success-50 text-success-600" },
-  { label: "Planning", href: "/planning", icon: <CalendarDays className="h-4 w-4" />, color: "bg-warning-50 text-warning-600" },
-  { label: "Gérer le stock", href: "/stock", icon: <Database className="h-4 w-4" />, color: "bg-primary-50 text-primary-600" },
+  {
+    label: "Nouvelle commande",
+    href: "/commandes",
+    icon: <Plus className="h-4 w-4" />,
+    color: "bg-primary-50 text-primary-600",
+  },
+  {
+    label: "Voir les clients",
+    href: "/clients",
+    icon: <Users className="h-4 w-4" />,
+    color: "bg-success-50 text-success-600",
+  },
+  {
+    label: "Planning",
+    href: "/planning",
+    icon: <CalendarDays className="h-4 w-4" />,
+    color: "bg-warning-50 text-warning-600",
+  },
+  {
+    label: "Gérer le stock",
+    href: "/stock",
+    icon: <Database className="h-4 w-4" />,
+    color: "bg-primary-50 text-primary-600",
+  },
 ];
 
 export default function DashboardPage() {
@@ -75,9 +103,12 @@ export default function DashboardPage() {
   const formatCurrency = (cents: number) =>
     new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(cents / 100);
 
-  const revenueChange = kpis && kpis.revenuePrevWeekCents > 0
-    ? Math.round(((kpis.revenueCents - kpis.revenuePrevWeekCents) / kpis.revenuePrevWeekCents) * 100)
-    : null;
+  const revenueChange =
+    kpis && kpis.revenuePrevWeekCents > 0
+      ? Math.round(
+          ((kpis.revenueCents - kpis.revenuePrevWeekCents) / kpis.revenuePrevWeekCents) * 100,
+        )
+      : null;
 
   const greeting = getGreeting();
 
@@ -85,7 +116,7 @@ export default function DashboardPage() {
     <>
       <Header title="Tableau de bord" />
 
-      <div className="space-y-6 p-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* Welcome + Quick actions */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -119,7 +150,11 @@ export default function DashboardPage() {
               <StatCard
                 label="Chiffre d'affaires"
                 value={formatCurrency(kpis.revenueCents)}
-                trend={revenueChange !== null ? { value: revenueChange, label: "vs sem. préc." } : undefined}
+                trend={
+                  revenueChange !== null
+                    ? { value: revenueChange, label: "vs sem. préc." }
+                    : undefined
+                }
                 icon={<CircleDollarSign className="h-5 w-5" />}
               />
               <StatCard
@@ -167,7 +202,12 @@ export default function DashboardPage() {
               <Skeleton className="h-72 w-full" />
             ) : (
               <ResponsiveContainer width="100%" height={288}>
-                <AreaChart data={(chartData ?? []).map(p => ({ month: p.month, revenue: p.revenueCents / 100 }))}>
+                <AreaChart
+                  data={(chartData ?? []).map((p) => ({
+                    month: p.month,
+                    revenue: p.revenueCents / 100,
+                  }))}
+                >
                   <defs>
                     <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#1B5E20" stopOpacity={0.15} />
@@ -176,12 +216,29 @@ export default function DashboardPage() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="month" tick={{ fontSize: 12 }} stroke="#9ca3af" />
-                  <YAxis tick={{ fontSize: 12 }} stroke="#9ca3af" tickFormatter={(v: number) => `${v}\u00A0\u20AC`} />
-                  <Tooltip
-                    formatter={(value: number) => [`${value.toFixed(2)}\u00A0\u20AC`, "Chiffre d'affaires"]}
-                    contentStyle={{ borderRadius: "8px", border: "1px solid #e5e7eb", fontSize: "13px" }}
+                  <YAxis
+                    tick={{ fontSize: 12 }}
+                    stroke="#9ca3af"
+                    tickFormatter={(v: number) => `${v}\u00A0\u20AC`}
                   />
-                  <Area type="monotone" dataKey="revenue" stroke="#1B5E20" strokeWidth={2} fill="url(#colorRevenue)" />
+                  <Tooltip
+                    formatter={(value: number) => [
+                      `${value.toFixed(2)}\u00A0\u20AC`,
+                      "Chiffre d'affaires",
+                    ]}
+                    contentStyle={{
+                      borderRadius: "8px",
+                      border: "1px solid #e5e7eb",
+                      fontSize: "13px",
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="revenue"
+                    stroke="#1B5E20"
+                    strokeWidth={2}
+                    fill="url(#colorRevenue)"
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             )}

@@ -54,7 +54,10 @@ const statusOptions = [
   { value: "CANCELLED", label: "Annulée" },
 ];
 
-const statusConfig: Record<OrderStatus, { label: string; variant: "warning" | "info" | "default" | "success" | "danger" }> = {
+const statusConfig: Record<
+  OrderStatus,
+  { label: string; variant: "warning" | "info" | "default" | "success" | "danger" }
+> = {
   PENDING: { label: "En attente", variant: "warning" },
   CONFIRMED: { label: "Confirmée", variant: "info" },
   IN_DELIVERY: { label: "En livraison", variant: "default" },
@@ -112,25 +115,41 @@ export default function CommandesPage() {
     <>
       <Header title="Commandes" />
 
-      <div className="space-y-4 p-6">
+      <div className="space-y-4 p-4 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="w-full max-w-xs">
             <SearchInput
               placeholder="N° commande ou client..."
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              onClear={() => { setSearch(""); setPage(1); }}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              onClear={() => {
+                setSearch("");
+                setPage(1);
+              }}
             />
           </div>
           <div className="w-44">
             <Select
               options={statusOptions}
               value={statusFilter}
-              onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
             />
           </div>
           {(search || statusFilter) && (
-            <button onClick={() => { setSearch(""); setStatusFilter(""); setPage(1); }} className="text-xs text-primary-600 hover:underline">
+            <button
+              onClick={() => {
+                setSearch("");
+                setStatusFilter("");
+                setPage(1);
+              }}
+              className="text-xs text-primary-600 hover:underline"
+            >
               Réinitialiser les filtres
             </button>
           )}
@@ -142,7 +161,11 @@ export default function CommandesPage() {
           <EmptyState
             icon={<ClipboardList className="h-12 w-12" />}
             title={search || statusFilter ? "Aucune commande trouvée" : "Aucune commande"}
-            description={search || statusFilter ? "Essayez de modifier vos filtres." : "Les commandes de vos clients apparaîtront ici."}
+            description={
+              search || statusFilter
+                ? "Essayez de modifier vos filtres."
+                : "Les commandes de vos clients apparaîtront ici."
+            }
           />
         ) : (
           <>
@@ -182,15 +205,29 @@ export default function CommandesPage() {
                       <Td>
                         <div className="space-y-0.5">
                           {order.items.map((item) => (
-                            <p key={item.id} className="text-xs text-gray-600">{item.quantity}x {item.product.name}</p>
+                            <p key={item.id} className="text-xs text-gray-600">
+                              {item.quantity}x {item.product.name}
+                            </p>
                           ))}
                         </div>
                       </Td>
-                      <Td><span className="font-semibold text-gray-900">{formatPrice(order.totalCents)}</span></Td>
-                      <Td><span className="text-sm">{formatDate(order.deliveryDate)}</span></Td>
-                      <Td><span className="text-xs text-gray-500">{order.timeSlot}</span></Td>
                       <Td>
-                        {status ? <Badge variant={status.variant}>{status.label}</Badge> : <Badge variant="neutral">{order.status}</Badge>}
+                        <span className="font-semibold text-gray-900">
+                          {formatPrice(order.totalCents)}
+                        </span>
+                      </Td>
+                      <Td>
+                        <span className="text-sm">{formatDate(order.deliveryDate)}</span>
+                      </Td>
+                      <Td>
+                        <span className="text-xs text-gray-500">{order.timeSlot}</span>
+                      </Td>
+                      <Td>
+                        {status ? (
+                          <Badge variant={status.variant}>{status.label}</Badge>
+                        ) : (
+                          <Badge variant="neutral">{order.status}</Badge>
+                        )}
                       </Td>
                       <Td>
                         {nextStatus && nextLabel && (
@@ -198,7 +235,9 @@ export default function CommandesPage() {
                             variant="ghost"
                             size="sm"
                             loading={statusMutation.isPending}
-                            onClick={() => statusMutation.mutate({ id: order.id, status: nextStatus })}
+                            onClick={() =>
+                              statusMutation.mutate({ id: order.id, status: nextStatus })
+                            }
                           >
                             <ArrowRight className="h-3.5 w-3.5" />
                             {nextLabel}
@@ -211,7 +250,13 @@ export default function CommandesPage() {
               </tbody>
             </Table>
 
-            <Pagination page={page} totalPages={totalPages} total={pagination?.total ?? 0} label="commandes" onPageChange={setPage} />
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              total={pagination?.total ?? 0}
+              label="commandes"
+              onPageChange={setPage}
+            />
           </>
         )}
       </div>
