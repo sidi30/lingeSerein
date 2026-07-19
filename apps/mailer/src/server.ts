@@ -3,7 +3,12 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import nodemailer from "nodemailer";
 import { z } from "zod";
-import { confirmationEmail, notificationEmail } from "./templates.js";
+import {
+  confirmationEmail,
+  notificationEmail,
+  devisNotificationEmail,
+  devisClientConfirmationEmail,
+} from "./templates.js";
 import { addQuoteRequest, deleteQuoteRequest, listQuoteRequests, setQuoteStatus } from "./store.js";
 import { renderInbox, requireBasicAuth } from "./inbox.js";
 
@@ -52,6 +57,40 @@ const contactSchema = z
       .max(2000)
       .refine(noControlCharsExceptNewline, "Caractères invalides"),
     // Honeypot anti-bot : champ invisible côté client, doit rester vide.
+    website: z.string().max(0).optional(),
+  })
+  .strict();
+
+// ─── Schéma du formulaire de devis structuré (vitrine → /api/devis) ───
+// Reprend les mêmes gardes anti-injection d'en-têtes que contactSchema.
+const devisLineSchema = z
+  .object({
+    designation: z.string().min(1).max(300).refine(noControlChars, "Caractères invalides"),
+    qty: z.number().int().min(1),
+    unitCents: z.number().int().min(0),
+  })
+  .strict();
+
+const devisSchema = z
+  .object({
+    name: z.string().min(2).max(100).refine(noControlChars, "Caractères invalides"),
+    company: z.string().min(2).max(200).refine(noControlChars, "Caractères invalides"),
+    email: z.string().email().max(254),
+    phone: z
+      .string()
+      .min(8)
+      .max(20)
+      .regex(/^[+()\d\s.-]+$/, "Numéro de téléphone invalide"),
+    note: z
+      .string()
+      .max(2000)
+      .refine(noControlCharsExceptNewline, "Caractères invalides")
+      .optional(),
+    zone: z.string().max(100).refine(noControlChars, "Caractères invalides").optional(),
+    lignes: z.array(devisLineSchema).min(1),
+    livraisonCents: z.number().int().min(0).default(0),
+    recap: z.string().max(4000).refine(noControlCharsExceptNewline, "Caractères invalides"),
+    // Honeypot anti-bot : doit rester vide.
     website: z.string().max(0).optional(),
   })
   .strict();
@@ -210,6 +249,143 @@ app.post(
       });
     } catch (err) {
       app.log.error({ err }, "Échec de l'envoi de la confirmation client");
+    }
+
+    return reply.status(200).send({ message: "Demande envoyée avec succès" });
+  },
+);
+
+// ─── Devis structuré — orchestration création API + emails ───
+// La vitrine POST ici son formulaire de devis détaillé. Ce endpoint :
+//   (a) persiste un lead de secours (JSONL) — jamais de perte,
+//   (b) crée le vrai devis via l'API interne (best-effort),
+//   (c) notifie le propriétaire (détail complet du devis),
+//   (d) confirme au visiteur (SANS détail, simple accusé de réception).
+// Toujours 200 après validation : les étapes b/c/d sont « best effort ».
+app.post(
+  "/api/devis",
+  {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: "15 minutes",
+      },
+    },
+  },
+  async (request, reply) => {
+    const result = devisSchema.safeParse(request.body);
+
+    if (!result.success) {
+      return reply.status(400).send({
+        error: "Données invalides",
+        details: result.error.flatten().fieldErrors,
+      });
+    }
+
+    const data = result.data;
+
+    // Honeypot rempli => bot. 200 sans effet (aucun indice à l'attaquant).
+    if (data.website && data.website.length > 0) {
+      return reply.status(200).send({ message: "Demande envoyée avec succès" });
+    }
+
+    // Défense en profondeur : neutralise tout CR/LF résiduel dans le sujet.
+    const safeCompany = data.company.replace(/[\r\n]+/g, " ").trim();
+
+    // (a) Persiste un lead de secours AVANT tout appel réseau : aucun lead perdu
+    // même si l'API interne et/ou le SMTP échouent.
+    try {
+      addQuoteRequest({
+        name: data.name,
+        company: data.company,
+        email: data.email,
+        phone: data.phone,
+        message: data.recap,
+        ip: request.ip,
+      });
+    } catch (err) {
+      app.log.error({ err }, "Échec de la persistance de la demande de devis web");
+    }
+
+    // (b) Crée le vrai devis côté API interne (serveur-à-serveur). Best-effort :
+    // un échec ne casse jamais la réponse — le lead est déjà persisté et les
+    // emails partent quand même (le propriétaire saisira le devis à la main).
+    let created: { id?: string; numero?: string; totalTTC?: number } = {};
+    try {
+      const apiBase = process.env.INTERNAL_API_URL ?? "http://ls-api:3001";
+      const notes =
+        `\u{1F310} Demande web${data.zone ? " — zone " + data.zone : ""}\n\n` +
+        data.recap +
+        (data.note ? "\n\nMessage du client:\n" + data.note : "");
+
+      const res = await fetch(`${apiBase}/api/v1/quotes/public`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-secret": process.env.INTERNAL_INTAKE_SECRET ?? "",
+        },
+        body: JSON.stringify({
+          clientNom: data.name,
+          clientEmail: data.email,
+          clientTel: data.phone,
+          clientAdresse: data.zone || data.company,
+          livraisonCents: data.livraisonCents,
+          notes,
+          lignes: data.lignes.map((l, i) => ({ ...l, position: i })),
+        }),
+      });
+
+      if (res.ok) {
+        const json = (await res.json()) as {
+          data?: { id?: string; numero?: string; totals?: { totalTTC?: number } };
+        };
+        created = {
+          id: json.data?.id,
+          numero: json.data?.numero,
+          totalTTC: json.data?.totals?.totalTTC,
+        };
+      } else {
+        app.log.error({ status: res.status }, "L'API interne a rejeté la création du devis");
+      }
+    } catch (err) {
+      app.log.error({ err }, "Échec de l'appel à l'API interne de création du devis");
+    }
+
+    // (c) Notification propriétaire — détail complet du devis. Best-effort.
+    try {
+      await transporter.sendMail({
+        from: `"Linge Serein" <${GMAIL_USER}>`,
+        to: GMAIL_USER,
+        replyTo: data.email,
+        subject: `Nouveau devis web — ${safeCompany}`,
+        html: devisNotificationEmail({
+          name: data.name,
+          company: data.company,
+          email: data.email,
+          phone: data.phone,
+          zone: data.zone,
+          note: data.note,
+          lignes: data.lignes,
+          livraisonCents: data.livraisonCents,
+          numero: created.numero,
+          quoteId: created.id,
+          totalTTC: created.totalTTC,
+        }),
+      });
+    } catch (err) {
+      app.log.error({ err }, "Échec de l'envoi de la notification devis (propriétaire)");
+    }
+
+    // (d) Confirmation visiteur — SANS aucun détail du devis. Best-effort.
+    try {
+      await transporter.sendMail({
+        from: `"Linge Serein" <${GMAIL_USER}>`,
+        to: data.email,
+        subject: "Linge Serein — votre demande de devis",
+        html: devisClientConfirmationEmail(data.name),
+      });
+    } catch (err) {
+      app.log.error({ err }, "Échec de l'envoi de la confirmation devis (visiteur)");
     }
 
     return reply.status(200).send({ message: "Demande envoyée avec succès" });

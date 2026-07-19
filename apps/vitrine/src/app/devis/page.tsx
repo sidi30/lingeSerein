@@ -704,7 +704,16 @@ function DevisPageInner() {
 
               <div className="space-y-2">
                 {calc.lignes.length > 0 ? (
-                  <DevisRequest recap={recap} />
+                  <DevisRequest
+                    recap={recap}
+                    lignes={calc.lignes.map((l) => ({
+                      designation: l.name,
+                      qty: l.qty,
+                      unitCents: Math.round(l.total / Math.max(1, l.qty)),
+                    }))}
+                    livraisonCents={calc.livraisonFrais}
+                    zone={zone.name}
+                  />
                 ) : (
                   <a
                     href="/#contact"

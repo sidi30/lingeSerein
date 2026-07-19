@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
 import { Playfair_Display, Inter } from "next/font/google";
+import { GoogleAnalytics } from "@next/third-parties/google";
 import { ScrollProgress } from "@/components/scroll-progress";
 import { SectionDots } from "@/components/section-dots";
 import { CATALOG_DEFAULTS, SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
 import "./globals.css";
+
+// Analytics & vérification Search Console — INLINÉS AU BUILD (export statique).
+// Inactifs par défaut : aucun script GA / meta GSC émis si les variables ne sont pas définies
+// au moment du `next build`.
+const GA_ID = process.env.NEXT_PUBLIC_GA_ID;
 
 // NOTE (Option A, ADR-V2-005) : les prix du JSON-LD sont dérivés de @lingengo/shared
 // (source de vérité de seed). Désynchro possible avec la DB en production — assumée en V1.
@@ -80,8 +86,11 @@ export const metadata: Metadata = {
       "max-video-preview": -1,
     },
   },
-  // TODO: coller le code fourni par Google Search Console après vérification
-  // verification: { google: "xxxxxxxxxxxxxxxxxxxxxxxx" },
+  // Vérification Google Search Console : émet <meta name="google-site-verification">
+  // au build si NEXT_PUBLIC_GSC_VERIFICATION est défini, sinon absente.
+  verification: process.env.NEXT_PUBLIC_GSC_VERIFICATION
+    ? { google: process.env.NEXT_PUBLIC_GSC_VERIFICATION }
+    : undefined,
 };
 
 // Catalogue d'offres structuré : permet aux IA et à Google d'extraire l'offre
@@ -381,6 +390,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ScrollProgress />
         <SectionDots />
         {children}
+        {GA_ID ? <GoogleAnalytics gaId={GA_ID} /> : null}
       </body>
     </html>
   );

@@ -20,6 +20,7 @@ import notificationRoutes from "./routes/notifications/index.js";
 import clientRoutes from "./routes/clients/index.js";
 import dashboardRoutes from "./routes/dashboard/index.js";
 import quoteRoutes from "./routes/quotes/index.js";
+import publicQuoteRoutes from "./routes/quotes/public.js";
 import userRoutes from "./routes/users/index.js";
 import settingsRoutes from "./routes/settings/index.js";
 import { AppError } from "./utils/errors.js";
@@ -156,6 +157,9 @@ export async function buildApp() {
   await app.register(clientRoutes, { prefix: "/api/v1/clients" });
   await app.register(dashboardRoutes, { prefix: "/api/v1/dashboard" });
   await app.register(quoteRoutes, { prefix: "/api/v1/quotes" });
+  // Route interne serveur-à-serveur (mailer → API) : POST /api/v1/quotes/public.
+  // Protégée par secret partagé (x-internal-secret), non par JWT.
+  await app.register(publicQuoteRoutes, { prefix: "/api/v1/quotes" });
   await app.register(userRoutes, { prefix: "/api/v1/users" });
   await app.register(settingsRoutes, { prefix: "/api/v1/settings" });
 

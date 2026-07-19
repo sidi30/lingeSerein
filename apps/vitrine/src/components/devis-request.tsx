@@ -8,16 +8,32 @@ const API_URL = process.env.NEXT_PUBLIC_MAILER_URL || "https://api.lingeserein.f
 const inputCls =
   "w-full rounded-lg border border-lavender-200 bg-white px-3 py-2 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest";
 
+interface Ligne {
+  /** Libellé de l'article (ex. « Kit Bain »). */
+  designation: string;
+  /** Quantité par rotation. */
+  qty: number;
+  /** Prix unitaire en centimes (total ligne / quantité). */
+  unitCents: number;
+}
+
 interface Props {
   /** Récapitulatif chiffré (déjà formaté) envoyé au propriétaire. */
   recap: string;
+  /** Lignes structurées du devis (>=1) — permet au backend de bâtir un vrai devis. */
+  lignes: Ligne[];
+  /** Frais de livraison en centimes (0 = offerte). */
+  livraisonCents: number;
+  /** Nom de la zone de livraison sélectionnée. */
+  zone: string;
 }
 
 /**
  * Envoie au propriétaire l'estimation que le visiteur a montée dans le simulateur,
- * via le mailer existant (/api/contact). Le proprio reçoit le détail chiffré + contact.
+ * via l'endpoint /api/devis du mailer, qui construit un vrai devis côté admin.
+ * On transmet à la fois les lignes structurées ET le récap texte lisible.
  */
-export function DevisRequest({ recap }: Props) {
+export function DevisRequest({ recap, lignes, livraisonCents, zone }: Props) {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [error, setError] = useState("");
@@ -36,21 +52,22 @@ export function DevisRequest({ recap }: Props) {
       s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
     const recapClean = stripControl(recap);
     const note = stripControl(get("note").trim());
-    const message =
-      `Demande de devis depuis le simulateur :\n\n${recapClean}` +
-      (note ? `\n\nMessage du client :\n${note}` : "");
 
     const payload = {
       name: get("name"),
       company: get("company"),
       email: get("email"),
       phone: get("phone"),
-      message: message.slice(0, 2000),
+      note: note.slice(0, 2000) || undefined, // message optionnel du visiteur
+      zone,
+      lignes,
+      livraisonCents,
+      recap: recapClean.slice(0, 4000),
       website: get("website"), // honeypot
     };
 
     try {
-      const res = await fetch(`${API_URL}/api/contact`, {
+      const res = await fetch(`${API_URL}/api/devis`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
