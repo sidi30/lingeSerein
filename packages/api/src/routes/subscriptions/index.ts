@@ -236,12 +236,20 @@ export default async function subscriptionRoutes(app: FastifyInstance): Promise<
         const clientId = await resolveClient(request.user.sub, request.params.userId);
         if (!clientId) throw new NotFoundError("Client", request.params.userId);
 
-        const subscription = await service[action](
-          clientId,
-          request.ip,
-          request.headers["user-agent"],
-          request.user.sub,
-        );
+        // `force` n'a de sens que sur cancel : il lève le blocage d'engagement.
+        // Réservé à l'admin (cette route l'est déjà) et tracé dans l'audit.
+        const forceCancel =
+          action === "cancel" && (request.body as { force?: boolean } | undefined)?.force === true;
+
+        const subscription = await (action === "cancel"
+          ? service.cancel(
+              clientId,
+              request.ip,
+              request.headers["user-agent"],
+              request.user.sub,
+              forceCancel,
+            )
+          : service[action](clientId, request.ip, request.headers["user-agent"], request.user.sub));
 
         return reply.send({ success: true, data: subscription });
       },

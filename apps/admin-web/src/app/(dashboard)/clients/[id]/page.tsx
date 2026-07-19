@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { PauseCircle, PlayCircle, Plus, XCircle } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { Header } from "@/components/header";
 import { Card } from "@/components/ui/card";
@@ -189,21 +189,45 @@ export default function ClientDetailPage() {
   // actions d'abonnement renvoyaient 404.
   // Le changement de statut passe par trois routes distinctes (pause/resume/
   // cancel), et non par un PATCH portant un champ `status`.
+  // Résilier sous engagement est REFUSÉ par l'API (règle des 3 mois du contrat).
+  // On mémorise le refus pour proposer au propriétaire de passer outre en
+  // connaissance de cause, plutôt que de lui afficher une erreur sèche sur un
+  // bouton qui semble cassé.
+  const [engagementBloquant, setEngagementBloquant] = useState<string | null>(null);
+
   const subMutation = useMutation({
     mutationFn: (
-      action: { type: "link"; plan: string } | { type: "pause" | "resume" | "cancel" },
+      action:
+        | { type: "link"; plan: string }
+        | { type: "pause" | "resume" }
+        | { type: "cancel"; force?: boolean },
     ) =>
       action.type === "link"
         ? api.post(`/subscriptions/clients/${id}`, { plan: action.plan })
-        : api.patch(`/subscriptions/clients/${id}/${action.type}`, {}),
+        : api.patch(
+            `/subscriptions/clients/${id}/${action.type}`,
+            action.type === "cancel" && action.force ? { force: true } : {},
+          ),
     onSuccess: () => {
       toast("Abonnement mis à jour");
       setLinkSubModal(false);
       setConfirmCancelSub(false);
+      setEngagementBloquant(null);
       queryClient.invalidateQueries({ queryKey: ["client", id] });
     },
-    onError: (err: unknown) =>
-      toast(err instanceof Error ? err.message : "Erreur sur l'abonnement", "error"),
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Erreur sur l'abonnement";
+      const code =
+        err instanceof ApiError
+          ? ((err.data as { error?: { code?: string } } | undefined)?.error?.code ?? null)
+          : null;
+
+      if (code === "ENGAGEMENT_ACTIVE") {
+        setEngagementBloquant(message);
+        return;
+      }
+      toast(message, "error");
+    },
   });
 
   const orders = useMemo(() => client?.orders ?? [], [client]);
@@ -780,8 +804,24 @@ export default function ClientDetailPage() {
         loading={subMutation.isPending}
         variant="danger"
         title="Résilier l'abonnement ?"
-        description="L'abonnement de ce client sera résilié. Un engagement en cours peut bloquer l'opération."
+        description="L'abonnement de ce client sera résilié, en respectant le préavis."
         confirmLabel="Résilier"
+      />
+
+      {/* Second temps : l'engagement bloque. On explique la raison exacte et on
+          laisse le propriétaire trancher — c'est SA règle, il peut y renoncer. */}
+      <ConfirmDialog
+        open={engagementBloquant !== null}
+        onClose={() => setEngagementBloquant(null)}
+        onConfirm={() => subMutation.mutate({ type: "cancel", force: true })}
+        loading={subMutation.isPending}
+        variant="danger"
+        title="Engagement en cours"
+        description={`${engagementBloquant ?? ""}
+
+Vous pouvez résilier malgré tout : ce sera un geste commercial de votre part, enregistré dans l'historique.`}
+        confirmLabel="Résilier quand même"
+        cancelLabel="Respecter l'engagement"
       />
     </>
   );

@@ -357,7 +357,23 @@ export class SubscriptionsService {
    * BLOQUÉE si now() < committedUntil (ADR-V2-006, AC-F6-03).
    * Sinon : cancelledAt=now, cancelEffectiveAt=now+noticePeriodDays.
    */
-  async cancel(userId: string, ipAddress?: string, userAgent?: string, actorId?: string) {
+  /**
+   * Résilie un abonnement.
+   *
+   * @param force  Réservé à l'admin : passe outre l'engagement de 3 mois.
+   *   L'engagement protège le prestataire, mais le propriétaire doit pouvoir y
+   *   renoncer (geste commercial, établissement qui ferme). Sans cette porte de
+   *   sortie, le bouton « Résilier » de l'admin échoue systématiquement tant que
+   *   l'engagement court — ce qui se lit comme une panne, pas comme une règle.
+   *   Le contournement est tracé dans l'audit.
+   */
+  async cancel(
+    userId: string,
+    ipAddress?: string,
+    userAgent?: string,
+    actorId?: string,
+    force = false,
+  ) {
     const subscription = await this.prisma.subscription.findUnique({
       where: { userId },
       include: {
@@ -371,9 +387,9 @@ export class SubscriptionsService {
       throw new AppError(400, "ALREADY_CANCELLED", "Cet abonnement est déjà annulé");
     }
 
-    // Blocage engagement (ADR-V2-006)
+    // Blocage engagement (ADR-V2-006) — sauf passage en force par un admin.
     const now = new Date();
-    if (subscription.committedUntil && now < subscription.committedUntil) {
+    if (!force && subscription.committedUntil && now < subscription.committedUntil) {
       const dateStr = formatDate(subscription.committedUntil);
       throw new UnprocessableEntityError(
         `Résiliation non autorisée : l'engagement court jusqu'au ${dateStr}. La résiliation sera possible à partir du ${dateStr}.`,
@@ -426,12 +442,25 @@ export class SubscriptionsService {
   // ---- Liste (admin) ----------------------------------------------------------
 
   async list(query: ListSubscriptionsQuery) {
-    const { page, limit, status, plan } = query;
+    const { page, limit, status, plan, search } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.SubscriptionWhereInput = {
       ...(status ? { status } : {}),
       ...(plan ? { plan } : {}),
+      // La recherche porte sur le client, pas sur l'abonnement lui-même :
+      // c'est un nom d'établissement ou de contact qu'on tape, jamais un id.
+      ...(search
+        ? {
+            user: {
+              OR: [
+                { name: { contains: search, mode: "insensitive" as const } },
+                { companyName: { contains: search, mode: "insensitive" as const } },
+                { email: { contains: search, mode: "insensitive" as const } },
+              ],
+            },
+          }
+        : {}),
     };
 
     const [subscriptions, total] = await Promise.all([

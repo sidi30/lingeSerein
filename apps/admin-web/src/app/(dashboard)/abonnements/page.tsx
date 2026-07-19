@@ -102,9 +102,13 @@ export default function AbonnementsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["subscriptions", page, statusFilter, planFilter, search],
     queryFn: () =>
-      api.get<SubscriptionsResponse>("/subscriptions", {
+      // getRaw et NON get : `get` déballe déjà `data`, on récupérait donc le
+      // tableau puis on lisait `.data` dessus → undefined → page vide.
+      // Le paramètre de taille s'appelle `limit` côté API ; `pageSize` était
+      // ignoré en silence.
+      api.getRaw<SubscriptionsResponse>("/subscriptions", {
         page,
-        pageSize: 20,
+        limit: 20,
         status: statusFilter || undefined,
         plan: planFilter || undefined,
         search: search || undefined,

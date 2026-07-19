@@ -56,6 +56,9 @@ export const updateSubscriptionConfigSchema = z
 // ---- Liste des abonnements (GET /subscriptions — admin) -----------------------
 
 export const listSubscriptionsQuerySchema = z.object({
+  // La page admin proposait une barre de recherche qui n'était rattachée à
+  // rien : le paramètre n'existait pas côté API et était ignoré en silence.
+  search: z.string().trim().min(1).max(200).optional(),
   status: z.enum(["ACTIVE", "PAUSED", "CANCELLED", "PAST_DUE"]).optional(),
   // plan conservé pour compat admin (ADR-V2-003) — filtre les legacy
   plan: z.enum(["ESSENTIELLE", "CONFORT", "PRESTIGE"]).optional(),
