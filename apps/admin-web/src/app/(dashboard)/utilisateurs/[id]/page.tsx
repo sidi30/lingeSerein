@@ -165,8 +165,10 @@ export default function UtilisateurDetailPage() {
       api.patch<UserDTO>(`/users/${id}`, {
         name: values.name,
         email: values.email,
-        phone: values.phone || undefined,
-        zoneId: values.zoneId || undefined,
+        // null = effacer. Avec undefined, retirer la zone d'un livreur ou son
+        // téléphone était impossible : la sauvegarde réussissait sans rien changer.
+        phone: values.phone || null,
+        zoneId: values.zoneId || null,
         role: values.role,
       }),
     onSuccess: () => {

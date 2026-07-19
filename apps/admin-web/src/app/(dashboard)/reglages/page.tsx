@@ -316,10 +316,13 @@ function OperateurTab() {
       api.patch<OperatorDTO>("/settings/operator", {
         name: values.name,
         email: values.email,
-        phone: values.phone || undefined,
-        address: values.address || undefined,
-        siret: values.siret || undefined,
-        legalMentions: values.legalMentions || undefined,
+        // `undefined` = « ne pas toucher », `null` = « effacer ». On envoyait
+        // undefined sur un champ vidé : l'écran disait « enregistré » et
+        // l'ancienne valeur restait en base. Le schéma accepte null ici.
+        phone: values.phone || null,
+        address: values.address || null,
+        siret: values.siret || null,
+        legalMentions: values.legalMentions || null,
       }),
     onSuccess: () => {
       toast("Informations enregistrées");

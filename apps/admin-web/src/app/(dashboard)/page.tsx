@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -83,6 +85,7 @@ const quickActions = [
 ];
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { user } = useAuth();
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
@@ -160,7 +163,6 @@ export default function DashboardPage() {
               <StatCard
                 label="Livraisons"
                 value={kpis.deliveriesCompleted}
-                trend={{ value: 0, label: "cette semaine" }}
                 icon={<Truck className="h-5 w-5" />}
               />
               <StatCard
@@ -171,7 +173,6 @@ export default function DashboardPage() {
               <StatCard
                 label="Nouveaux clients"
                 value={kpis.newClients}
-                trend={{ value: 0, label: "cette semaine" }}
                 icon={<UserPlus className="h-5 w-5" />}
               />
             </>
@@ -248,7 +249,7 @@ export default function DashboardPage() {
           <Card
             title="Alertes récentes"
             actions={
-              <Button variant="ghost" size="sm" onClick={() => {}}>
+              <Button variant="ghost" size="sm" onClick={() => router.push("/commandes")}>
                 Tout voir
               </Button>
             }

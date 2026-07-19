@@ -78,7 +78,7 @@ export default function PlanningPage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedRound, setSelectedRound] = useState<Round | null>(null);
-  const [form, setForm] = useState({ date: "", driver: "", clientIds: [] as string[] });
+  const [form, setForm] = useState({ date: "", driverId: "", clientIds: [] as string[] });
 
   const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset]);
 
@@ -105,20 +105,40 @@ export default function PlanningPage() {
 
   const clients = clientsData?.data ?? [];
 
+  // Le formulaire demandait un nom de chauffeur en texte libre, alors que l'API
+  // exige l'identifiant d'un utilisateur LIVREUR : la création échouait donc
+  // toujours en 400. On propose les livreurs réels.
+  const { data: driversData } = useQuery({
+    queryKey: ["users", "livreurs"],
+    queryFn: () =>
+      api.getRaw<PaginatedResponse<{ id: string; name: string }>>("/users", {
+        role: "LIVREUR",
+        limit: 100,
+      }),
+  });
+  const drivers = driversData?.data ?? [];
+
   const createMutation = useMutation({
     mutationFn: () =>
+      // Le schéma attend `driverId` et un tableau `stops` structuré, pas une
+      // liste d'identifiants clients. L'ordre d'arrêt suit l'ordre de sélection.
       api.post("/deliveries/rounds", {
         date: form.date,
-        driver: form.driver,
-        clientIds: form.clientIds,
+        driverId: form.driverId,
+        stops: form.clientIds.map((clientId, i) => ({
+          clientId,
+          stopOrder: i + 1,
+          setsToDeliver: 0,
+        })),
       }),
     onSuccess: () => {
       toast("Tournée créée");
       queryClient.invalidateQueries({ queryKey: ["deliveries"] });
       setCreateOpen(false);
-      setForm({ date: "", driver: "", clientIds: [] });
+      setForm({ date: "", driverId: "", clientIds: [] });
     },
-    onError: () => toast("Erreur lors de la création", "error"),
+    onError: (err: unknown) =>
+      toast(err instanceof Error ? err.message : "Erreur lors de la création", "error"),
   });
 
   const roundsByDate = useMemo(() => {
@@ -247,13 +267,27 @@ export default function PlanningPage() {
             onChange={(e) => setForm({ ...form, date: e.target.value })}
             required
           />
-          <Input
-            label="Chauffeur"
-            value={form.driver}
-            onChange={(e) => setForm({ ...form, driver: e.target.value })}
-            placeholder="Nom du chauffeur"
-            required
-          />
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-gray-700">Livreur</label>
+            <select
+              value={form.driverId}
+              onChange={(e) => setForm({ ...form, driverId: e.target.value })}
+              required
+              className="min-h-11 w-full rounded-md border border-gray-300 px-3 py-2 text-base sm:min-h-0 sm:text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+            >
+              <option value="">Choisir un livreur…</option>
+              {drivers.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            {drivers.length === 0 && (
+              <p className="mt-1 text-xs text-amber-600">
+                Aucun livreur enregistré. Créez-en un dans Utilisateurs.
+              </p>
+            )}
+          </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-gray-700">
               Clients ({form.clientIds.length} sélectionné{form.clientIds.length > 1 ? "s" : ""})
@@ -289,7 +323,7 @@ export default function PlanningPage() {
             <Button
               type="submit"
               loading={createMutation.isPending}
-              disabled={form.clientIds.length === 0}
+              disabled={form.clientIds.length === 0 || !form.driverId}
             >
               Créer
             </Button>

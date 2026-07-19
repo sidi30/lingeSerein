@@ -178,7 +178,9 @@ function ProductModal({ open, product, onClose }: ProductModalProps) {
         name: values.name,
         description: values.description || undefined,
         kind: values.kind,
-        category: values.category || undefined,
+        // null pour effacer réellement (le schéma l'accepte). `description` et
+        // `slug` ne sont PAS nullables côté API : les laisser en undefined.
+        category: values.category || null,
         priceCents: Math.round(values.priceEuros * 100),
         slug: values.slug || undefined,
         // serviceTypeId omis : résolu côté API (ServiceType LOCATION par défaut)

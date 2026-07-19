@@ -10,7 +10,8 @@
 import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { Plus, Users } from "lucide-react";
+import { Download, Plus, Users } from "lucide-react";
+import { useToast } from "@/lib/toast";
 import { api } from "@/lib/api";
 import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,7 @@ function AccessBadge({ hasAppAccess }: { hasAppAccess: boolean }) {
 }
 
 export default function ClientsPage() {
+  const { toast } = useToast();
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [searchDebounced, setSearchDebounced] = useState("");
@@ -64,6 +66,35 @@ export default function ClientsPage() {
   const [sourceFilter, setSourceFilter] = useState("");
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  // La route /clients/export renvoie du text/csv, pas l'enveloppe JSON habituelle :
+  // le client `api` la parserait en JSON et échouerait. On passe donc par fetch
+  // direct, en réutilisant le même jeton d'authentification.
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/clients/export`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("accessToken") ?? ""}` },
+      });
+      if (!res.ok) throw new Error("Export impossible");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `clients-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Révocation différée : révoquer dans le même tick peut annuler le
+      // téléchargement avant que le navigateur ait lu le blob.
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Export impossible", "error");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const handleSearch = useCallback((value: string) => {
     setSearch(value);
@@ -116,10 +147,16 @@ export default function ClientsPage() {
       <Header
         title="Clients"
         actions={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            Nouveau client
-          </Button>
+          <>
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Nouveau client
+            </Button>
+            <Button size="sm" variant="secondary" onClick={exportCsv} loading={exporting}>
+              <Download className="h-4 w-4" aria-hidden="true" />
+              Exporter CSV
+            </Button>
+          </>
         }
       />
 
