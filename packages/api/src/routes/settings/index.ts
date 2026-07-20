@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { CATALOG_PRODUCTS, SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
 import { idParamSchema } from "@lingengo/shared";
 import { SettingsService } from "../../services/settings.service.js";
 import { ValidationError } from "../../utils/errors.js";
@@ -272,6 +273,70 @@ export default async function settingsRoutes(app: FastifyInstance): Promise<void
       );
 
       return reply.send({ success: true, data: result });
+    },
+  );
+
+  // ---- GET /settings/price-drift (admin) --------------------------------------
+  // La VITRINE est la source de vérité des prix : ses tarifs sont des constantes
+  // TypeScript compilées au build (packages/shared), elle ne lit jamais la base.
+  // La base peut donc silencieusement diverger de ce que voient les visiteurs —
+  // un client verrait un prix sur le site et un autre sur son devis.
+  // Cette route compare les deux et signale tout écart. Elle ne corrige rien :
+  // c'est un détecteur, la correction reste une décision.
+  app.get(
+    "/price-drift",
+    { preHandler: [app.authenticate, requireRole("ROLE_ADMIN", "ROLE_SUPER_ADMIN")] },
+    async (request, reply) => {
+      const operatorId = await getOperatorId(request.user.sub);
+
+      const produits = await app.prisma.product.findMany({
+        where: { operatorId, deletedAt: null },
+        select: { slug: true, name: true, priceCents: true },
+      });
+      const parSlug = new Map(produits.map((p) => [p.slug, p]));
+
+      const ecarts: {
+        type: "produit" | "abonnement";
+        cle: string;
+        libelle: string;
+        vitrineCents: number;
+        adminCents: number | null;
+      }[] = [];
+
+      for (const attendu of CATALOG_PRODUCTS) {
+        const enBase = parSlug.get(attendu.slug);
+        if (!enBase || enBase.priceCents !== attendu.priceCents) {
+          ecarts.push({
+            type: "produit",
+            cle: attendu.slug,
+            libelle: attendu.name,
+            vitrineCents: attendu.priceCents,
+            adminCents: enBase?.priceCents ?? null,
+          });
+        }
+      }
+
+      const config = await app.prisma.subscriptionConfig.findUnique({ where: { operatorId } });
+      if (!config || config.priceCents !== SUBSCRIPTION_DEFAULTS.PRICE_CENTS) {
+        ecarts.push({
+          type: "abonnement",
+          cle: "pack-serenite",
+          libelle: SUBSCRIPTION_DEFAULTS.PLAN_NAME,
+          vitrineCents: SUBSCRIPTION_DEFAULTS.PRICE_CENTS,
+          adminCents: config?.priceCents ?? null,
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          aligne: ecarts.length === 0,
+          ecarts,
+          // Rappel explicite du sens de la correction, pour que personne ne
+          // "corrige" la vitrine sur la base par erreur.
+          sourceDeVerite: "vitrine",
+        },
+      });
     },
   );
 }
