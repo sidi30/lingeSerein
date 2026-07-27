@@ -268,8 +268,14 @@ export default function PlanningPage() {
             required
           />
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700">Livreur</label>
+            <label
+              className="mb-1.5 block text-sm font-medium text-gray-700"
+              htmlFor="planning-driver"
+            >
+              Livreur
+            </label>
             <select
+              id="planning-driver"
               value={form.driverId}
               onChange={(e) => setForm({ ...form, driverId: e.target.value })}
               required
@@ -289,10 +295,19 @@ export default function PlanningPage() {
             )}
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700">
+            {/* Intitulé d'un GROUPE de cases à cocher : pas un <label> (il ne
+                pointe vers aucun champ unique) mais le nom du groupe. */}
+            <span
+              id="planning-clients-label"
+              className="mb-1.5 block text-sm font-medium text-gray-700"
+            >
               Clients ({form.clientIds.length} sélectionné{form.clientIds.length > 1 ? "s" : ""})
-            </label>
-            <div className="max-h-48 overflow-y-auto rounded-md border border-gray-300 p-2">
+            </span>
+            <div
+              role="group"
+              aria-labelledby="planning-clients-label"
+              className="max-h-48 overflow-y-auto rounded-md border border-gray-300 p-2"
+            >
               {clients.length === 0 ? (
                 <p className="p-2 text-xs text-gray-400">Aucun client disponible</p>
               ) : (
