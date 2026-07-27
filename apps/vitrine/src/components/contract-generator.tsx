@@ -57,6 +57,8 @@ export function ContractGenerator() {
   );
   const [jourFacturation, setJourFacturation] = useState("1er");
   const [depotEuros, setDepotEuros] = useState(0);
+  const [livraisonEuros, setLivraisonEuros] = useState(0);
+  const [blankFields, setBlankFields] = useState(false);
   const [conditionsParticulieres, setConditionsParticulieres] = useState("");
   const [signature, setSignature] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -83,9 +85,16 @@ export function ContractGenerator() {
       lignes: [],
       totalCents: 0,
       tvaApplicable: false,
+      // Abonnement manuel : pas de lignes de devis, donc pas de détail financier.
+      sousTotalCents: 0,
+      remisePct: 0,
+      remiseCents: 0,
+      livraisonCents: Math.round(livraisonEuros * 100),
+      tvaCents: 0,
       depotGarantieCents: Math.round(depotEuros * 100),
       conditionsParticulieres,
       signatureSrc: signature ?? undefined,
+      blankFields,
     }),
     [
       numero,
@@ -101,8 +110,10 @@ export function ContractGenerator() {
       preavisJours,
       jourFacturation,
       depotEuros,
+      livraisonEuros,
       conditionsParticulieres,
       signature,
+      blankFields,
     ],
   );
 
@@ -119,7 +130,8 @@ export function ContractGenerator() {
     }
   };
 
-  const canGenerate = client.nom.trim().length > 0 || client.etablissement.trim().length > 0;
+  const canGenerate =
+    blankFields || client.nom.trim().length > 0 || client.etablissement.trim().length > 0;
 
   return (
     <div className="rounded-2xl bg-white border border-lavender-200 shadow-sm overflow-hidden mb-8">
@@ -367,7 +379,37 @@ export function ContractGenerator() {
                 onChange={(e) => setDepotEuros(Number(e.target.value) || 0)}
               />
             </div>
+            <div>
+              <label className={labelCls} htmlFor="ct-livr">
+                Frais de livraison (€)
+              </label>
+              <input
+                id="ct-livr"
+                type="number"
+                min={0}
+                step={0.01}
+                className={inputCls}
+                value={livraisonEuros}
+                onChange={(e) => setLivraisonEuros(Number(e.target.value) || 0)}
+              />
+            </div>
           </div>
+
+          <label className="mt-3 flex items-start gap-2 rounded-lg border border-lavender-100 bg-white p-3">
+            <input
+              type="checkbox"
+              checked={blankFields}
+              onChange={(e) => setBlankFields(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-lavender-300 text-forest focus-visible:ring-forest"
+            />
+            <span className="text-sm text-gray-800">
+              Contrat à compléter à la main
+              <span className="mt-0.5 block text-[11px] text-gray-500">
+                Les champs laissés vides (client, dates, adresse…) sont imprimés en pointillés pour
+                être remplis au stylo.
+              </span>
+            </span>
+          </label>
           <p className="mt-2 text-[11px] text-gray-500">
             Règle : 1 Pack Sérénité par mois (dotation ci-dessus). Les kits au-delà sont facturés au
             tarif normal (kit bain 7,50 € · kit lit 16,50 €). Engagement ferme puis préavis.

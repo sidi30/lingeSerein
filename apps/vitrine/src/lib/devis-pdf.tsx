@@ -1,4 +1,11 @@
 import { Document, Page, Text, View, Image, StyleSheet, pdf } from "@react-pdf/renderer";
+import {
+  BLANK_PLACEHOLDER,
+  DELIVERY_RULE_TEXT,
+  deliveryLabelFromCents,
+  printableField,
+} from "@lingengo/shared";
+import type { DeliveryZone } from "@lingengo/shared";
 
 /* ─── Types ─── */
 
@@ -28,6 +35,16 @@ export interface DevisData {
   reglement?: string;
   /** Signature de l'émetteur (data URL PNG dessinée dans l'admin), placée sur le devis. */
   signatureSrc?: string;
+  /** Libellé des frais de livraison (urgence / zone / gratuité). */
+  livraisonLabel?: string;
+  /** Délai de livraison demandé (1-2 j = urgence 25 €). */
+  delaiJours?: number;
+  /** Zone de livraison retenue. */
+  zoneLivraison?: DeliveryZone;
+  /** Mode « à compléter au stylo » : champs vides imprimés en pointillés. */
+  blankFields?: boolean;
+  /** Nombre de lignes vierges ajoutées au tableau. */
+  blankLines?: number;
 }
 
 /* ─── Branding ─── */
@@ -221,6 +238,10 @@ const styles = StyleSheet.create({
 
 export function DevisDocument({ data, logoSrc }: { data: DevisData; logoSrc?: string }) {
   const t = computeDevisTotals(data);
+  const blank = !!data.blankFields;
+  const livraisonLabel =
+    (data.livraisonLabel ?? "").trim() || deliveryLabelFromCents(data.livraisonCents);
+  const blankRows = Array.from({ length: blank ? (data.blankLines ?? 5) : 0 });
 
   return (
     <Document
@@ -243,10 +264,10 @@ export function DevisDocument({ data, logoSrc }: { data: DevisData; logoSrc?: st
           <View style={styles.devisTitleWrap}>
             <Text style={styles.devisTitle}>DEVIS</Text>
             <Text style={styles.devisMeta}>
-              N° <Text style={styles.devisMetaStrong}>{data.numero || "—"}</Text>
+              N° <Text style={styles.devisMetaStrong}>{printableField(data.numero, blank)}</Text>
             </Text>
             <Text style={styles.devisMeta}>
-              Date <Text style={styles.devisMetaStrong}>{data.date}</Text>
+              Date <Text style={styles.devisMetaStrong}>{printableField(data.date, blank)}</Text>
             </Text>
             <Text style={styles.devisMeta}>Validité {data.validiteJours} jours</Text>
           </View>
@@ -264,14 +285,28 @@ export function DevisDocument({ data, logoSrc }: { data: DevisData; logoSrc?: st
           <View style={styles.partyBox}>
             <Text style={styles.partyLabel}>Client</Text>
             <Text style={styles.partyName}>
-              {data.client.etablissement || data.client.nom || "—"}
+              {printableField(data.client.etablissement || data.client.nom, blank)}
             </Text>
-            {!!data.client.etablissement && !!data.client.nom && (
-              <Text style={styles.partyLine}>{data.client.nom}</Text>
+            {!!data.client.etablissement && (!!data.client.nom || blank) && (
+              <Text style={styles.partyLine}>{printableField(data.client.nom, blank)}</Text>
             )}
-            {!!data.client.adresse && <Text style={styles.partyLine}>{data.client.adresse}</Text>}
-            {!!data.client.tel && <Text style={styles.partyLine}>Tél. {data.client.tel}</Text>}
-            {!!data.client.email && <Text style={styles.partyLine}>{data.client.email}</Text>}
+            {(!!data.client.adresse || blank) && (
+              <Text style={styles.partyLine}>
+                {blank && !data.client.adresse.trim()
+                  ? `Adresse : ${BLANK_PLACEHOLDER}`
+                  : data.client.adresse}
+              </Text>
+            )}
+            {(!!data.client.tel || blank) && (
+              <Text style={styles.partyLine}>Tél. {printableField(data.client.tel, blank)}</Text>
+            )}
+            {(!!data.client.email || blank) && (
+              <Text style={styles.partyLine}>
+                {blank && !data.client.email.trim()
+                  ? `Email : ${BLANK_PLACEHOLDER}`
+                  : data.client.email}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -292,6 +327,19 @@ export function DevisDocument({ data, logoSrc }: { data: DevisData; logoSrc?: st
             </Text>
           </View>
         ))}
+        {/* Lignes vierges — devis à compléter au stylo */}
+        {blankRows.map((_, i) => (
+          <View
+            key={`blank-${i}`}
+            style={[styles.row, ...((data.lines.length + i) % 2 === 1 ? [styles.rowAlt] : [])]}
+            wrap={false}
+          >
+            <Text style={[styles.td, styles.colDesignation]}>{BLANK_PLACEHOLDER}</Text>
+            <Text style={[styles.td, styles.colQty]}>_____</Text>
+            <Text style={[styles.td, styles.colPu]}>___________</Text>
+            <Text style={[styles.td, styles.colTotal]}>___________</Text>
+          </View>
+        ))}
 
         {/* Totals */}
         <View style={styles.totalsWrap}>
@@ -307,7 +355,7 @@ export function DevisDocument({ data, logoSrc }: { data: DevisData; logoSrc?: st
               </View>
             )}
             <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Livraison</Text>
+              <Text style={styles.totalLabel}>{livraisonLabel}</Text>
               <Text style={styles.totalValue}>
                 {data.livraisonCents === 0 ? "Offerte" : euros(data.livraisonCents)}
               </Text>
@@ -348,6 +396,7 @@ export function DevisDocument({ data, logoSrc }: { data: DevisData; logoSrc?: st
             {data.tvaApplicable ? "" : " TVA non applicable, art. 293 B du CGI."}
           </Text>
           {!!data.reglement?.trim() && <Text style={{ marginTop: 3 }}>{data.reglement}</Text>}
+          <Text style={{ marginTop: 3 }}>{DELIVERY_RULE_TEXT}</Text>
           <Text style={{ marginTop: 5 }}>
             {SOCIETE.nom} — {SOCIETE.raisonSociale} · SIREN {SOCIETE.siren} · SIRET {SOCIETE.siret}{" "}
             · APE {SOCIETE.ape} · {SOCIETE.adresse}. Immatriculée au RNE le {SOCIETE.rne}. TVA non

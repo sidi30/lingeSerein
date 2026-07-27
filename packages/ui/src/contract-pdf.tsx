@@ -14,6 +14,13 @@
 
 import { Document, Page, Text, View, Image, StyleSheet, pdf } from "@react-pdf/renderer";
 import type { ContractData } from "@lingengo/shared";
+import {
+  BLANK_PLACEHOLDER,
+  DELIVERY_RULE_TEXT,
+  checkContractTotals,
+  printableField,
+  resolveLivraisonLabel,
+} from "@lingengo/shared";
 import { LOGO_DATA_URI } from "./logo";
 
 /* ─── Opérateur / identité légale (override optionnel, mirroir de devis-pdf) ─── */
@@ -245,6 +252,13 @@ const styles = StyleSheet.create({
   },
   totalLabel: { fontFamily: "Helvetica-Bold", fontSize: 9, color: "#ffffff" },
   totalValue: { fontFamily: "Times-Bold", fontSize: 12, color: "#ffffff" },
+  /* Détail financier (concordance devis ↔ contrat) */
+  totalsWrap: { flexDirection: "row", justifyContent: "flex-end", marginTop: 8 },
+  totalsBox: { width: 250 },
+  detailRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 },
+  detailLabel: { fontSize: 8, color: GRAY },
+  detailValue: { fontSize: 8, color: INK, textAlign: "right" },
+  detailDivider: { height: 0.75, backgroundColor: LINE, marginVertical: 4 },
   /* Signatures */
   signWrap: { flexDirection: "row", justifyContent: "space-between", marginTop: 16, gap: 24 },
   signBox: {
@@ -340,6 +354,7 @@ function MainHeader({
   numero,
   date,
   extra,
+  blank,
 }: {
   soc: ReturnType<typeof resolvePrestataire>;
   logoSrc?: string;
@@ -348,6 +363,7 @@ function MainHeader({
   numero?: string;
   date?: string;
   extra?: string;
+  blank?: boolean;
 }) {
   return (
     <View style={styles.header}>
@@ -364,9 +380,9 @@ function MainHeader({
         <Text style={styles.docTitle}>{title}</Text>
         <Text style={styles.docSub}>{subtitle}</Text>
         <Text style={styles.docMeta}>
-          N° <Text style={styles.metaStrong}>{numero || "—"}</Text>
+          N° <Text style={styles.metaStrong}>{printableField(numero, blank)}</Text>
           {"   ·   "}
-          {date || "—"}
+          {printableField(date, blank)}
         </Text>
         {!!extra && <Text style={styles.docMeta}>{extra}</Text>}
       </View>
@@ -427,6 +443,7 @@ function Parties({
   data: ContractData;
   clientNom: string;
 }) {
+  const blank = !!data.blankFields;
   return (
     <>
       <Text style={styles.partiesIntro}>Entre les soussignés :</Text>
@@ -447,15 +464,35 @@ function Parties({
         <View style={styles.partyBox}>
           <Text style={styles.partyLabel}>Le Client</Text>
           <Text style={styles.partyName}>{clientNom}</Text>
-          {!!data.client.etablissement && !!data.client.nom && (
-            <Text style={styles.partyLine}>Représenté par {data.client.nom}</Text>
+          {(!!data.client.nom || blank) && !!data.client.etablissement && (
+            <Text style={styles.partyLine}>
+              Représenté par {printableField(data.client.nom, blank)}
+            </Text>
           )}
-          {!!data.client.identifiant && (
-            <Text style={styles.partyLine}>{data.client.identifiant}</Text>
+          {(!!data.client.identifiant || blank) && (
+            <Text style={styles.partyLine}>
+              {blank && !data.client.identifiant.trim()
+                ? `Forme juridique / SIRET : ${printableField(data.client.identifiant, blank)}`
+                : data.client.identifiant}
+            </Text>
           )}
-          {!!data.client.adresse && <Text style={styles.partyLine}>{data.client.adresse}</Text>}
-          {!!data.client.tel && <Text style={styles.partyLine}>Tél. {data.client.tel}</Text>}
-          {!!data.client.email && <Text style={styles.partyLine}>{data.client.email}</Text>}
+          {(!!data.client.adresse || blank) && (
+            <Text style={styles.partyLine}>
+              {blank && !data.client.adresse.trim()
+                ? `Adresse : ${printableField(data.client.adresse, blank)}`
+                : data.client.adresse}
+            </Text>
+          )}
+          {(!!data.client.tel || blank) && (
+            <Text style={styles.partyLine}>Tél. {printableField(data.client.tel, blank)}</Text>
+          )}
+          {(!!data.client.email || blank) && (
+            <Text style={styles.partyLine}>
+              {blank && !data.client.email.trim()
+                ? `Email : ${printableField(data.client.email, blank)}`
+                : data.client.email}
+            </Text>
+          )}
         </View>
       </View>
     </>
@@ -505,10 +542,10 @@ function Signatures({
     <>
       <View style={styles.article} wrap={false}>
         <P>
-          Fait à {data.lieu || "Orange"}, le {data.date || "…"}, en deux exemplaires originaux, dont
-          un remis à chaque Partie. Chaque Partie reconnaît avoir pris connaissance de
-          l&apos;ensemble des clauses du présent contrat et de son annexe, et les accepter sans
-          réserve.
+          Fait à {printableField(data.lieu, data.blankFields, "Orange")}, le{" "}
+          {printableField(data.date, data.blankFields, "…")}, en deux exemplaires originaux, dont un
+          remis à chaque Partie. Chaque Partie reconnaît avoir pris connaissance de l&apos;ensemble
+          des clauses du présent contrat et de son annexe, et les accepter sans réserve.
         </P>
       </View>
 
@@ -570,6 +607,7 @@ function AbonnementBody({
   const prix = euros(data.prixMensuelCents);
   const depot = data.depotGarantieCents > 0 ? euros(data.depotGarantieCents) : null;
   const showSource = !!data.devisNumero && !!data.nbMensualitesDevis;
+  const livraisonLabel = resolveLivraisonLabel(data);
 
   return (
     <Page size="A4" style={styles.page}>
@@ -588,6 +626,7 @@ function AbonnementBody({
         subtitle="Pack Sérénité — location & entretien de linge"
         numero={data.numero}
         date={data.date}
+        blank={data.blankFields}
       />
 
       <Parties soc={soc} data={data} clientNom={clientNom} />
@@ -616,9 +655,15 @@ function AbonnementBody({
             livraison &amp; reprise
           </Text>
         </View>
+        {data.livraisonCents > 0 && (
+          <View style={styles.synthRow}>
+            <Text style={styles.synthLabel}>{livraisonLabel}</Text>
+            <Text style={styles.synthValue}>{euros(data.livraisonCents)}</Text>
+          </View>
+        )}
         <View style={styles.synthRow}>
           <Text style={styles.synthLabel}>Prise d&apos;effet</Text>
-          <Text style={styles.synthValue}>{data.dateDebut || "—"}</Text>
+          <Text style={styles.synthValue}>{printableField(data.dateDebut, data.blankFields)}</Text>
         </View>
         <View style={styles.synthRow}>
           <Text style={styles.synthLabel}>Engagement initial</Text>
@@ -687,9 +732,9 @@ function AbonnementBody({
 
       <Article titre="Article 3 — Durée, engagement et résiliation">
         <P>
-          Le contrat prend effet le {data.dateDebut || "…"} pour une durée initiale ferme de{" "}
-          {data.engagementMois} mois (période d&apos;engagement). Il se renouvelle ensuite par
-          tacite reconduction, par périodes successives d&apos;un (1) mois.
+          Le contrat prend effet le {printableField(data.dateDebut, data.blankFields, "…")} pour une
+          durée initiale ferme de {data.engagementMois} mois (période d&apos;engagement). Il se
+          renouvelle ensuite par tacite reconduction, par périodes successives d&apos;un (1) mois.
         </P>
         <P>
           À l&apos;issue de la période d&apos;engagement initiale, chacune des Parties peut résilier
@@ -788,6 +833,10 @@ function AbonnementBody({
           d&apos;un commun accord en fonction des arrivées et départs des voyageurs du Client. Le
           linge est livré propre, plié et emballé ; la reprise du linge sale s&apos;effectue lors de
           la livraison suivante.
+        </P>
+        <P>
+          Au-delà des {data.livraisonsIncluses} livraison(s) et reprise(s) incluses dans la dotation
+          mensuelle, toute livraison supplémentaire est facturée en sus. {DELIVERY_RULE_TEXT}
         </P>
         <P>
           Toute annulation ou modification d&apos;un créneau par le Client moins de vingt-quatre
@@ -917,6 +966,10 @@ function PonctuelBody({
 }) {
   const depot = data.depotGarantieCents > 0 ? euros(data.depotGarantieCents) : null;
   const total = euros(data.totalCents);
+  const totalHT = data.sousTotalCents - data.remiseCents + data.livraisonCents;
+  const livraisonLabel = resolveLivraisonLabel(data);
+  // Mode « à compléter » : quelques lignes vierges pour ajouter des prestations au stylo.
+  const blankRows = data.blankFields ? Array.from({ length: 4 }) : [];
 
   return (
     <Page size="A4" style={styles.page}>
@@ -932,6 +985,7 @@ function PonctuelBody({
         numero={data.numero}
         date={data.date}
         extra="Sans engagement · paiement à la commande"
+        blank={data.blankFields}
       />
 
       <Parties soc={soc} data={data} clientNom={clientNom} />
@@ -977,16 +1031,67 @@ function PonctuelBody({
             </Text>
           </View>
         ))}
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>{data.tvaApplicable ? "Total TTC" : "Total net"}</Text>
-          <Text style={styles.totalValue}>{total}</Text>
+        {/* Lignes vierges à compléter au stylo (mode « contrat à remplir »). */}
+        {blankRows.map((_, i) => (
+          <View
+            key={`blank-${i}`}
+            style={[styles.tRow, ...((data.lignes.length + i) % 2 === 1 ? [styles.tRowAlt] : [])]}
+            wrap={false}
+          >
+            <Text style={[styles.td, styles.colDesignation]}>{BLANK_PLACEHOLDER}</Text>
+            <Text style={[styles.td, styles.colQty]}>____</Text>
+            <Text style={[styles.td, styles.colPu]}>__________</Text>
+            <Text style={[styles.td, styles.colTotal]}>__________</Text>
+          </View>
+        ))}
+
+        {/* Détail financier — reprend à l'identique chaque montant du devis. */}
+        <View style={styles.totalsWrap}>
+          <View style={styles.totalsBox}>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Sous-total</Text>
+              <Text style={styles.detailValue}>{euros(data.sousTotalCents)}</Text>
+            </View>
+            {data.remiseCents > 0 && (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Remise {data.remisePct / 100} %</Text>
+                <Text style={styles.detailValue}>{"-" + euros(data.remiseCents)}</Text>
+              </View>
+            )}
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>{livraisonLabel}</Text>
+              <Text style={styles.detailValue}>
+                {data.livraisonCents === 0 ? "Offerte" : euros(data.livraisonCents)}
+              </Text>
+            </View>
+            <View style={styles.detailDivider} />
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Total HT</Text>
+              <Text style={styles.detailValue}>{euros(totalHT)}</Text>
+            </View>
+            {data.tvaApplicable && (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>TVA 20 %</Text>
+                <Text style={styles.detailValue}>{euros(data.tvaCents)}</Text>
+              </View>
+            )}
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>
+                {data.tvaApplicable ? "Total TTC" : "Total net"}
+              </Text>
+              <Text style={styles.totalValue}>{total}</Text>
+            </View>
+          </View>
         </View>
         <P>
           {data.tvaApplicable
             ? "Les prix sont exprimés toutes taxes comprises."
             : "Prix nets — TVA non applicable, article 293 B du CGI (régime de la franchise en base)."}{" "}
-          La prestation est due en intégralité à la commande. Toute prestation supplémentaire fait
-          l&apos;objet d&apos;un accord écrit préalable et d&apos;une facturation distincte.
+          Le détail ci-dessus reprend à l&apos;identique les montants du devis
+          {data.devisNumero ? ` n° ${data.devisNumero}` : ""} : sous-total des lignes, remise
+          éventuelle, frais de livraison et taxes. La prestation est due en intégralité à la
+          commande. Toute prestation supplémentaire fait l&apos;objet d&apos;un accord écrit
+          préalable et d&apos;une facturation distincte.
         </P>
       </Article>
 
@@ -1045,6 +1150,11 @@ function PonctuelBody({
           La livraison et la reprise sont effectuées sur la zone desservie, aux créneaux convenus
           d&apos;un commun accord. Le linge est livré propre, plié et emballé ; la reprise du linge
           sale s&apos;effectue au créneau convenu.
+        </P>
+        <P>
+          {DELIVERY_RULE_TEXT} Le montant retenu pour la présente commande figure au détail
+          financier de l&apos;article 2 ({livraisonLabel} :{" "}
+          {data.livraisonCents === 0 ? "offerte" : euros(data.livraisonCents)}).
         </P>
         <P>
           Toute annulation ou modification d&apos;un créneau par le Client moins de vingt-quatre
@@ -1196,6 +1306,18 @@ export async function downloadContractPdf(
   data: ContractData,
   options?: { operator?: OperatorInfo; logoUrl?: string },
 ) {
+  // Garde-fou : on refuse d'imprimer un contrat dont le tableau ne somme pas au
+  // total affiché (c'est exactement le défaut qui laissait 25 € de livraison
+  // apparaître dans le total sans figurer nulle part sur le document).
+  const check = checkContractTotals(data);
+  if (!check.ok) {
+    throw new Error(
+      `Contrat incohérent : le détail (${(check.computedCents / 100).toFixed(2)} €) ne correspond ` +
+        `pas au total annoncé (${(check.totalCents / 100).toFixed(2)} €). ` +
+        `Vérifiez les lignes, la remise et les frais de livraison du devis.`,
+    );
+  }
+
   // Logo embarqué (data-URI) TOUJOURS disponible → jamais de fallback texte.
   // `options.logoUrl` reste un override optionnel : si le fetch réussit on l'utilise,
   // sinon on conserve le logo embarqué.

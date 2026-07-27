@@ -3,6 +3,8 @@
  * Aucune dépendance React — consommable par l'API Fastify, l'admin-web et la vitrine.
  */
 
+import { deliveryLabelFromCents, type DeliveryZone } from "./constants";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -28,10 +30,49 @@ export interface DevisData {
   /** Centièmes de pourcentage — 1000 = 10 % */
   remisePct: number;
   livraisonCents: number;
+  /**
+   * Libellé exact des frais de livraison (urgence, zone, gratuité). Repris tel
+   * quel sur le contrat dérivé — c'est ce qui garantit la concordance devis ↔ contrat.
+   */
+  livraisonLabel?: string;
+  /** Délai de livraison demandé, en jours (1-2 = urgence, ≥ 3 = tarif ordinaire). */
+  delaiJours?: number;
+  /** Zone de livraison retenue pour le calcul des frais. */
+  zoneLivraison?: DeliveryZone;
   notes?: string;
   tvaApplicable: boolean;
   reglement?: string;
   signatureSrc?: string;
+  /**
+   * Mode « à compléter à la main » : les champs non saisis sont imprimés en
+   * pointillés ({@link BLANK_PLACEHOLDER}) au lieu d'être masqués.
+   */
+  blankFields?: boolean;
+  /** Nombre de lignes vierges ajoutées en fin de tableau (saisie au stylo). */
+  blankLines?: number;
+}
+
+/** Marque imprimée à la place d'un champ non saisi en mode « à compléter ». */
+export const BLANK_PLACEHOLDER = "------------------------";
+
+/**
+ * Valeur à imprimer pour un champ texte.
+ * - mode normal : la valeur, ou `—` si vide ;
+ * - mode « à compléter » : la valeur, ou une zone en pointillés à remplir au stylo.
+ */
+export function printableField(
+  value: string | null | undefined,
+  blankFields?: boolean,
+  fallback = "—",
+): string {
+  const s = (value ?? "").trim();
+  if (s) return s;
+  return blankFields ? BLANK_PLACEHOLDER : fallback;
+}
+
+/** Nombre de kits d'un devis (désignations « Kit … ») — seuil de gratuité Orange. */
+export function countKits(lines: { designation: string; qty: number }[]): number {
+  return lines.reduce((n, l) => (/\bkit\b/i.test(l.designation) ? n + (l.qty || 0) : n), 0);
 }
 
 export interface DevisTotals {
@@ -64,6 +105,19 @@ export function computeDevisTotals(d: DevisData): DevisTotals {
   const tva = d.tvaApplicable ? Math.round(totalHT * 0.2) : 0;
   const totalTTC = totalHT + tva;
   return { sousTotal, remise, totalHT, tva, totalTTC };
+}
+
+/**
+ * Libellé des frais de livraison à imprimer. Utilise le libellé explicite s'il
+ * est connu (délai + zone saisis), sinon le déduit du montant — de sorte que le
+ * devis et le contrat affichent toujours la même chose.
+ */
+export function resolveLivraisonLabel(d: {
+  livraisonCents: number;
+  livraisonLabel?: string;
+}): string {
+  const explicit = (d.livraisonLabel ?? "").trim();
+  return explicit || deliveryLabelFromCents(d.livraisonCents);
 }
 
 // ============================================================================
@@ -162,6 +216,7 @@ export function quoteToDevisData(quote: QuoteForDevis): DevisData {
     })),
     remisePct: quote.remisePct,
     livraisonCents: quote.livraisonCents,
+    livraisonLabel: deliveryLabelFromCents(quote.livraisonCents),
     notes: quote.notes ?? undefined,
     tvaApplicable: quote.tvaApplicable,
   };

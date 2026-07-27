@@ -212,9 +212,131 @@ export const SUBSCRIPTION_DEFAULTS = {
 export const DELIVERY_DEFAULTS = {
   FREE_THRESHOLD_CENTS: 12000, // offerte dès 120 €
   FREE_MIN_KITS_ORANGE: 4, // offerte dès 4 kits à Orange
+  ZONE_ORANGE_CENTS: 1200, // Orange, sous le seuil de gratuité — 12 €
   ZONE_PROCHE_CENTS: 1200, // zone proche (Carpentras, Vaison…) — 12 €
   ZONE_ELARGIE_CENTS: 1500, // zone élargie (Avignon, Apt…) — 15 €
+  /** Délai (jours) au-delà duquel le tarif ordinaire s'applique : J+3 et plus. */
+  URGENT_MAX_DAYS: 2,
+  /** Forfait d'urgence : livraison demandée à J+1 ou J+2 — 25 €, non dégressif. */
+  URGENT_FEE_CENTS: 2500,
 } as const;
+
+/** Zone de livraison desservie */
+export type DeliveryZone = "ORANGE" | "PROCHE" | "ELARGIE";
+
+export const DELIVERY_ZONE_LABELS: Record<DeliveryZone, string> = {
+  ORANGE: "Orange",
+  PROCHE: "Zone proche (Carpentras, Vaison, Bollène…)",
+  ELARGIE: "Zone élargie (Avignon, Apt, Pertuis…)",
+};
+
+export interface DeliveryFeeInput {
+  /** Délai entre la commande et la livraison, en jours (1 = lendemain). */
+  delaiJours: number;
+  zone: DeliveryZone;
+  /** Montant des articles APRÈS remise, en centimes (seuil de gratuité). */
+  montantApresRemiseCents: number;
+  /** Nombre de kits commandés (gratuité Orange). */
+  nbKits: number;
+}
+
+export interface DeliveryFee {
+  /** Montant facturé, en centimes. */
+  cents: number;
+  /** Libellé exact repris tel quel sur le devis ET sur le contrat. */
+  label: string;
+  /** Forfait d'urgence appliqué (J+1 / J+2). */
+  urgent: boolean;
+  /** Livraison offerte (seuil atteint). */
+  offerte: boolean;
+}
+
+/** Tarif de base de la zone, hors gratuité et hors urgence. */
+function zoneBaseCents(zone: DeliveryZone): number {
+  switch (zone) {
+    case "ORANGE":
+      return DELIVERY_DEFAULTS.ZONE_ORANGE_CENTS;
+    case "ELARGIE":
+      return DELIVERY_DEFAULTS.ZONE_ELARGIE_CENTS;
+    case "PROCHE":
+    default:
+      return DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS;
+  }
+}
+
+/**
+ * Frais de livraison — SOURCE DE VÉRITÉ unique (devis, contrat, admin, vitrine).
+ *
+ * Règle métier :
+ *  - livraison demandée à J+1 ou J+2 → forfait d'urgence de 25 €, **fixe** :
+ *    ni les seuils de gratuité ni le tarif de zone ne s'appliquent ;
+ *  - à partir de J+3 → tarif ordinaire : offerte dès 120 € de commande (après
+ *    remise) ou dès 4 kits à Orange, sinon tarif de la zone (12 € / 15 €).
+ */
+export function computeDeliveryFee(input: DeliveryFeeInput): DeliveryFee {
+  const { delaiJours, zone, montantApresRemiseCents, nbKits } = input;
+
+  if (
+    Number.isFinite(delaiJours) &&
+    delaiJours >= 1 &&
+    delaiJours <= DELIVERY_DEFAULTS.URGENT_MAX_DAYS
+  ) {
+    return {
+      cents: DELIVERY_DEFAULTS.URGENT_FEE_CENTS,
+      label: `Livraison urgente (sous ${DELIVERY_DEFAULTS.URGENT_MAX_DAYS * 24} h) — forfait`,
+      urgent: true,
+      offerte: false,
+    };
+  }
+
+  const offerteSeuil = montantApresRemiseCents >= DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS;
+  const offerteOrange = zone === "ORANGE" && nbKits >= DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE;
+
+  if (offerteSeuil || offerteOrange) {
+    return {
+      cents: 0,
+      label: offerteOrange
+        ? `Livraison offerte (Orange, dès ${DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits)`
+        : `Livraison offerte (dès ${DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande)`,
+      urgent: false,
+      offerte: true,
+    };
+  }
+
+  return {
+    cents: zoneBaseCents(zone),
+    label: `Livraison — ${DELIVERY_ZONE_LABELS[zone]}`,
+    urgent: false,
+    offerte: false,
+  };
+}
+
+/**
+ * Énoncé du barème de livraison, rédigé une seule fois : le devis et le contrat
+ * impriment strictement la même clause.
+ */
+export const DELIVERY_RULE_TEXT =
+  `Frais de livraison : toute livraison demandée à J+1 ou J+2 (sous ` +
+  `${DELIVERY_DEFAULTS.URGENT_MAX_DAYS * 24} heures) donne lieu à un forfait d'urgence de ` +
+  `${DELIVERY_DEFAULTS.URGENT_FEE_CENTS / 100} €, non dégressif et non soumis aux seuils de ` +
+  `gratuité. À partir du troisième jour, les frais de livraison ordinaires s'appliquent : ` +
+  `${DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS / 100} € en zone proche, ` +
+  `${DELIVERY_DEFAULTS.ZONE_ELARGIE_CENTS / 100} € en zone élargie, livraison offerte dès ` +
+  `${DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande ou dès ` +
+  `${DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits à Orange.`;
+
+/**
+ * Libellé de repli quand le délai/la zone ne sont pas connus (devis relu depuis
+ * la base : seul le montant est persisté). Garantit que le contrat affiche le
+ * même intitulé que le devis pour un même montant.
+ */
+export function deliveryLabelFromCents(cents: number): string {
+  if (cents <= 0) return "Livraison offerte";
+  if (cents === DELIVERY_DEFAULTS.URGENT_FEE_CENTS) {
+    return `Livraison urgente (sous ${DELIVERY_DEFAULTS.URGENT_MAX_DAYS * 24} h) — forfait`;
+  }
+  return "Livraison";
+}
 
 /**
  * Comparaison à-la-carte vs Pack Sérénité (base mensuelle, honnête).

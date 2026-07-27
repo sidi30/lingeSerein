@@ -8,7 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/lib/toast";
 import { formatPrice, eurosToCents } from "@/lib/format";
-import { detectContractType, quoteToContractData, SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
+import {
+  computeQuoteFinancials,
+  deliveryLabelFromCents,
+  detectContractType,
+  quoteToContractData,
+  SUBSCRIPTION_DEFAULTS,
+} from "@lingengo/shared";
 import type { QuoteForContract, ContractTerms } from "@lingengo/shared";
 import type { QuoteDTO, SubscriptionConfigDTO } from "@/lib/types";
 import { FileSignature, Info, PackageCheck } from "lucide-react";
@@ -65,10 +71,19 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
         unitCents: l.unitCents,
       })),
       tvaApplicable: quote.tvaApplicable,
+      // Remise et livraison DOIVENT suivre : sans elles, le contrat affichait un
+      // total sans le détail correspondant (frais de livraison invisibles).
+      remisePct: quote.remisePct,
+      livraisonCents: quote.livraisonCents,
+      livraisonLabel: deliveryLabelFromCents(quote.livraisonCents),
       totalNetCents: quote.totals.totalTTC,
     }),
     [quote],
   );
+
+  // Garde-fou affiché : recalcul indépendant du total à partir du devis.
+  const fin = useMemo(() => computeQuoteFinancials(quoteForContract), [quoteForContract]);
+  const totalsMatch = fin.totalCents === quote.totals.totalTTC;
 
   const { type, nbMensualites } = useMemo(
     () => detectContractType(quoteForContract, packPriceCents),
@@ -98,11 +113,13 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
   const [jourFacturation, setJourFacturation] = useState("1er");
   const [depotGarantieEuros, setDepotGarantieEuros] = useState<number>(0);
   const [conditionsParticulieres, setConditionsParticulieres] = useState(quote.notes ?? "");
+  const [blankFields, setBlankFields] = useState(false);
 
   const [downloading, setDownloading] = useState(false);
 
   const handleDownload = async () => {
-    if (!dateDebut.trim()) return;
+    // En mode « à compléter », la prise d'effet peut rester vierge (remplie au stylo).
+    if (!dateDebut.trim() && !blankFields) return;
     setDownloading(true);
     try {
       const terms: ContractTerms = {
@@ -120,7 +137,7 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
         numero,
         date: dateSignature,
       };
-      const data = quoteToContractData(quoteForContract, terms, packPriceCents);
+      const data = quoteToContractData(quoteForContract, terms, packPriceCents, { blankFields });
       const { downloadContractPdf } = await import("@lingengo/ui/contract-pdf");
       await downloadContractPdf(data);
       toast("Contrat généré");
@@ -146,6 +163,20 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
             source&nbsp;: {quote.numero}
           </span>
         </div>
+
+        {/* Garde-fou : le contrat ne peut pas afficher d'autres chiffres que le devis */}
+        {!totalsMatch && (
+          <div className="rounded-xl border border-danger-500 bg-danger-50 p-4 text-sm text-danger-600">
+            <p className="font-semibold">Incohérence de calcul — génération bloquée</p>
+            <p className="mt-1">
+              Le détail du devis (lignes {formatPrice(fin.sousTotalCents)} − remise{" "}
+              {formatPrice(fin.remiseCents)} + livraison {formatPrice(fin.livraisonCents)} + TVA{" "}
+              {formatPrice(fin.tvaCents)} = {formatPrice(fin.totalCents)}) ne correspond pas au
+              total enregistré ({formatPrice(quote.totals.totalTTC)}). Corrigez le devis avant de
+              produire le contrat.
+            </p>
+          </div>
+        )}
 
         {/* Résumé dérivé — le devis définit le contrat */}
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -199,9 +230,45 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
                   ))}
                 </tbody>
                 <tfoot>
+                  <tr className="border-t border-gray-200">
+                    <td className="pt-2 text-gray-500" colSpan={2}>
+                      Sous-total
+                    </td>
+                    <td className="pt-2 text-right tabular-nums text-gray-900">
+                      {formatPrice(fin.sousTotalCents)}
+                    </td>
+                  </tr>
+                  {fin.remiseCents > 0 && (
+                    <tr>
+                      <td className="text-gray-500" colSpan={2}>
+                        Remise {quote.remisePct / 100} %
+                      </td>
+                      <td className="text-right tabular-nums text-danger-600">
+                        -{formatPrice(fin.remiseCents)}
+                      </td>
+                    </tr>
+                  )}
+                  <tr>
+                    <td className="text-gray-500" colSpan={2}>
+                      {deliveryLabelFromCents(quote.livraisonCents)}
+                    </td>
+                    <td className="text-right tabular-nums text-gray-900">
+                      {fin.livraisonCents === 0 ? "Offerte" : formatPrice(fin.livraisonCents)}
+                    </td>
+                  </tr>
+                  {quote.tvaApplicable && (
+                    <tr>
+                      <td className="text-gray-500" colSpan={2}>
+                        TVA 20 %
+                      </td>
+                      <td className="text-right tabular-nums text-gray-900">
+                        {formatPrice(fin.tvaCents)}
+                      </td>
+                    </tr>
+                  )}
                   <tr className="border-t border-gray-300">
                     <td className="pt-2 font-semibold text-gray-900" colSpan={2}>
-                      Total net
+                      {quote.tvaApplicable ? "Total TTC" : "Total net"}
                     </td>
                     <td className="pt-2 text-right text-base font-bold tabular-nums text-primary-700">
                       {formatPrice(quote.totals.totalTTC)}
@@ -209,7 +276,10 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
                   </tr>
                 </tfoot>
               </table>
-              <p className="text-xs text-gray-500">Sans engagement · paiement à la commande.</p>
+              <p className="text-xs text-gray-500">
+                Sans engagement · paiement à la commande. Ces montants sont repris à
+                l&apos;identique sur le contrat.
+              </p>
             </div>
           )}
         </div>
@@ -369,6 +439,23 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
             </div>
           </div>
 
+          {/* Contrat à compléter à la main */}
+          <label className="mt-4 flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              checked={blankFields}
+              onChange={(e) => setBlankFields(e.target.checked)}
+            />
+            <span className="text-sm text-gray-700">
+              Contrat à compléter au stylo
+              <span className="mt-0.5 block text-xs text-gray-500">
+                Les champs non saisis sont imprimés en pointillés ({"------"}) et quatre lignes
+                vierges sont ajoutées au tableau des prestations.
+              </span>
+            </span>
+          </label>
+
           {/* Conditions particulières */}
           <div className="mt-4">
             <label
@@ -392,7 +479,11 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
           <Button variant="secondary" onClick={onClose}>
             Annuler
           </Button>
-          <Button loading={downloading} disabled={!dateDebut.trim()} onClick={handleDownload}>
+          <Button
+            loading={downloading}
+            disabled={(!dateDebut.trim() && !blankFields) || !totalsMatch}
+            onClick={handleDownload}
+          >
             <FileSignature className="h-4 w-4" aria-hidden="true" />
             Télécharger le contrat
           </Button>
