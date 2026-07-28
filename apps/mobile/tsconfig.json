@@ -2,6 +2,9 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // Les tests unitaires importent en `./cache.ts` (exigé par
+    // `node --import tsx --test`, qui résout les chemins tels quels).
+    "allowImportingTsExtensions": true,
     "paths": {
       "@/*": ["./*"],
       "@lingengo/shared": ["../../packages/shared/src"],

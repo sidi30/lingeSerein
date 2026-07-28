@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Header } from "@/components/header";
@@ -10,8 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
+import { DeleteAction } from "@/components/ui/delete-action";
+import { DELETE_BLOCKED } from "@/lib/deletion";
+import { DetailFallback } from "@/components/ui/detail-fallback";
+import { detailState, invalidateAfter } from "@/lib/query";
 import { Table, Thead, Th, Td, Tr } from "@/components/ui/table";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/lib/toast";
 import { formatPrice, formatDate, formatDateTime } from "@/lib/format";
 import { ORDER_TRANSITIONS } from "@lingengo/shared";
@@ -56,6 +59,7 @@ const nextActionLabels: Partial<Record<OrderStatus, string>> = {
 
 export default function CommandeDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -63,19 +67,21 @@ export default function CommandeDetailPage() {
   const [cancelRaison, setCancelRaison] = useState("");
   const [cancelError, setCancelError] = useState("");
 
-  const { data: order, isLoading } = useQuery({
+  const orderQuery = useQuery({
     queryKey: ["order", id],
     queryFn: () => api.get<OrderDetailDTO>(`/orders/${id}`),
   });
+  const order = orderQuery.data;
+  const state = detailState(orderQuery, Boolean(id));
 
   const statusMutation = useMutation({
     mutationFn: ({ status, raison }: { status: OrderStatus; raison?: string }) =>
       api.patch<OrderDetailDTO>(`/orders/${id}/status`, { status, raison }),
     onSuccess: () => {
       toast("Statut mis à jour");
-      queryClient.invalidateQueries({ queryKey: ["order", id] });
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-      queryClient.invalidateQueries({ queryKey: ["orders-badge"] });
+      // Un changement de statut ne touche pas que la commande : la tournée, le
+      // stock, la facture adossée et les KPI bougent avec elle.
+      void invalidateAfter(queryClient, "order");
       setCancelModal(false);
       setCancelRaison("");
     },
@@ -94,26 +100,15 @@ export default function CommandeDetailPage() {
     statusMutation.mutate({ status: "CANCELLED", raison: cancelRaison });
   };
 
-  if (isLoading) {
+  if (state !== "ready" || !order) {
     return (
       <>
         <Header title="Commande" />
-        <div className="space-y-6 p-4 sm:p-6">
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-40 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
-      </>
-    );
-  }
-
-  if (!order) {
-    return (
-      <>
-        <Header title="Commande" />
-        <div className="flex items-center justify-center p-12 text-gray-400">
-          Commande introuvable
-        </div>
+        <DetailFallback
+          state={state === "ready" ? "loading" : state}
+          label="Cette commande"
+          onRetry={() => void orderQuery.refetch()}
+        />
       </>
     );
   }
@@ -146,6 +141,23 @@ export default function CommandeDetailPage() {
                 Refuser
               </Button>
             )}
+            {/* PENDING ou CANCELLED uniquement (ORDER_DELETABLE côté API). */}
+            <DeleteAction
+              endpoint={`/orders/${order.id}`}
+              itemLabel={`la commande ${order.orderNumber}`}
+              label="Supprimer"
+              title="Supprimer cette commande ?"
+              description={`La commande ${order.orderNumber} sera supprimée. Cette action n'est pas réversible depuis l'admin.`}
+              successMessage="Commande supprimée"
+              disabledReason={
+                order.status === "PENDING" || order.status === "CANCELLED"
+                  ? null
+                  : DELETE_BLOCKED.order
+              }
+              scopes={["order"]}
+              removeKeys={[["order", id]]}
+              onDeleted={() => router.push("/commandes")}
+            />
           </div>
         }
       />

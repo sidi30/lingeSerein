@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/lib/toast";
 import type { UserDTO, DeliveryZoneDTO } from "@/lib/types";
 import { Copy, CheckCircle2 } from "lucide-react";
+import { invalidateAfter } from "@/lib/query";
 
 const formSchema = z.object({
   name: z.string().min(1, "Le nom est obligatoire").max(200),
@@ -35,6 +36,7 @@ const errorCls = "mt-1 text-xs text-danger-600";
 export default function NouvelUtilisateurPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -66,6 +68,9 @@ export default function NouvelUtilisateurPage() {
       }),
     onSuccess: (result) => {
       setTempPassword(result.temporaryPassword);
+      // L'écran reste en place pour afficher le mot de passe temporaire, mais
+      // la liste des utilisateurs, elle, doit déjà connaître le nouveau compte.
+      void invalidateAfter(queryClient, "user");
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : "Erreur lors de la création";

@@ -1,5 +1,10 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
-import { NotFoundError, AppError, ForbiddenError } from "../utils/errors.js";
+import {
+  NotFoundError,
+  AppError,
+  ForbiddenError,
+  UnprocessableEntityError,
+} from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
 import type {
   CreateRoundInput,
@@ -151,7 +156,10 @@ export class DeliveriesService {
       where: {
         driverId,
         date: { gte: today, lt: tomorrow },
-        status: { in: ["PLANNED", "IN_PROGRESS"] },
+        // COMPLETED incluse : sans elle, la tournée s'évanouissait à l'instant
+        // même où le livreur la clôturait, et son écran retombait sur « Aucune
+        // tournée aujourd'hui » — impossible de relire ce qu'il venait de faire.
+        status: { in: ["PLANNED", "IN_PROGRESS", "COMPLETED"] },
       },
       include: {
         stops: {
@@ -209,6 +217,14 @@ export class DeliveriesService {
         conforme: data.conforme,
         reserves: data.reserves,
         completedAt: new Date(),
+      },
+      // Même forme que les arrêts renvoyés par `getRoundById` / `getTodayRound` :
+      // la ligne nue renvoyée auparavant n'avait ni `client` ni `order`, et
+      // l'écran d'arrêt perdait l'adresse et le numéro de commande sitôt la
+      // livraison validée.
+      include: {
+        client: { select: { id: true, name: true, address: true, phone: true } },
+        order: { select: { id: true, orderNumber: true } },
       },
     });
 
@@ -397,6 +413,19 @@ export class DeliveriesService {
     const updated = await this.prisma.deliveryRound.update({
       where: { id: roundId },
       data: { status: "COMPLETED", completedAt: new Date() },
+      // Alignée sur `getRoundById` : sans `stops`, l'écran de tournée se vidait
+      // au moment même où le livreur la terminait.
+      include: {
+        stops: {
+          orderBy: { stopOrder: "asc" },
+          include: {
+            client: { select: { id: true, name: true, address: true, phone: true } },
+            order: { select: { id: true, orderNumber: true } },
+          },
+        },
+        driver: { select: { id: true, name: true } },
+        zone: { select: { id: true, name: true } },
+      },
     });
 
     await createAuditLog({
@@ -411,5 +440,67 @@ export class DeliveriesService {
     });
 
     return updated;
+  }
+
+  // ---- Suppression d'une tournée (DELETE /deliveries/rounds/:id) --------------
+
+  /**
+   * Supprime une tournée et ses arrêts — uniquement si RIEN n'a été livré.
+   *
+   * Un arrêt COMPLETED porte des preuves de remise : quantités livrées, linge
+   * sale repris, signature du client. Ces éléments font foi en cas de litige et
+   * ont déjà bougé le stock. Supprimer la tournée les effacerait sans rien
+   * corriger des mouvements déjà passés — d'où le refus, quel que soit le statut
+   * de la tournée elle-même.
+   *
+   * Suppression DURE : `DeliveryRound` n'a pas de `deletedAt`, et une tournée
+   * sans aucun arrêt livré n'est que de la planification. Les rotations qui
+   * pointaient vers ces arrêts survivent (`Rotation.deliveryStopId` est
+   * `onDelete: SetNull`) : le linge dehors reste suivi.
+   */
+  async deleteRound(roundId: string, adminId: string, ipAddress?: string, userAgent?: string) {
+    const round = await this.prisma.deliveryRound.findUnique({
+      where: { id: roundId },
+      select: {
+        id: true,
+        status: true,
+        date: true,
+        stops: { select: { id: true, status: true } },
+      },
+    });
+
+    if (!round) {
+      throw new NotFoundError("Tournée", roundId);
+    }
+
+    const completed = round.stops.filter((s) => s.status === "COMPLETED").length;
+
+    if (completed > 0) {
+      throw new UnprocessableEntityError(
+        `Cette tournée compte ${completed} arrêt(s) déjà livré(s) : leurs preuves de remise ` +
+          `(signature, quantités) ne peuvent pas être effacées`,
+        "ROUND_HAS_COMPLETED_STOPS",
+      );
+    }
+
+    // Les arrêts d'abord : la relation est obligatoire côté arrêt, la tournée ne
+    // peut pas partir tant qu'ils pointent dessus.
+    await this.prisma.$transaction([
+      this.prisma.deliveryStop.deleteMany({ where: { roundId } }),
+      this.prisma.deliveryRound.delete({ where: { id: roundId } }),
+    ]);
+
+    await createAuditLog({
+      prisma: this.prisma,
+      userId: adminId,
+      action: "DELETE",
+      entity: "DeliveryRound",
+      entityId: roundId,
+      changes: { previousStatus: round.status, stopsDeleted: round.stops.length },
+      ipAddress,
+      userAgent,
+    });
+
+    return { id: roundId, deleted: true, stopsDeleted: round.stops.length };
   }
 }

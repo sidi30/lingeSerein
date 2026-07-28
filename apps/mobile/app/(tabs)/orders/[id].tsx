@@ -21,8 +21,16 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/Button";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
-import { useOrder, useCancelOrder, useUpdateOrderStatus, formatCents, formatDate } from "@/lib/api";
+import {
+  useOrder,
+  useCancelOrder,
+  useUpdateOrderStatus,
+  formatCents,
+  formatDate,
+  errorMessage,
+} from "@/lib/api";
 import type { StatusHistoryEntry } from "@/lib/api";
+import { detailState } from "@/lib/query";
 import { useAuthStore } from "@/lib/store";
 import { colors, font, spacing, radius } from "@/lib/theme";
 
@@ -229,7 +237,9 @@ function RefuseModal({
 export default function OrderDetailScreen() {
   const params = useLocalSearchParams<{ id: string | string[] }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
-  const { data: order, isLoading, isError, refetch, isRefetching } = useOrder(id ?? "");
+  const orderQuery = useOrder(id ?? "");
+  const { data: order, refetch, isRefetching } = orderQuery;
+  const state = detailState(orderQuery, !!id);
   const cancel = useCancelOrder();
   const updateStatus = useUpdateOrderStatus();
   const role = useAuthStore((s) => s.user?.role);
@@ -238,7 +248,33 @@ export default function OrderDetailScreen() {
 
   const [showRefuseModal, setShowRefuseModal] = useState(false);
 
-  if (!id || isError || (!isLoading && !order)) {
+  // Injoignable ≠ inexistant : sur mobile, un rafraîchissement qui échoue après
+  // une action ne prouve pas que la commande a disparu. On propose de réessayer
+  // au lieu d'annoncer une suppression qui n'a pas eu lieu.
+  if (state === "unavailable") {
+    return (
+      <ScreenWrapper>
+        <EmptyState
+          icon="cloud-offline-outline"
+          title="Commande momentanément indisponible"
+          description="Impossible de joindre le serveur. Vérifiez votre connexion, la commande n'est pas perdue."
+        />
+        <Button
+          title="Réessayer"
+          onPress={() => void refetch()}
+          style={{ marginTop: spacing.lg }}
+        />
+        <Button
+          title="Retour"
+          onPress={() => router.back()}
+          variant="outline"
+          style={{ marginTop: spacing.sm }}
+        />
+      </ScreenWrapper>
+    );
+  }
+
+  if (state === "missing") {
     return (
       <ScreenWrapper>
         <EmptyState
@@ -256,7 +292,7 @@ export default function OrderDetailScreen() {
     );
   }
 
-  if (isLoading) {
+  if (state === "loading") {
     return (
       <ScreenWrapper>
         <View style={{ gap: spacing.md }}>
@@ -284,7 +320,17 @@ export default function OrderDetailScreen() {
         text: "Oui, annuler",
         style: "destructive",
         onPress: () => {
-          cancel.mutate({ id: order.id }, { onSuccess: () => router.back() });
+          if (cancel.isPending) return;
+          cancel.mutate(
+            { id: order.id },
+            {
+              onSuccess: () => router.back(),
+              // Le serveur refuse l'annulation à moins de 24 h (CANCEL_TOO_LATE)
+              // ou sur un statut incompatible. Sans ce retour, le client croyait
+              // la commande annulée alors qu'elle sera livrée et facturée.
+              onError: (e) => Alert.alert("Annulation impossible", errorMessage(e)),
+            },
+          );
         },
       },
     ]);
@@ -296,16 +342,24 @@ export default function OrderDetailScreen() {
       {
         text: "Confirmer",
         onPress: () => {
-          updateStatus.mutate({ id: order.id, status: "CONFIRMED" });
+          if (updateStatus.isPending) return;
+          updateStatus.mutate(
+            { id: order.id, status: "CONFIRMED" },
+            { onError: (e) => Alert.alert("Mise à jour impossible", errorMessage(e)) },
+          );
         },
       },
     ]);
   };
 
   const handleAdminRefuse = (reason: string) => {
+    if (updateStatus.isPending) return;
     updateStatus.mutate(
       { id: order.id, status: "CANCELLED", reason },
-      { onSuccess: () => setShowRefuseModal(false) },
+      {
+        onSuccess: () => setShowRefuseModal(false),
+        onError: (e) => Alert.alert("Refus impossible", errorMessage(e)),
+      },
     );
   };
 
@@ -315,7 +369,13 @@ export default function OrderDetailScreen() {
       { text: "Non", style: "cancel" },
       {
         text: "Oui",
-        onPress: () => updateStatus.mutate({ id: order.id, status: newStatus }),
+        onPress: () => {
+          if (updateStatus.isPending) return;
+          updateStatus.mutate(
+            { id: order.id, status: newStatus },
+            { onError: (e) => Alert.alert("Mise à jour impossible", errorMessage(e)) },
+          );
+        },
       },
     ]);
   };
@@ -363,12 +423,16 @@ export default function OrderDetailScreen() {
         Articles commandés
       </Text>
       <Card>
-        {order.items.map((item, i) => (
+        {(order.items ?? []).map((item, i) => (
           <View key={item.id} style={[styles.itemRow, i > 0 && styles.itemBorder]}>
             <View style={{ flex: 1 }}>
               <Text style={styles.itemName}>{item.product?.name ?? "Article"}</Text>
               <Text style={styles.itemMeta}>
-                {item.product?.range} · {formatCents(item.unitCents)}/u
+                {/* `range` est null pour tout le catalogue V2 : sans filtrage on
+                    affiche un « · » orphelin en tête de chaque ligne. */}
+                {[item.product?.range, `${formatCents(item.unitCents)}/u`]
+                  .filter(Boolean)
+                  .join(" · ")}
               </Text>
             </View>
             <Text style={styles.itemQty}>{item.quantity}×</Text>

@@ -7,12 +7,15 @@ import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DeleteAction } from "@/components/ui/delete-action";
+import { DELETE_BLOCKED } from "@/lib/deletion";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmailText } from "@/components/ui/email-text";
 import { DAY_LABELS, addDays, dayKey, dayKeyFromISO } from "@/lib/calendar";
 import type { PaginatedResponse } from "@/lib/types";
+import { invalidateAfter } from "@/lib/query";
 
 /**
  * Tournée telle que la renvoie `GET /deliveries/rounds` (liste).
@@ -197,7 +200,7 @@ export function RoundsTab() {
       }),
     onSuccess: () => {
       toast("Tournée créée");
-      queryClient.invalidateQueries({ queryKey: ["deliveries"] });
+      void invalidateAfter(queryClient, "delivery");
       setCreateOpen(false);
       setForm({ date: "", driverId: "", clientIds: [], setsByClient: {} });
     },
@@ -531,6 +534,29 @@ export function RoundsTab() {
                   ))
                 )}
               </div>
+            </div>
+
+            <div className="flex justify-start border-t border-gray-100 pt-4">
+              {/* Une tournée dont un arrêt est livré porte des preuves de remise
+                  (signature, quantités) : l'API refuse alors la suppression
+                  (422 ROUND_HAS_COMPLETED_STOPS), et l'UI le dit avant l'appel. */}
+              <DeleteAction
+                endpoint={`/deliveries/rounds/${roundDetail.id}`}
+                itemLabel={`la tournée du ${new Date(roundDetail.date).toLocaleDateString("fr-FR")}`}
+                label="Supprimer la tournée"
+                title="Supprimer cette tournée ?"
+                description={`La tournée et ses ${roundDetail.stops.length} arrêt${
+                  roundDetail.stops.length > 1 ? "s" : ""
+                } seront supprimés. Une tournée sans arrêt livré n'est que de la planification.`}
+                successMessage="Tournée supprimée"
+                disabledReason={
+                  roundDetail.stops.some((s) => s.status === "COMPLETED")
+                    ? DELETE_BLOCKED.round
+                    : null
+                }
+                scopes={["delivery"]}
+                onDeleted={() => setSelectedRoundId(null)}
+              />
             </div>
           </div>
         )}

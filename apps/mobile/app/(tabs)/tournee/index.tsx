@@ -17,8 +17,9 @@ import { Card } from "@/components/Card";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { ProgressRing } from "@/components/ProgressRing";
 import { EmptyState } from "@/components/EmptyState";
+import { ErrorState } from "@/components/ErrorState";
 import { Button } from "@/components/Button";
-import { useTodayRound, useCompleteRound } from "@/lib/api";
+import { useTodayRound, useCompleteRound, errorMessage } from "@/lib/api";
 import type { DeliveryStop } from "@/lib/api";
 import { colors, font, spacing, radius, MIN_HIT_TARGET } from "@/lib/theme";
 
@@ -179,20 +180,35 @@ function MapViewSection({
     Array<{ stopId: string; latitude: number; longitude: number } | null>
   >([]);
 
+  // `stops` est un tableau recréé à chaque rendu du parent : dépendre de sa
+  // référence relançait tout le géocodage en boucle. On se cale sur l'identité
+  // réelle du contenu.
+  const stopsKey = stops.map((s) => `${s.id}:${s.client.address ?? ""}`).join("|");
+
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
-      const results = await Promise.all(
-        stops.map(async (stop) => {
-          if (!stop.client.address) return null;
-          const c = await geocodeAddress(stop.client.address);
-          if (!c) return null;
-          return { stopId: stop.id, ...c };
-        }),
-      );
-      setCoords(results);
+      const results: Array<{ stopId: string; latitude: number; longitude: number } | null> = [];
+      // Séquentiel : en parallèle, le géocodeur de la plateforme limite le débit
+      // et rejette silencieusement une partie des adresses.
+      for (const stop of stops) {
+        if (cancelled) return;
+        if (!stop.client.address) {
+          results.push(null);
+          continue;
+        }
+        const c = await geocodeAddress(stop.client.address);
+        results.push(c ? { stopId: stop.id, ...c } : null);
+      }
+      // Ignore le résultat d'un passage rendu obsolète par un nouveau.
+      if (!cancelled) setCoords(results);
     };
     void load();
-  }, [stops]);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopsKey]);
 
   const validCoords = coords.filter(Boolean) as Array<{
     stopId: string;
@@ -264,7 +280,7 @@ function MapViewSection({
 // ─── Main screen ─────────────────────────────────────────────────
 
 export default function TourneeScreen() {
-  const { data: round, isLoading, refetch, isRefetching } = useTodayRound();
+  const { data: round, isLoading, isError, refetch, isRefetching } = useTodayRound();
   const completeRound = useCompleteRound();
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [locationPermission, setLocationPermission] = useState<"granted" | "denied" | "unknown">(
@@ -298,7 +314,9 @@ export default function TourneeScreen() {
   // Stops triés + arrêt courant calculés AVANT les early returns (Rules of
   // Hooks) — round peut être null, on tolère donc l'absence de données ici.
   const sortedStops = round ? [...round.stops].sort((a, b) => a.stopOrder - b.stopOrder) : [];
-  const currentStop = sortedStops.find((s) => s.status !== "COMPLETED");
+  // Un arrêt SKIPPED ou FAILED n'est pas « à faire » : le compter comme tel
+  // le laissait affiché en « Prochain » et empêchait la fin de tournée.
+  const currentStop = sortedStops.find((s) => s.status === "PENDING");
 
   // renderStop déclaré avant tout return conditionnel : sinon le nombre de
   // hooks change entre le rendu loading et le rendu data → crash
@@ -321,7 +339,12 @@ export default function TourneeScreen() {
         { text: "Annuler", style: "cancel" },
         {
           text: "Terminer",
-          onPress: () => completeRound.mutate(round.id),
+          onPress: () => {
+            if (completeRound.isPending) return;
+            completeRound.mutate(round.id, {
+              onError: (e) => Alert.alert("Fin de tournée impossible", errorMessage(e)),
+            });
+          },
         },
       ],
     );
@@ -334,6 +357,18 @@ export default function TourneeScreen() {
         <SkeletonBox height={70} style={{ marginBottom: spacing.sm }} />
         <SkeletonBox height={70} style={{ marginBottom: spacing.sm }} />
         <SkeletonBox height={70} />
+      </ScreenWrapper>
+    );
+  }
+
+  // AVANT l'état vide : « Aucune tournée aujourd'hui » sur une coupure réseau
+  // renvoyait le livreur chez lui alors que des clients l'attendaient.
+  // (Un 404/403 est déjà transformé en `null` par le hook : ici, c'est une
+  // vraie panne.)
+  if (isError) {
+    return (
+      <ScreenWrapper>
+        <ErrorState what="votre tournée du jour" onRetry={() => void refetch()} />
       </ScreenWrapper>
     );
   }

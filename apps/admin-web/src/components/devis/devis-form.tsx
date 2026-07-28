@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import type { DeliveryZone, UrgencyLevel } from "@lingengo/shared";
 import type { QuoteDTO, UserDTO } from "@/lib/types";
 import { useStockBySlug } from "@/lib/rotations";
 import { AlertTriangle, Plus, Trash2, ChevronUp, ChevronDown, Search } from "lucide-react";
+import { invalidateAfter } from "@/lib/query";
 
 /* ─── Catalogue quick-add ───
  * Dérivé du catalogue canonique (@lingengo/shared) : aucun prix n'est retapé ici,
@@ -91,6 +92,7 @@ const errorCls = "mt-1 text-xs text-danger-600";
 
 export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [clientSearch, setClientSearch] = useState("");
   const [showClientSearch, setShowClientSearch] = useState(false);
 
@@ -281,8 +283,11 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
       if (!initialData?.id) return Promise.reject(new Error("ID devis manquant"));
       return api.patch<QuoteDTO>(`/quotes/${initialData.id}`, payload);
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       toast(mode === "create" ? "Devis créé" : "Devis mis à jour");
+      // Avant `onSuccess`, qui navigue : sans cette attente, la liste des devis
+      // restait sur son cache et le devis tout juste créé en était absent.
+      await invalidateAfter(queryClient, "quote");
       onSuccess(result.id);
     },
     onError: (err: unknown) => {

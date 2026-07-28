@@ -475,6 +475,11 @@ model SubscriptionConfig {
   kitLitQty           Int      @default(4) @map("kit_lit_qty")
   minEngagementMonths Int      @default(3) @map("min_engagement_months")
   noticePeriodDays    Int      @default(30) @map("notice_period_days")
+  /// Facturation récurrente : TVA appliquée ou non. `false` par défaut, comme
+  /// les devis — l'opérateur relève de la franchise en base (art. 293 B du CGI)
+  /// tant qu'il n'a pas basculé. Facturer une TVA qu'on n'est pas autorisé à
+  /// collecter est la faute grave ; l'oublier se rattrape.
+  tvaApplicable       Boolean  @default(false) @map("tva_applicable")
   isActive            Boolean  @default(true) @map("is_active")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")

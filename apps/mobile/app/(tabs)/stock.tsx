@@ -8,6 +8,7 @@ import { DonutChart } from "@/components/DonutChart";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
+import { ErrorState } from "@/components/ErrorState";
 import { useMyStock, useOrders, formatDateShort, formatCents } from "@/lib/api";
 import type { ClientStock, StockMovement } from "@/lib/api";
 import { colors, font, spacing, radius } from "@/lib/theme";
@@ -150,12 +151,23 @@ function ActivitySection() {
   const { data: ordersData } = useOrders("DELIVERED");
 
   const now = new Date();
-  const cutoff = new Date(now);
-  if (period === "Ce mois") {
-    cutoff.setMonth(now.getMonth() - 1);
-  } else {
-    cutoff.setMonth(now.getMonth() - 3);
-  }
+  // Reculer d'un mois déborde sur les mois courts : le 31 mai, « 31 avril »
+  // n'existe pas et JS le normalise au 1er mai — la fenêtre saute un jour et des
+  // commandes disparaissent du total. On borne donc explicitement au dernier
+  // jour du mois visé. Minuit, aussi : `deliveryDate` est à minuit, et un cutoff
+  // à l'heure courante exclurait les livraisons du jour pivot.
+  const monthsBack = period === "Ce mois" ? 1 : 3;
+  const target = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
+  const lastDayOfTarget = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  const cutoff = new Date(
+    target.getFullYear(),
+    target.getMonth(),
+    Math.min(now.getDate(), lastDayOfTarget),
+    0,
+    0,
+    0,
+    0,
+  );
 
   const periodOrders =
     ordersData?.filter((o) => o.status === "DELIVERED" && new Date(o.deliveryDate) >= cutoff) ?? [];
@@ -216,7 +228,7 @@ function StockSkeleton() {
 // ─── Main screen ─────────────────────────────────────────────────
 
 export default function StockScreen() {
-  const { data, isLoading, refetch, isRefetching } = useMyStock();
+  const { data, isLoading, isError, refetch, isRefetching } = useMyStock();
 
   // Hook déclaré AVANT tout return conditionnel (Rules of Hooks) — sinon le
   // nombre de hooks change entre le rendu loading et le rendu data → crash
@@ -230,6 +242,17 @@ export default function StockScreen() {
   );
 
   if (isLoading) return <StockSkeleton />;
+
+  // « Pas de stock » et « je n'ai pas pu joindre le serveur » n'appellent pas la
+  // même réaction : le premier se règle à la prochaine livraison, le second en
+  // réessayant.
+  if (isError) {
+    return (
+      <ScreenWrapper>
+        <ErrorState what="votre stock" onRetry={() => void refetch()} />
+      </ScreenWrapper>
+    );
+  }
 
   if (!data?.stocks.length) {
     return (

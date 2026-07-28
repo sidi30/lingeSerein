@@ -10,9 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DeleteAction } from "@/components/ui/delete-action";
 import { Table, Thead, Th, Td, Tr } from "@/components/ui/table";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DetailFallback } from "@/components/ui/detail-fallback";
+import { detailState, invalidateAfter } from "@/lib/query";
 import { useToast } from "@/lib/toast";
 import { formatPrice, formatDate } from "@/lib/format";
 import { QUOTE_TRANSITIONS, QUOTE_EDITABLE, quoteToDevisData } from "@lingengo/shared";
@@ -27,7 +28,6 @@ import type {
 import {
   Download,
   Copy,
-  Trash2,
   ArrowRight,
   Edit,
   AlertCircle,
@@ -68,7 +68,6 @@ export default function DevisDetailPage() {
   const queryClient = useQueryClient();
 
   const [editMode, setEditMode] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [convertModal, setConvertModal] = useState(false);
   const [clientRequiredModal, setClientRequiredModal] = useState(false);
   const [createClientModal, setCreateClientModal] = useState(false);
@@ -80,10 +79,12 @@ export default function DevisDetailPage() {
   const [lineProductMapping, setLineProductMapping] = useState<Record<string, string>>({});
   const [deliveryDate, setDeliveryDate] = useState("");
 
-  const { data: quote, isLoading } = useQuery({
+  const quoteQuery = useQuery({
     queryKey: ["quote", id],
     queryFn: () => api.get<QuoteDTO>(`/quotes/${id}`),
   });
+  const quote = quoteQuery.data;
+  const state = detailState(quoteQuery, Boolean(id));
 
   const { data: products } = useQuery({
     queryKey: ["products-for-convert"],
@@ -113,8 +114,7 @@ export default function DevisDetailPage() {
       toast("Devis rattaché au client");
       setClientRequiredModal(false);
       setClientSearch("");
-      queryClient.invalidateQueries({ queryKey: ["quote", id] });
-      queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      void invalidateAfter(queryClient, "quote");
       // On rouvre la conversion : c'est ce que l'artisan voulait faire au départ.
       setConvertModal(true);
     },
@@ -127,8 +127,7 @@ export default function DevisDetailPage() {
     mutationFn: (status: QuoteStatus) => api.patch<QuoteDTO>(`/quotes/${id}/status`, { status }),
     onSuccess: () => {
       toast("Statut mis à jour");
-      queryClient.invalidateQueries({ queryKey: ["quote", id] });
-      queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      void invalidateAfter(queryClient, "quote");
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : "Erreur lors du changement de statut";
@@ -139,21 +138,14 @@ export default function DevisDetailPage() {
   // Duplication
   const duplicateMutation = useMutation({
     mutationFn: () => api.post<QuoteDTO>(`/quotes/${id}/duplicate`),
-    onSuccess: (newQuote) => {
+    onSuccess: async (newQuote) => {
       toast("Devis dupliqué");
+      // Attendre l'invalidation AVANT de naviguer : sans elle, revenir sur la
+      // liste affichait un cache d'où le nouveau devis était absent.
+      await invalidateAfter(queryClient, "quote");
       router.push(`/devis/${newQuote.id}`);
     },
     onError: () => toast("Erreur lors de la duplication", "error"),
-  });
-
-  // Suppression
-  const deleteMutation = useMutation({
-    mutationFn: () => api.delete(`/quotes/${id}`),
-    onSuccess: () => {
-      toast("Devis supprimé");
-      router.push("/devis");
-    },
-    onError: () => toast("Erreur lors de la suppression", "error"),
   });
 
   // Conversion en commande
@@ -169,8 +161,12 @@ export default function DevisDetailPage() {
         lineMappings,
       });
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       toast("Devis converti en commande");
+      // La conversion écrit des deux côtés : le devis passe converti, une
+      // commande naît, le stock bouge. Invalider les deux domaines avant de
+      // naviguer, sinon la liste des commandes n'affiche pas la nouvelle ligne.
+      await invalidateAfter(queryClient, "quote", "order");
       router.push(`/commandes/${result.orderId}`);
     },
     onError: (err: unknown) => {
@@ -191,8 +187,9 @@ export default function DevisDetailPage() {
   // dans ce cas son message nomme la facture existante, on le remonte tel quel.
   const invoiceMutation = useMutation({
     mutationFn: () => api.post<InvoiceDTO>(`/invoices/from-quote/${id}`, {}),
-    onSuccess: (invoice) => {
+    onSuccess: async (invoice) => {
       toast(`Facture ${invoice.invoiceNumber} créée`);
+      await invalidateAfter(queryClient, "invoice", "quote");
       router.push(`/factures/${invoice.id}`);
     },
     onError: (err: unknown) =>
@@ -219,23 +216,15 @@ export default function DevisDetailPage() {
     }
   };
 
-  if (isLoading) {
+  if (state !== "ready" || !quote) {
     return (
       <>
         <Header title="Devis" />
-        <div className="space-y-6 p-4 sm:p-6">
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
-      </>
-    );
-  }
-
-  if (!quote) {
-    return (
-      <>
-        <Header title="Devis" />
-        <div className="flex items-center justify-center p-12 text-gray-400">Devis introuvable</div>
+        <DetailFallback
+          state={state === "ready" ? "loading" : state}
+          label="Ce devis"
+          onRetry={() => void quoteQuery.refetch()}
+        />
       </>
     );
   }
@@ -247,7 +236,7 @@ export default function DevisDetailPage() {
         initialData={quote}
         onSuccess={() => {
           setEditMode(false);
-          queryClient.invalidateQueries({ queryKey: ["quote", id] });
+          void invalidateAfter(queryClient, "quote");
         }}
         onCancel={() => setEditMode(false)}
       />
@@ -321,12 +310,26 @@ export default function DevisDetailPage() {
                 Convertir en commande
               </Button>
             )}
-            {canDelete && (
-              <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
-                <Trash2 className="h-4 w-4" aria-hidden="true" />
-                Supprimer
-              </Button>
-            )}
+            {/* Désactivé plutôt que masqué hors brouillon : la règle (« un devis
+                envoyé garde la trace de ce qui a été proposé ») est utile à
+                lire, l'absence de bouton ne l'enseigne pas. */}
+            <DeleteAction
+              endpoint={`/quotes/${quote.id}`}
+              itemLabel={`le devis ${quote.numero}`}
+              label="Supprimer"
+              variant="danger"
+              title="Supprimer le devis ?"
+              description={`Le devis ${quote.numero} (${quote.clientNom}) sera supprimé définitivement. Cette action est irréversible.`}
+              successMessage="Devis supprimé"
+              disabledReason={
+                canDelete
+                  ? null
+                  : "Seul un devis en brouillon peut être supprimé — un devis envoyé garde une trace de ce qui a été proposé au client."
+              }
+              scopes={["quote"]}
+              removeKeys={[["quote", id]]}
+              onDeleted={() => router.push("/devis")}
+            />
           </div>
         }
       />
@@ -686,18 +689,6 @@ export default function DevisDetailPage() {
           setCreateClientModal(false);
           attachMutation.mutate(client.id);
         }}
-      />
-
-      {/* Confirmation suppression */}
-      <ConfirmDialog
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        onConfirm={() => deleteMutation.mutate()}
-        loading={deleteMutation.isPending}
-        variant="danger"
-        title="Supprimer le devis ?"
-        description={`Le devis ${quote.numero} sera supprimé définitivement. Cette action est irréversible.`}
-        confirmLabel="Supprimer"
       />
     </>
   );

@@ -93,11 +93,26 @@ export class StockItemsService {
       where: { operatorId_productSlug: { operatorId, productSlug } },
     });
 
-    if (!item) {
+    if (item) return toStockItemView(item);
+
+    // Pas de ligne en base ⇒ parc jamais saisi, PAS un article inexistant :
+    // `list()` synthétise justement ce slug à zéro. Renvoyer 404 faisait
+    // « introuvable » sur un article qu'on venait de voir dans la liste, et
+    // interdisait d'ouvrir l'écran où l'on saisit précisément ce parc.
+    const catalogue = CATALOG_PRODUCTS.find((p) => p.slug === productSlug);
+    if (!catalogue) {
       throw new NotFoundError("Stock", productSlug);
     }
 
-    return toStockItemView(item);
+    return {
+      productSlug: catalogue.slug,
+      name: catalogue.name,
+      totalOwned: 0,
+      inCirculation: 0,
+      dirtyPending: 0,
+      retired: 0,
+      disponible: 0,
+    };
   }
 
   /**

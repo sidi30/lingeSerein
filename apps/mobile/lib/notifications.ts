@@ -18,6 +18,8 @@ import { router } from "expo-router";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { apiFetch } from "./api";
+import { invalidateAfter } from "./cache";
+import { queryClient } from "./queryClient";
 import { useAuthStore } from "./store";
 
 // ─── Résolution des liens profonds ───────────────────────────────
@@ -187,6 +189,7 @@ export function usePushNotifications(): void {
 
     let cancelled = false;
     let subscription: { remove: () => void } | undefined;
+    let receivedSub: { remove: () => void } | undefined;
 
     try {
       Notifications.setNotificationHandler({
@@ -196,6 +199,13 @@ export function usePushNotifications(): void {
           shouldPlaySound: true,
           shouldSetBadge: false,
         }),
+      });
+
+      // Une push REÇUE application ouverte n'était écoutée nulle part : seul le
+      // tap l'était. Le badge d'onglet restait donc en retard jusqu'au cycle de
+      // polling suivant (60 s) alors que le serveur venait de nous prévenir.
+      receivedSub = Notifications.addNotificationReceivedListener(() => {
+        void invalidateAfter(queryClient, "notification");
       });
 
       subscription = Notifications.addNotificationResponseReceivedListener((response) => {
@@ -216,6 +226,7 @@ export function usePushNotifications(): void {
     return () => {
       cancelled = true;
       subscription?.remove();
+      receivedSub?.remove();
     };
   }, [token]);
 }

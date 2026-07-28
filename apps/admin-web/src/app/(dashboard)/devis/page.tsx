@@ -14,10 +14,12 @@ import { Table, Thead, Th, Td, Tr } from "@/components/ui/table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonTable } from "@/components/ui/skeleton";
+import { DeleteAction } from "@/components/ui/delete-action";
 import { Plus, FileText } from "lucide-react";
 import { formatPrice, formatDate } from "@/lib/format";
 import type { PaginatedResponse, QuoteDTO, QuoteStatus } from "@/lib/types";
 import { QUOTE_TRANSITIONS } from "@lingengo/shared";
+import { useClampedPage } from "@/lib/use-clamped-page";
 
 const statusOptions = [
   { value: "", label: "Tous les statuts" },
@@ -84,6 +86,7 @@ export default function DevisListPage() {
   const quotes = data?.data ?? [];
   const pagination = data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
+  useClampedPage(page, totalPages, setPage);
 
   return (
     <>
@@ -176,6 +179,7 @@ export default function DevisListPage() {
                   <Th>Total TTC</Th>
                   <Th>Date</Th>
                   <Th>Validité</Th>
+                  <Th className="text-right">Actions</Th>
                 </tr>
               </Thead>
               <tbody>
@@ -220,6 +224,25 @@ export default function DevisListPage() {
                             <span className="ml-1 text-gray-400">(terminal)</span>
                           )}
                         </span>
+                      </Td>
+                      <Td className="text-right">
+                        {/* L'API n'autorise la suppression qu'en BROUILLON
+                            (quotes.service.ts, 422 QUOTE_NOT_DELETABLE) : au-delà
+                            le bouton est désactivé avec sa raison, jamais
+                            cliquable pour rien. */}
+                        <DeleteAction
+                          endpoint={`/quotes/${quote.id}`}
+                          itemLabel={`le devis ${quote.numero}`}
+                          title="Supprimer ce devis ?"
+                          description={`Le devis ${quote.numero} (${quote.clientNom}) sera retiré de vos listes. Cette action n'est pas réversible depuis l'admin.`}
+                          successMessage="Devis supprimé"
+                          disabledReason={
+                            quote.status === "BROUILLON"
+                              ? null
+                              : "Seul un devis en brouillon peut être supprimé — un devis envoyé garde une trace de ce qui a été proposé au client."
+                          }
+                          scopes={["quote"]}
+                        />
                       </Td>
                     </Tr>
                   );

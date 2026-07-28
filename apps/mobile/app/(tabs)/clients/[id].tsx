@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/Button";
 import { SectionHeader } from "@/components/SectionHeader";
 import { useClient, formatCents, formatDate, CLIENT_SOURCE_LABELS } from "@/lib/api";
+import { detailState } from "@/lib/query";
 import { colors, font, spacing, radius } from "@/lib/theme";
 
 const ACCOMMODATION_LABELS: Record<string, string> = {
@@ -50,9 +51,36 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 export default function ClientDetailScreen() {
   const params = useLocalSearchParams<{ id: string | string[] }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
-  const { data: client, isLoading, isError, refetch, isRefetching } = useClient(id ?? "");
+  const clientQuery = useClient(id ?? "");
+  const { data: client, refetch, isRefetching } = clientQuery;
+  const state = detailState(clientQuery, !!id);
 
-  if (!id || isError || (!isLoading && !client)) {
+  // Injoignable ≠ inexistant : un rafraîchissement qui échoue après une action
+  // ne veut pas dire que la fiche a disparu.
+  if (state === "unavailable") {
+    return (
+      <ScreenWrapper>
+        <EmptyState
+          icon="cloud-offline-outline"
+          title="Fiche momentanément indisponible"
+          description="Impossible de joindre le serveur. Vérifiez votre connexion, la fiche n'est pas perdue."
+        />
+        <Button
+          title="Réessayer"
+          onPress={() => void refetch()}
+          style={{ marginTop: spacing.lg }}
+        />
+        <Button
+          title="Retour"
+          onPress={() => router.back()}
+          variant="outline"
+          style={{ marginTop: spacing.sm }}
+        />
+      </ScreenWrapper>
+    );
+  }
+
+  if (state === "missing") {
     return (
       <ScreenWrapper>
         <EmptyState
@@ -70,7 +98,7 @@ export default function ClientDetailScreen() {
     );
   }
 
-  if (isLoading) return <ClientDetailSkeleton />;
+  if (state === "loading") return <ClientDetailSkeleton />;
   if (!client) return null;
 
   const initials = client.name

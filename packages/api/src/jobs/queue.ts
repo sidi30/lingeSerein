@@ -9,6 +9,7 @@ export const QUEUE_NAMES = {
   INVOICES: "invoices",
   QUOTE_EXPIRY: "quote-expiry",
   ROTATIONS: "rotations",
+  DEVICE_TOKENS: "device-tokens",
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

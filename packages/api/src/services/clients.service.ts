@@ -499,7 +499,7 @@ export class ClientsService {
       }
     }
 
-    const updated = await this.prisma.user.update({
+    await this.prisma.user.update({
       where: { id },
       data: {
         ...(data.name !== undefined ? { name: data.name } : {}),
@@ -569,7 +569,11 @@ export class ClientsService {
       userAgent,
     });
 
-    return updated;
+    // La MÊME forme que `GET /clients/:id`. La réponse plate renvoyée
+    // auparavant perdait `subscription`, `orders`, `stocks` et les agrégats
+    // (`ordersCount`, `revenueCents`, `lastOrderAt`) : un écran qui s'appuyait
+    // dessus voyait ses blocs se vider après une simple sauvegarde.
+    return this.getById(id, operatorId);
   }
 
   // ---- Export CSV -----------------------------------------------------------

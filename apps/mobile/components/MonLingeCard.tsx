@@ -55,7 +55,9 @@ function RotationRow({ rotation }: { rotation: Rotation }) {
   const isLate = lateDays > 0;
   const isSoon = !isLate && remaining != null && remaining <= 1;
 
-  const totalItems = rotation.lignes.reduce((s, l) => s + l.qtyLivree, 0);
+  // `lignes` vient d'un DTO encore mouvant côté API : on ne suppose pas.
+  const lignes = rotation.lignes ?? [];
+  const totalItems = lignes.reduce((s, l) => s + l.qtyLivree, 0);
 
   let statusText: string;
   if (!rotation.dateReprisePrevue) {
@@ -85,9 +87,9 @@ function RotationRow({ rotation }: { rotation: Rotation }) {
         <Text style={styles.rowSince}>depuis le {formatDate(rotation.dateLivraison)}</Text>
       </View>
 
-      {rotation.lignes.length > 0 && (
+      {lignes.length > 0 && (
         <Text style={styles.rowLines} numberOfLines={2}>
-          {rotation.lignes.map((l) => `${l.qtyLivree}x ${l.designation}`).join(" · ")}
+          {lignes.map((l) => `${l.qtyLivree}x ${l.designation}`).join(" · ")}
         </Text>
       )}
 

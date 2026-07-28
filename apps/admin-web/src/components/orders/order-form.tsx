@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { EmailText } from "@/components/ui/email-text";
 import { formatPrice } from "@/lib/format";
 import type { ClientListDTO, PaginatedResponse, ProductV2DTO } from "@/lib/types";
+import { invalidateAfter } from "@/lib/query";
 
 const TIME_SLOTS = ["08:00-10:00", "10:00-12:00", "14:00-16:00", "16:00-18:00"];
 
@@ -124,11 +125,11 @@ export function OrderForm({ clientId, clientName, onSuccess, onCancel }: OrderFo
         specialNotes: specialNotes.trim() || undefined,
       });
     },
-    onSuccess: (order) => {
+    onSuccess: async (order) => {
       toast(`Commande ${order.orderNumber} créée`);
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
-      if (pickedClientId) queryClient.invalidateQueries({ queryKey: ["client", pickedClientId] });
+      // Attendu avant `onSuccess` : l’appelant referme la modale et navigue,
+      // et la liste qu’il affiche doit déjà connaître la commande créée.
+      await invalidateAfter(queryClient, "order", "client");
       onSuccess?.(order);
     },
     onError: (err: unknown) => {

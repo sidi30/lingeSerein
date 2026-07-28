@@ -17,6 +17,7 @@ import { useState, useMemo } from "react";
 import { Package, Pencil, PowerOff, Power, Plus } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import type { ProductV2DTO, ProductKind, PaginatedResponse } from "@/lib/types";
+import { invalidateAfter } from "@/lib/query";
 
 /* ─── Schémas Zod ─── */
 
@@ -95,7 +96,7 @@ function PriceModal({ product, onClose }: PriceModalProps) {
     },
     onSuccess: () => {
       toast("Prix mis à jour");
-      queryClient.invalidateQueries({ queryKey: ["products-v2"] });
+      void invalidateAfter(queryClient, "product");
       onClose();
     },
     onError: (err: unknown) => {
@@ -187,7 +188,7 @@ function ProductModal({ open, product, onClose }: ProductModalProps) {
       }),
     onSuccess: () => {
       toast("Produit créé");
-      queryClient.invalidateQueries({ queryKey: ["products-v2"] });
+      void invalidateAfter(queryClient, "product");
       reset();
       onClose();
     },
@@ -210,7 +211,7 @@ function ProductModal({ open, product, onClose }: ProductModalProps) {
     },
     onSuccess: () => {
       toast("Produit mis à jour");
-      queryClient.invalidateQueries({ queryKey: ["products-v2"] });
+      void invalidateAfter(queryClient, "product");
       onClose();
     },
     onError: (err: unknown) => {
@@ -443,7 +444,7 @@ export default function ProduitsPage() {
     },
     onSuccess: () => {
       toast("Statut du produit mis à jour");
-      queryClient.invalidateQueries({ queryKey: ["products-v2"] });
+      void invalidateAfter(queryClient, "product");
       setToggleTarget(null);
     },
     onError: (err: unknown) => {

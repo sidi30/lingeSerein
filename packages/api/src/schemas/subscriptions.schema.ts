@@ -47,6 +47,8 @@ export const updateSubscriptionConfigSchema = z
       .int()
       .min(0, "Le préavis doit être supérieur ou égal à 0")
       .optional(),
+    /** Facturation récurrente avec ou sans TVA (franchise en base, art. 293 B). */
+    tvaApplicable: z.boolean().optional(),
     isActive: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {

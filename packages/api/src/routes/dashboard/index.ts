@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { DashboardService } from "../../services/dashboard.service.js";
 import { requireRole } from "../../middleware/rbac.js";
+import { operatorIdOf } from "../../utils/operator.js";
 
 export default async function dashboardRoutes(app: FastifyInstance): Promise<void> {
   const service = new DashboardService(app.prisma);
@@ -10,12 +11,9 @@ export default async function dashboardRoutes(app: FastifyInstance): Promise<voi
     "/kpis",
     { preHandler: [app.authenticate, requireRole("ROLE_ADMIN", "ROLE_SUPER_ADMIN")] },
     async (request, reply) => {
-      const admin = await app.prisma.user.findUnique({
-        where: { id: request.user.sub },
-        select: { operatorId: true },
-      });
+      const operatorId = await operatorIdOf(app, request);
 
-      const kpis = await service.getKpis(admin!.operatorId);
+      const kpis = await service.getKpis(operatorId);
       return reply.send({ success: true, data: kpis });
     },
   );
@@ -35,12 +33,9 @@ export default async function dashboardRoutes(app: FastifyInstance): Promise<voi
     "/alerts",
     { preHandler: [app.authenticate, requireRole("ROLE_ADMIN", "ROLE_SUPER_ADMIN")] },
     async (request, reply) => {
-      const admin = await app.prisma.user.findUnique({
-        where: { id: request.user.sub },
-        select: { operatorId: true },
-      });
+      const operatorId = await operatorIdOf(app, request);
 
-      const alerts = await service.getAlerts(admin!.operatorId);
+      const alerts = await service.getAlerts(operatorId);
       return reply.send({ success: true, data: alerts });
     },
   );

@@ -40,9 +40,11 @@ export default async function orderRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const isAdmin = request.user.role === ROLES.ADMIN || request.user.role === ROLES.SUPER_ADMIN;
-      const userId = isAdmin ? undefined : request.user.sub;
+      const isDriver = request.user.role === ROLES.LIVREUR;
+      const userId = isAdmin || isDriver ? undefined : request.user.sub;
+      const driverId = isDriver ? request.user.sub : undefined;
 
-      const order = await service.getById(paramsParsed.data.id, userId);
+      const order = await service.getById(paramsParsed.data.id, userId, driverId);
       return reply.send({ success: true, data: order });
     },
   );
@@ -128,6 +130,39 @@ export default async function orderRoutes(app: FastifyInstance): Promise<void> {
       );
 
       return reply.send({ success: true, data: order });
+    },
+  );
+
+  // ---- DELETE /orders/:id (admin) ----
+  app.delete<{ Params: { id: string } }>(
+    "/:id",
+    {
+      preHandler: [app.authenticate, requireRole("ROLE_ADMIN", "ROLE_SUPER_ADMIN")],
+      schema: {
+        tags: ["Commandes"],
+        summary: "Supprimer une commande (soft-delete, PENDING ou CANCELLED)",
+        description:
+          "Refuse en 422 ORDER_NOT_DELETABLE au-delà : une commande confirmée ou livrée est " +
+          "adossée à une tournée et à une facture. L'annuler d'abord (PATCH /:id/status) conserve la trace.",
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      const paramsParsed = idParamSchema.safeParse(request.params);
+      if (!paramsParsed.success) {
+        throw new ValidationError(
+          paramsParsed.error.flatten().fieldErrors as Record<string, string[]>,
+        );
+      }
+
+      const result = await service.softDelete(
+        paramsParsed.data.id,
+        request.user.sub,
+        request.ip,
+        request.headers["user-agent"],
+      );
+
+      return reply.send({ success: true, data: result });
     },
   );
 }

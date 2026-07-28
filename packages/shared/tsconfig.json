@@ -1,9 +1,17 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // Les tests importent en `./module.ts` (exigé par `node --import tsx --test`).
+    // Sans cette option ils ne passent pas le typecheck ; la build, qui émet
+    // vraiment, la remet à false dans tsconfig.build.json.
+    "allowImportingTsExtensions": true,
     "rootDir": "src",
     "outDir": "dist"
   },
   "include": ["src"],
-  "exclude": ["dist", "node_modules", "**/*.test.ts"]
+  // Les tests restent dans le projet TypeScript : ESLint (projectService) refuse
+  // d'analyser un fichier absent du projet, et tous les *.test.ts échouaient en
+  // « was not found by the project service ». La build, elle, les exclut via
+  // tsconfig.build.json.
+  "exclude": ["dist", "node_modules"]
 }

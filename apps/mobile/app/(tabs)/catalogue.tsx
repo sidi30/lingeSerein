@@ -6,6 +6,7 @@ import { ScreenWrapper } from "@/components/ScreenWrapper";
 import { Card } from "@/components/Card";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
+import { ErrorState } from "@/components/ErrorState";
 import { useProducts, formatCents } from "@/lib/api";
 import type { Product, ProductKind } from "@/lib/api";
 import { colors, font, spacing, radius } from "@/lib/theme";
@@ -143,7 +144,7 @@ function CatalogueSkeleton() {
 // ─── Main screen ─────────────────────────────────────────────────
 
 export default function CatalogueScreen() {
-  const { data: products, isLoading, refetch, isRefetching } = useProducts();
+  const { data: products, isLoading, isError, refetch, isRefetching } = useProducts();
   const [activeFilter, setActiveFilter] = useState<FilterValue>("__all__");
 
   const filteredProducts: Product[] =
@@ -159,6 +160,7 @@ export default function CatalogueScreen() {
   );
 
   if (isLoading) return <CatalogueSkeleton />;
+  if (isError) return <ErrorState what="le catalogue" onRetry={() => void refetch()} />;
 
   return (
     <View style={styles.container}>

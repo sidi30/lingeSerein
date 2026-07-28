@@ -40,7 +40,13 @@ export class SettingsService {
       _count: { id: true },
     });
 
-    const countMap = new Map(zoneCounts.map((c) => [c.zoneId!, c._count.id]));
+    // `groupBy` type `zoneId` en nullable ; le `where` ci-dessus l'a déjà borné
+    // aux zones existantes, mais on filtre plutôt que d'affirmer.
+    const countMap = new Map(
+      zoneCounts
+        .filter((c): c is typeof c & { zoneId: string } => c.zoneId !== null)
+        .map((c) => [c.zoneId, c._count.id]),
+    );
 
     return zones.map((z) => ({
       ...z,

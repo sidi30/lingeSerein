@@ -15,6 +15,7 @@ import {
   priceUpdateSchema,
   listProductsQuerySchema,
 } from "../../schemas/products.schema.js";
+import { operatorIdOf } from "../../utils/operator.js";
 
 export default async function productRoutes(app: FastifyInstance): Promise<void> {
   const service = new ProductsService(app.prisma);
@@ -66,14 +67,11 @@ export default async function productRoutes(app: FastifyInstance): Promise<void>
         throw new ValidationError(parsed.error.flatten().fieldErrors as Record<string, string[]>);
       }
 
-      const admin = await app.prisma.user.findUnique({
-        where: { id: request.user.sub },
-        select: { operatorId: true },
-      });
+      const operatorId = await operatorIdOf(app, request);
 
       const product = await service.create(
         parsed.data,
-        admin!.operatorId,
+        operatorId,
         request.user.sub,
         request.ip,
         request.headers["user-agent"],

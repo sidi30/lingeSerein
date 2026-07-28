@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
+import { ErrorState } from "@/components/ErrorState";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead } from "@/lib/api";
 import type { Notification } from "@/lib/api";
@@ -182,7 +183,7 @@ function NotifItem({
 // ─── Écran ───────────────────────────────────────────────────────
 
 export default function NotificationsScreen() {
-  const { data, isLoading, refetch, isRefetching } = useNotifications();
+  const { data, isLoading, isError, refetch, isRefetching } = useNotifications();
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
   const insets = useSafeAreaInsets();
@@ -192,6 +193,7 @@ export default function NotificationsScreen() {
   const sections = useMemo(() => groupByDay(notifications), [notifications]);
 
   if (isLoading) return <LoadingScreen />;
+  if (isError) return <ErrorState what="vos notifications" onRetry={() => void refetch()} />;
 
   const unreadCount = data?.unreadCount ?? 0;
 

@@ -5,6 +5,7 @@ import { CalendarClock, MapPin, PackageCheck, Truck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { DeleteAction } from "@/components/ui/delete-action";
 import { useToast } from "@/lib/toast";
 import { ApiError } from "@/lib/api";
 import { dayKey, dayKeyFromISO } from "@/lib/calendar";
@@ -168,7 +169,27 @@ export function RotationDetail({ rotation, onClose }: RotationDetailProps) {
 
         {/* Saisie de la reprise */}
         {!repriseOpen ? (
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* Supprimer une rotation dont le linge est encore dehors ferait
+                disparaître la seule trace de ce qu'il faut aller récupérer :
+                l'API ne l'autorise qu'une fois reprise ou annulée. */}
+            <span className="mr-auto">
+              <DeleteAction
+                endpoint={`/rotations/${rotation.id}`}
+                itemLabel={`la rotation de ${rotation.clientNom}`}
+                label="Supprimer"
+                title="Supprimer cette rotation ?"
+                description={`La rotation de ${rotation.clientNom} et ses lignes seront supprimées. Les mouvements de stock déjà enregistrés ne sont pas annulés.`}
+                successMessage="Rotation supprimée"
+                disabledReason={
+                  rotation.status === "REPRISE" || rotation.status === "ANNULEE"
+                    ? null
+                    : "Le linge de cette rotation est encore chez le client : elle ne peut être supprimée qu'une fois reprise ou annulée."
+                }
+                scopes={["rotation"]}
+                onDeleted={onClose}
+              />
+            </span>
             <Button variant="secondary" onClick={onClose}>
               Fermer
             </Button>

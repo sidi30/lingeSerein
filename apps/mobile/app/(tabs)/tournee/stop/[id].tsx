@@ -25,10 +25,12 @@ import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
-import { SignaturePad, strokesToDataUrl } from "@/components/SignaturePad";
+import { ErrorState } from "@/components/ErrorState";
+import { SignaturePad, strokesToDataUrl, isMeaningfulSignature } from "@/components/SignaturePad";
 import type { SignatureStroke } from "@/components/SignaturePad";
-import { useTodayRound, useCompleteStop } from "@/lib/api";
+import { useTodayRound, useCompleteStop, errorMessage } from "@/lib/api";
 import type { DeliveryStop, CompleteStopInput } from "@/lib/api";
+import { useAuthStore } from "@/lib/store";
 import { colors, font, spacing, radius, MIN_HIT_TARGET, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
 
 // ─── Stepper ──────────────────────────────────────────────────────
@@ -92,8 +94,11 @@ export default function StopDetailScreen() {
   const params = useLocalSearchParams<{ id: string | string[] }>();
   const stopId = Array.isArray(params.id) ? params.id[0] : params.id;
 
-  const { data: round, isLoading } = useTodayRound();
+  const roundQuery = useTodayRound();
+  const { data: round } = roundQuery;
   const completeStop = useCompleteStop();
+  const role = useAuthStore((s) => s.user?.role);
+  const isDriver = role === "ROLE_LIVREUR";
   const insets = useSafeAreaInsets();
 
   const stop: DeliveryStop | undefined = round?.stops.find((s) => s.id === stopId);
@@ -110,12 +115,38 @@ export default function StopDetailScreen() {
   const [conforme, setConforme] = useState(true);
   const [reserves, setReserves] = useState("");
 
-  const hasSignature = strokes.length > 0;
+  // Un appui accidentel sur la zone (pour faire défiler) ne vaut pas signature.
+  const hasSignature = isMeaningfulSignature(strokes);
 
   // Pre-fill when stop data loads
   const setsVal = setsDelivered ?? stop?.setsToDeliver ?? 0;
 
-  if (isLoading) {
+  // Écran réservé au livreur. `useTodayRound` est désactivé pour les autres
+  // rôles, et une requête désactivée reste `isPending` indéfiniment : sans ce
+  // garde-fou, un client arrivant ici par lien profond voyait un squelette qui
+  // ne se résolvait jamais.
+  if (!isDriver) {
+    return (
+      <View style={styles.flex}>
+        <EmptyState
+          icon="lock-closed-outline"
+          title="Réservé aux livreurs"
+          description="Cet écran fait partie de la tournée de livraison."
+        />
+        <Button
+          title="Retour"
+          onPress={() => router.back()}
+          variant="outline"
+          style={{ margin: spacing.lg }}
+        />
+      </View>
+    );
+  }
+
+  // Tant que la tournée n'est pas arrivée, on affiche le squelette — y compris
+  // quand la requête est en cours de rafraîchissement. `isLoading` seul valait
+  // « introuvable » dans ce cas, alors que l'arrêt existe.
+  if (!stop && (roundQuery.isPending || roundQuery.isFetching)) {
     return (
       <KeyboardAvoidingView
         style={styles.flex}
@@ -127,6 +158,23 @@ export default function StopDetailScreen() {
           <SkeletonBox height={80} style={{ margin: spacing.lg }} />
         </View>
       </KeyboardAvoidingView>
+    );
+  }
+
+  // La tournée n'a pas pu être chargée : l'arrêt existe toujours, c'est la
+  // liaison qui manque. Le dire évite d'annoncer au livreur la disparition
+  // d'un arrêt sur lequel il doit encore faire signer.
+  if (!stop && roundQuery.isError) {
+    return (
+      <View style={styles.flex}>
+        <ErrorState what="votre tournée" onRetry={() => void roundQuery.refetch()} />
+        <Button
+          title="Retour"
+          onPress={() => router.back()}
+          variant="outline"
+          style={{ margin: spacing.lg }}
+        />
+      </View>
     );
   }
 
@@ -175,9 +223,9 @@ export default function StopDetailScreen() {
   };
 
   const submit = () => {
-    if (Platform.OS !== "web") {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
+    // `submit` est aussi appelé depuis une alerte, hors de la protection
+    // `disabled` du bouton : sans cette garde, deux validations peuvent partir.
+    if (completeStop.isPending) return;
 
     const data: CompleteStopInput = {
       setsDelivered: setsVal,
@@ -197,9 +245,14 @@ export default function StopDetailScreen() {
       },
       {
         onSuccess: () => {
+          // Haptique de succès seulement une fois le serveur d'accord : la
+          // jouer avant l'envoi confirmait aussi les échecs.
+          if (Platform.OS !== "web") {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          }
           // Find next pending stop
           const nextStop = round?.stops
-            .filter((s) => s.status !== "COMPLETED" && s.id !== stop.id)
+            .filter((s) => s.status === "PENDING" && s.id !== stop.id)
             .sort((a, b) => a.stopOrder - b.stopOrder)[0];
 
           if (nextStop) {
@@ -220,9 +273,14 @@ export default function StopDetailScreen() {
           // On ne réinitialise que l'étape de confirmation : la signature, le
           // nom et les réserves restent saisis pour pouvoir réessayer sans
           // redemander au client de signer une seconde fois.
+          if (Platform.OS !== "web") {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          }
           Alert.alert(
-            "Erreur de validation",
-            e instanceof Error ? e.message : "Une erreur est survenue.",
+            "Validation impossible",
+            `${errorMessage(e)}
+
+Votre signature est conservée.`,
           );
           setConfirmed(false);
         },
@@ -450,6 +508,7 @@ export default function StopDetailScreen() {
               />
 
               <SignaturePad
+                disabled={completeStop.isPending}
                 onChange={(s, size) => {
                   setStrokes(s);
                   setPadSize(size);

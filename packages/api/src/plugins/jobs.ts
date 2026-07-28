@@ -7,6 +7,7 @@ import { createNotificationWorker } from "../jobs/notification.worker.js";
 import { createInvoiceWorker } from "../jobs/invoice.worker.js";
 import { createQuoteExpiryWorker } from "../jobs/quote-expiry.worker.js";
 import { createRotationWorker } from "../jobs/rotation.worker.js";
+import { createDeviceTokenWorker, RETENTION_JETONS_JOURS } from "../jobs/device-token.worker.js";
 
 /**
  * Plugin Fastify — BullMQ queues and workers.
@@ -28,6 +29,7 @@ export default fp(async (app: FastifyInstance) => {
   const invoicesQueue = createQueue(QUEUE_NAMES.INVOICES, connection);
   const quoteExpiryQueue = createQueue(QUEUE_NAMES.QUOTE_EXPIRY, connection);
   const rotationsQueue = createQueue(QUEUE_NAMES.ROTATIONS, connection);
+  const deviceTokensQueue = createQueue(QUEUE_NAMES.DEVICE_TOKENS, connection);
 
   // ---- Workers ----
   const workers: Worker[] = [];
@@ -37,6 +39,7 @@ export default fp(async (app: FastifyInstance) => {
   workers.push(createInvoiceWorker(connection, app.prisma));
   workers.push(createQuoteExpiryWorker(connection, app.prisma));
   workers.push(createRotationWorker(connection, app.prisma));
+  workers.push(createDeviceTokenWorker(connection, app.prisma));
 
   // ---- CRON Schedules ----
 
@@ -106,7 +109,43 @@ export default fp(async (app: FastifyInstance) => {
     },
   );
 
-  app.log.info("BullMQ workers and CRON schedules registered");
+  // ---- Facturation des abonnements ----
+  // Le worker de facturation existait sans AUCUN producteur : aucune facture
+  // d'abonnement récurrent n'a jamais été générée depuis la mise en service.
+  //
+  // Quotidien et non mensuel : les abonnements ne démarrent pas le même jour du
+  // mois, et chacun est facturé sur SA propre période (`currentPeriodEnd`), pas
+  // sur un calendrier commun. Le job ne fait rien les jours sans échéance.
+  //
+  // 05:00 Europe/Paris : après la purge des jetons (04:00), avant le rappel du
+  // matin (07:00). `tz` obligatoire — le conteneur tourne en UTC.
+  await invoicesQueue.upsertJobScheduler(
+    "invoice-cycle-cron",
+    { pattern: "0 5 * * *", tz: "Europe/Paris" },
+    {
+      name: "invoice-cycle",
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: { count: 100 } },
+    },
+  );
+
+  // Purge des jetons push dormants — tous les jours à 04:00
+  // `tz` obligatoire ici aussi (conteneur en UTC). 04:00 : après l'expiration des
+  // devis (03:00) et bien avant le rappel du matin (07:00), donc hors de toute
+  // fenêtre où un envoi push pourrait lire la table pendant qu'on la purge.
+  await deviceTokensQueue.upsertJobScheduler(
+    "device-token-cleanup-cron",
+    { pattern: "0 4 * * *", tz: "Europe/Paris" },
+    {
+      name: "device-token-cleanup",
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: { count: 100 } },
+    },
+  );
+
+  app.log.info(
+    `BullMQ workers and CRON schedules registered (rétention jetons push : ${RETENTION_JETONS_JOURS} j)`,
+  );
 
   // ---- Expose queues on app for route handlers ----
   app.decorate("queues", {
@@ -115,6 +154,7 @@ export default fp(async (app: FastifyInstance) => {
     invoices: invoicesQueue,
     quoteExpiry: quoteExpiryQueue,
     rotations: rotationsQueue,
+    deviceTokens: deviceTokensQueue,
   });
 
   // ---- Graceful shutdown ----
@@ -131,6 +171,7 @@ export default fp(async (app: FastifyInstance) => {
       invoicesQueue.close(),
       quoteExpiryQueue.close(),
       rotationsQueue.close(),
+      deviceTokensQueue.close(),
     ]);
 
     app.log.info("BullMQ workers shut down");
@@ -146,6 +187,7 @@ declare module "fastify" {
       invoices: ReturnType<typeof createQueue>;
       quoteExpiry: ReturnType<typeof createQueue>;
       rotations: ReturnType<typeof createQueue>;
+      deviceTokens: ReturnType<typeof createQueue>;
     };
   }
 }

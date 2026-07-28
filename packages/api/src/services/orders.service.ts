@@ -12,6 +12,12 @@ import type {
   UpdateOrderStatusInput,
 } from "../schemas/orders.schema.js";
 
+/**
+ * Seuls états supprimables : la commande n'est pas encore entrée dans la chaîne
+ * logistique (PENDING), ou en est déjà sortie sans effet (CANCELLED).
+ */
+const ORDER_DELETABLE: OrderStatus[] = ["PENDING", "CANCELLED"];
+
 export class OrdersService {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -70,9 +76,19 @@ export class OrdersService {
     };
   }
 
-  async getById(id: string, userId?: string) {
+  /**
+   * @param userId  restreint au propriétaire de la commande (rôle CLIENT).
+   * @param driverId restreint aux commandes d'une tournée que ce livreur conduit.
+   *
+   * Le livreur n'est ni admin ni propriétaire : il tombait donc dans la branche
+   * `userId = son propre id` et **toute** commande lui renvoyait 404, y compris
+   * celles de sa tournée du jour.
+   */
+  async getById(id: string, userId?: string, driverId?: string) {
     const where: Prisma.OrderWhereInput = { id, deletedAt: null };
-    if (userId) {
+    if (driverId) {
+      where.deliveryStop = { round: { driverId } };
+    } else if (userId) {
       where.userId = userId;
     }
 
@@ -160,7 +176,11 @@ export class OrdersService {
       where: { id: { in: productIds }, isActive: true, deletedAt: null },
     });
 
-    if (products.length !== productIds.length) {
+    // Comparaison sur les identifiants DISTINCTS : commander deux fois le même
+    // produit (deux lignes du même kit) donnait un `productIds` plus long que
+    // le nombre de lignes en base, et la commande était refusée en « produits
+    // invalides » alors que tout était valide.
+    if (products.length !== new Set(productIds).size) {
       throw new AppError(
         400,
         "INVALID_PRODUCTS",
@@ -171,7 +191,10 @@ export class OrdersService {
     const productMap = new Map(products.map((p) => [p.id, p]));
 
     const items = data.items.map((item) => {
-      const product = productMap.get(item.productId)!;
+      const product = productMap.get(item.productId);
+      if (!product) {
+        throw new AppError(400, "INVALID_PRODUCTS", `Produit ${item.productId} introuvable`);
+      }
       return {
         productId: item.productId,
         quantity: item.quantity,
@@ -289,7 +312,7 @@ export class OrdersService {
       );
     }
 
-    const updated = await this.prisma.order.update({
+    await this.prisma.order.update({
       where: { id },
       data: {
         status: "CANCELLED",
@@ -309,7 +332,10 @@ export class OrdersService {
       userAgent,
     });
 
-    return updated;
+    // La MÊME forme que `GET /orders/:id`. La ligne Prisma nue renvoyée
+    // auparavant n'avait pas `items` : un écran qui écrasait son cache avec
+    // cette réponse plantait au rendu suivant sur `order.items.map()`.
+    return this.getById(id);
   }
 
   async updateStatus(
@@ -339,7 +365,7 @@ export class OrdersService {
       );
     }
 
-    const updated = await this.prisma.order.update({
+    await this.prisma.order.update({
       where: { id },
       data: {
         status: to,
@@ -386,6 +412,54 @@ export class OrdersService {
       }
     }
 
-    return updated;
+    // Même forme que `GET /orders/:id` — cf. `cancel()`.
+    return this.getById(id);
+  }
+
+  // ---- Suppression douce (DELETE /orders/:id) ---------------------------------
+
+  /**
+   * Soft-delete d'une commande — PENDING ou CANCELLED uniquement.
+   *
+   * Au-delà, la commande est engagée dans la chaîne logistique et comptable :
+   * une commande CONFIRMED a pu générer un arrêt de tournée, une DELIVERED est
+   * adossée à une facture. La faire disparaître d'un clic désaccorderait la
+   * facturation du réel. Ces états-là s'annulent (PATCH /:id/status → CANCELLED),
+   * ce qui conserve la trace, puis se suppriment.
+   */
+  async softDelete(id: string, adminId: string, ipAddress?: string, userAgent?: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, status: true, orderNumber: true },
+    });
+
+    if (!order) {
+      throw new NotFoundError("Commande", id);
+    }
+
+    if (!ORDER_DELETABLE.includes(order.status)) {
+      throw new UnprocessableEntityError(
+        `Une commande ${order.status} ne peut pas être supprimée — annulez-la d'abord (statut CANCELLED)`,
+        "ORDER_NOT_DELETABLE",
+      );
+    }
+
+    await this.prisma.order.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+
+    await createAuditLog({
+      prisma: this.prisma,
+      userId: adminId,
+      action: "DELETE",
+      entity: "Order",
+      entityId: id,
+      changes: { orderNumber: order.orderNumber, previousStatus: order.status },
+      ipAddress,
+      userAgent,
+    });
+
+    return { id, deleted: true };
   }
 }

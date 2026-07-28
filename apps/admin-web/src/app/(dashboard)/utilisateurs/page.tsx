@@ -14,10 +14,13 @@ import { Table, Thead, Th, Td, Tr } from "@/components/ui/table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonTable } from "@/components/ui/skeleton";
+import { DeleteAction } from "@/components/ui/delete-action";
 import { Plus, UserCog } from "lucide-react";
 import { formatDate } from "@/lib/format";
+import { useAuth } from "@/lib/auth";
 import type { PaginatedResponse, UserDTO, UserRole } from "@/lib/types";
 import { EmailText } from "@/components/ui/email-text";
+import { useClampedPage } from "@/lib/use-clamped-page";
 
 const roleOptions = [
   { value: "", label: "Tous les rôles" },
@@ -43,6 +46,7 @@ const roleConfig: Record<UserRole, { label: string; variant: BadgeVariant }> = {
 
 export default function UtilisateursPage() {
   const router = useRouter();
+  const { user: currentUser } = useAuth();
   const [page, setPage] = useState(1);
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -73,6 +77,7 @@ export default function UtilisateursPage() {
   const users = data?.data ?? [];
   const pagination = data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
+  useClampedPage(page, totalPages, setPage);
 
   return (
     <>
@@ -179,6 +184,7 @@ export default function UtilisateursPage() {
                   <Th>Zone</Th>
                   <Th>Statut</Th>
                   <Th>Créé le</Th>
+                  <Th className="text-right">Actions</Th>
                 </tr>
               </Thead>
               <tbody>
@@ -216,6 +222,25 @@ export default function UtilisateursPage() {
                       </Td>
                       <Td>
                         <span className="text-sm text-gray-500">{formatDate(user.createdAt)}</span>
+                      </Td>
+                      <Td className="text-right">
+                        {/* L'API refuse l'auto-suppression (422 CANNOT_DELETE_SELF).
+                            On le reflète ici plutôt que de laisser partir un
+                            appel dont on connaît déjà le refus. */}
+                        <DeleteAction
+                          endpoint={`/users/${user.id}`}
+                          itemLabel={user.name}
+                          title={`Supprimer ${user.name} ?`}
+                          description="Le compte est désactivé et ses sessions sont révoquées immédiatement. Son historique (commandes, factures) reste attaché à son nom."
+                          successMessage="Compte supprimé"
+                          disabledReason={
+                            currentUser?.id === user.id
+                              ? "Vous ne pouvez pas supprimer votre propre compte."
+                              : null
+                          }
+                          requireTypedText={user.name}
+                          scopes={["user"]}
+                        />
                       </Td>
                     </Tr>
                   );

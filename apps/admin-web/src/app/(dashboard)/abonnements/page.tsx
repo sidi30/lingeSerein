@@ -11,8 +11,11 @@ import { Pagination } from "@/components/ui/pagination";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonTable } from "@/components/ui/skeleton";
 import { useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import { EmailText } from "@/components/ui/email-text";
+import { Button } from "@/components/ui/button";
+import { CascadeDeleteDialog } from "@/components/ui/cascade-delete-dialog";
+import { useClampedPage } from "@/lib/use-clamped-page";
 
 interface SubscriptionProduct {
   quantity: number;
@@ -101,6 +104,7 @@ export default function AbonnementsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [planFilter, setPlanFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Subscription | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["subscriptions", page, statusFilter, planFilter, search],
@@ -121,6 +125,7 @@ export default function AbonnementsPage() {
   const subscriptions = data?.data ?? [];
   const pagination = data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
+  useClampedPage(page, totalPages, setPage);
   const hasFilters = !!(search || statusFilter || planFilter);
 
   return (
@@ -202,6 +207,7 @@ export default function AbonnementsPage() {
                   <Th>Période</Th>
                   <Th>Produits</Th>
                   <Th>Montant/mois</Th>
+                  <Th className="text-right">Actions</Th>
                 </tr>
               </Thead>
               <tbody>
@@ -246,6 +252,16 @@ export default function AbonnementsPage() {
                           {formatPrice(monthlyCents)}
                         </span>
                       </Td>
+                      <Td className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Supprimer l'abonnement de ${sub.user.name}`}
+                          onClick={() => setDeleteTarget(sub)}
+                        >
+                          <Trash2 className="h-4 w-4 text-danger-600" aria-hidden="true" />
+                        </Button>
+                      </Td>
                     </Tr>
                   );
                 })}
@@ -262,6 +278,20 @@ export default function AbonnementsPage() {
           </>
         )}
       </div>
+
+      {deleteTarget && (
+        <CascadeDeleteDialog
+          open
+          onClose={() => setDeleteTarget(null)}
+          previewEndpoint={`/subscriptions/${deleteTarget.id}/deletion-preview`}
+          deleteEndpoint={`/subscriptions/${deleteTarget.id}?cascade=true`}
+          title={`Supprimer l'abonnement de ${deleteTarget.user.name} ?`}
+          description="L'abonnement et les rotations qu'il a engendrées seront supprimés. Les factures déjà émises, elles, sont conservées. Cette action est irréversible."
+          successMessage="Abonnement supprimé"
+          requireTypedText={deleteTarget.plan}
+          scopes={["subscription"]}
+        />
+      )}
     </>
   );
 }

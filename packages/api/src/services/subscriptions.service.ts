@@ -78,6 +78,9 @@ export class SubscriptionsService {
         kitLitQty: SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY,
         minEngagementMonths: SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS,
         noticePeriodDays: SUBSCRIPTION_DEFAULTS.NOTICE_PERIOD_DAYS,
+        // Aligné sur le défaut des devis : pas de TVA tant que l'opérateur n'a
+        // pas déclaré son assujettissement (art. 293 B du CGI).
+        tvaApplicable: false,
         isActive: true,
       },
     });
@@ -107,6 +110,7 @@ export class SubscriptionsService {
           ? { minEngagementMonths: data.minEngagementMonths }
           : {}),
         ...(data.noticePeriodDays !== undefined ? { noticePeriodDays: data.noticePeriodDays } : {}),
+        ...(data.tvaApplicable !== undefined ? { tvaApplicable: data.tvaApplicable } : {}),
         ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
       },
     });
@@ -295,6 +299,7 @@ export class SubscriptionsService {
         pausedAt: new Date(),
         pauseMonthsUsed: { increment: 1 },
       },
+      include: SUBSCRIPTION_INCLUDE,
     });
 
     await createAuditLog({
@@ -335,6 +340,7 @@ export class SubscriptionsService {
         currentPeriodStart: now,
         currentPeriodEnd: periodEnd,
       },
+      include: SUBSCRIPTION_INCLUDE,
     });
 
     await createAuditLog({

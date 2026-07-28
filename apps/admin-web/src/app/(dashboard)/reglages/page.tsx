@@ -17,6 +17,7 @@ import { SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
 import type { DeliveryZoneDTO, OperatorDTO, StockThresholdDTO } from "@/lib/types";
 import { Plus, Edit, Trash2, MapPin, Building2, Package, RefreshCw } from "lucide-react";
 import type { SubscriptionConfigDTO } from "@/lib/types";
+import { invalidateAfter } from "@/lib/query";
 
 type Tab = "zones" | "operateur" | "stock" | "abonnement";
 
@@ -100,7 +101,7 @@ function ZonesTab() {
     onSuccess: () => {
       toast(zoneModal.zone ? "Zone mise à jour" : "Zone créée");
       setZoneModal({ open: false });
-      queryClient.invalidateQueries({ queryKey: ["zones"] });
+      void invalidateAfter(queryClient, "settings");
     },
     onError: (err: unknown) => {
       toast(err instanceof Error ? err.message : "Erreur lors de l'enregistrement", "error");
@@ -112,7 +113,7 @@ function ZonesTab() {
     onSuccess: () => {
       toast("Zone supprimée");
       setConfirmDeleteZone(null);
-      queryClient.invalidateQueries({ queryKey: ["zones"] });
+      void invalidateAfter(queryClient, "settings");
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : "Erreur lors de la suppression";
@@ -350,7 +351,7 @@ function OperateurTab() {
       }),
     onSuccess: () => {
       toast("Informations enregistrées");
-      queryClient.invalidateQueries({ queryKey: ["operator"] });
+      void invalidateAfter(queryClient, "settings");
     },
     onError: (err: unknown) => {
       toast(err instanceof Error ? err.message : "Erreur lors de l'enregistrement", "error");
@@ -509,7 +510,7 @@ function StockTab() {
     },
     onSuccess: () => {
       toast("Seuils enregistrés");
-      queryClient.invalidateQueries({ queryKey: ["stock-thresholds"] });
+      void invalidateAfter(queryClient, "settings", "stock");
     },
     onError: (err: unknown) => {
       toast(err instanceof Error ? err.message : "Erreur lors de l'enregistrement", "error");
@@ -596,6 +597,7 @@ const subscriptionConfigSchema = z.object({
     .number({ invalid_type_error: "Valeur requise" })
     .int()
     .min(0, "La valeur doit être supérieure ou égale à 0"),
+  tvaApplicable: z.boolean(),
 });
 type SubscriptionConfigValues = z.infer<typeof subscriptionConfigSchema>;
 
@@ -621,6 +623,7 @@ function AbonnementTab() {
           kitLitQty: config.kitLitQty,
           minEngagementMonths: config.minEngagementMonths,
           noticePeriodDays: config.noticePeriodDays,
+          tvaApplicable: config.tvaApplicable ?? false,
         }
       : undefined,
   });
@@ -633,10 +636,11 @@ function AbonnementTab() {
         kitLitQty: values.kitLitQty,
         minEngagementMonths: values.minEngagementMonths,
         noticePeriodDays: values.noticePeriodDays,
+        tvaApplicable: values.tvaApplicable,
       }),
     onSuccess: () => {
       toast("Configuration abonnement enregistrée");
-      queryClient.invalidateQueries({ queryKey: ["subscription-config-admin"] });
+      void invalidateAfter(queryClient, "settings", "subscription");
     },
     onError: (err: unknown) => {
       toast(err instanceof Error ? err.message : "Erreur lors de l'enregistrement", "error");
@@ -789,6 +793,30 @@ function AbonnementTab() {
                 <p className={errorCls}>{errors.noticePeriodDays.message}</p>
               )}
             </div>
+          </div>
+
+          {/* Contrairement au reste du bloc, ce réglage n'est PAS un snapshot :
+              il est lu à chaque facture émise par la facturation récurrente,
+              y compris sur les abonnements déjà en cours. */}
+          <div className="mt-5 rounded-lg border border-gray-200 p-4">
+            <label className="flex items-start gap-3" htmlFor="sub-tva">
+              <input
+                id="sub-tva"
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                {...register("tvaApplicable")}
+              />
+              <span>
+                <span className="block text-sm font-medium text-gray-900">
+                  Appliquer la TVA (20 %) aux factures d&apos;abonnement
+                </span>
+                <span className="mt-0.5 block text-xs text-gray-500">
+                  Décoché, les factures sont émises sans TVA et portent la mention « TVA non
+                  applicable, art. 293 B du CGI ». Ne cochez qu&apos;une fois réellement assujetti :
+                  collecter une TVA sans y être autorisé vous expose à devoir la reverser.
+                </span>
+              </span>
+            </label>
           </div>
         </fieldset>
 

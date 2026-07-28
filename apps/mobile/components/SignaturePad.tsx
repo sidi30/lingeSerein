@@ -36,6 +36,38 @@ const STROKE_COLOR = "#0f172a";
 const STROKE_WIDTH = 2.5;
 const PAD_HEIGHT = 180;
 
+/**
+ * Distance minimale entre deux points retenus. Les événements tactiles arrivent
+ * bien plus vite que le doigt ne bouge : sans ce filtre, on accumule des points
+ * quasi confondus qui alourdissent le SVG (plafonné à 256 Ko côté serveur) et
+ * font ramer le rendu sur les appareils modestes.
+ */
+const MIN_POINT_DISTANCE = 2;
+
+/**
+ * Longueur totale de tracé en-dessous de laquelle on ne considère pas avoir une
+ * signature. Un simple appui — fréquent quand le livreur pose le doigt sur la
+ * zone pour faire défiler l'écran — laisserait sinon un point qui vaudrait
+ * preuve de réception signée par le client.
+ */
+const MIN_SIGNATURE_INK = 40;
+
+/** Longueur cumulée de tous les traits, en pixels. */
+export function signatureInkLength(strokes: SignatureStroke[]): number {
+  let total = 0;
+  for (const stroke of strokes) {
+    for (let i = 1; i < stroke.length; i++) {
+      total += Math.hypot(stroke[i].x - stroke[i - 1].x, stroke[i].y - stroke[i - 1].y);
+    }
+  }
+  return total;
+}
+
+/** Vrai tracé volontaire, par opposition à un appui accidentel. */
+export function isMeaningfulSignature(strokes: SignatureStroke[]): boolean {
+  return signatureInkLength(strokes) >= MIN_SIGNATURE_INK;
+}
+
 /** Arrondi à 1 décimale : la précision sub-pixel ne sert à rien et triple le poids du SVG. */
 function r(n: number): number {
   return Math.round(n * 10) / 10;
@@ -125,6 +157,18 @@ export function SignaturePad({ onChange, disabled, label }: SignaturePadProps) {
     setWidth(w);
   }, []);
 
+  const commit = useCallback(() => {
+    if (currentRef.current.length === 0) return;
+    strokesRef.current = [...strokesRef.current, currentRef.current];
+    currentRef.current = [];
+    setStrokes(strokesRef.current);
+    setCurrent([]);
+    onChangeRef.current(strokesRef.current, {
+      width: widthRef.current,
+      height: PAD_HEIGHT,
+    });
+  }, []);
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -142,23 +186,23 @@ export function SignaturePad({ onChange, disabled, label }: SignaturePadProps) {
 
         onPanResponderMove: (e) => {
           const { locationX, locationY } = e.nativeEvent;
+          const last = currentRef.current[currentRef.current.length - 1];
+          if (last && Math.hypot(locationX - last.x, locationY - last.y) < MIN_POINT_DISTANCE) {
+            return;
+          }
           currentRef.current = [...currentRef.current, { x: locationX, y: locationY }];
           setCurrent(currentRef.current);
         },
 
-        onPanResponderRelease: () => {
-          if (currentRef.current.length === 0) return;
-          strokesRef.current = [...strokesRef.current, currentRef.current];
-          currentRef.current = [];
-          setStrokes(strokesRef.current);
-          setCurrent([]);
-          onChangeRef.current(strokesRef.current, {
-            width: widthRef.current,
-            height: PAD_HEIGHT,
-          });
-        },
+        onPanResponderRelease: commit,
+        // Le système peut retirer le geste sans passer par `release` (appel
+        // entrant, volet de notifications, mise en arrière-plan). Sans ce
+        // gestionnaire, le trait en cours restait affiché mais n'était jamais
+        // enregistré, puis était écrasé au trait suivant : le livreur voyait une
+        // signature à l'écran et l'app affirmait qu'il n'y en avait aucune.
+        onPanResponderTerminate: commit,
       }),
-    [],
+    [commit],
   );
 
   const handleClear = useCallback(() => {
@@ -170,7 +214,9 @@ export function SignaturePad({ onChange, disabled, label }: SignaturePadProps) {
   }, []);
 
   const isEmpty = strokes.length === 0 && current.length === 0;
-  const allStrokes = current.length > 0 ? [...strokes, current] : strokes;
+  // Les traits terminés ne changent plus : on ne recalcule leur `d` que lorsque
+  // la liste change, pas à chaque point tracé.
+  const committedPaths = useMemo(() => strokes.map(strokeToPath), [strokes]);
 
   return (
     <View style={styles.container}>
@@ -198,10 +244,10 @@ export function SignaturePad({ onChange, disabled, label }: SignaturePadProps) {
       >
         {width > 0 && (
           <Svg width={width} height={PAD_HEIGHT} style={StyleSheet.absoluteFill}>
-            {allStrokes.map((s, i) => (
+            {committedPaths.map((d, i) => (
               <Path
                 key={i}
-                d={strokeToPath(s)}
+                d={d}
                 stroke={STROKE_COLOR}
                 strokeWidth={STROKE_WIDTH}
                 strokeLinecap="round"
@@ -209,6 +255,16 @@ export function SignaturePad({ onChange, disabled, label }: SignaturePadProps) {
                 fill="none"
               />
             ))}
+            {current.length > 0 && (
+              <Path
+                d={strokeToPath(current)}
+                stroke={STROKE_COLOR}
+                strokeWidth={STROKE_WIDTH}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            )}
           </Svg>
         )}
 

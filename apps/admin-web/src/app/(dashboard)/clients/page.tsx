@@ -10,7 +10,7 @@
 import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { Download, Plus, Users } from "lucide-react";
+import { Download, Plus, Trash2, Users } from "lucide-react";
 import { useToast } from "@/lib/toast";
 import { api } from "@/lib/api";
 import { Header } from "@/components/header";
@@ -25,6 +25,7 @@ import { SkeletonTable } from "@/components/ui/skeleton";
 import { EmailText } from "@/components/ui/email-text";
 import { RatingStars } from "@/components/clients/rating-stars";
 import { ClientCreateModal } from "@/components/clients/client-create-modal";
+import { CascadeDeleteDialog } from "@/components/ui/cascade-delete-dialog";
 import { formatPrice } from "@/lib/format";
 import {
   CLIENT_SOURCE_LABELS,
@@ -33,6 +34,7 @@ import {
   type DeliveryZoneDTO,
   type PaginatedResponse,
 } from "@/lib/types";
+import { useClampedPage } from "@/lib/use-clamped-page";
 
 const statusOptions = [
   { value: "", label: "Tous les statuts" },
@@ -67,6 +69,10 @@ export default function ClientsPage() {
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // Le client visé par la suppression. Le dialogue est monté à la demande :
+  // il repart ainsi vierge (saisie de confirmation, aperçu d'impact) d'un
+  // client à l'autre, au lieu d'hériter de l'état du précédent.
+  const [deleteTarget, setDeleteTarget] = useState<ClientListDTO | null>(null);
 
   // La route /clients/export renvoie du text/csv, pas l'enveloppe JSON habituelle :
   // le client `api` la parserait en JSON et échouerait. On passe donc par fetch
@@ -131,6 +137,7 @@ export default function ClientsPage() {
   const clients = data?.data ?? [];
   const pagination = data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
+  useClampedPage(page, totalPages, setPage);
   const hasFilters = !!(searchDebounced || statusFilter || zoneFilter || sourceFilter);
 
   const resetFilters = () => {
@@ -231,11 +238,17 @@ export default function ClientsPage() {
             {/* ─── Cartes (mobile) ─── */}
             <ul className="space-y-3 lg:hidden">
               {clients.map((client) => (
-                <li key={client.id}>
+                <li
+                  key={client.id}
+                  className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+                >
+                  {/* Le bouton « Supprimer » vit HORS de la carte cliquable :
+                      imbriquer un bouton dans un bouton est invalide et rend la
+                      cible tactile imprévisible. */}
                   <button
                     type="button"
                     onClick={() => router.push(`/clients/${client.id}`)}
-                    className="w-full rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm active:bg-gray-50"
+                    className="w-full p-4 text-left active:bg-gray-50"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -265,6 +278,12 @@ export default function ClientsPage() {
                       <EmailText email={client.email} className="text-xs text-gray-500" />
                     </div>
                   </button>
+                  <div className="flex justify-end border-t border-gray-100 px-2 py-1">
+                    <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(client)}>
+                      <Trash2 className="h-4 w-4 text-danger-600" aria-hidden="true" />
+                      Supprimer
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -280,6 +299,7 @@ export default function ClientsPage() {
                     <Th>CA</Th>
                     <Th>Accès</Th>
                     <Th>Note</Th>
+                    <Th className="text-right">Actions</Th>
                   </tr>
                 </Thead>
                 <tbody>
@@ -313,6 +333,22 @@ export default function ClientsPage() {
                       <Td>
                         <RatingStars value={client.rating} size="sm" />
                       </Td>
+                      <Td className="text-right">
+                        <span
+                          onClick={(e) => e.stopPropagation()}
+                          role="presentation"
+                          className="inline-flex"
+                        >
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Supprimer ${client.companyName ?? client.name}`}
+                            onClick={() => setDeleteTarget(client)}
+                          >
+                            <Trash2 className="h-4 w-4 text-danger-600" aria-hidden="true" />
+                          </Button>
+                        </span>
+                      </Td>
                     </Tr>
                   ))}
                 </tbody>
@@ -331,6 +367,24 @@ export default function ClientsPage() {
       </div>
 
       <ClientCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+
+      {deleteTarget && (
+        <CascadeDeleteDialog
+          open
+          onClose={() => setDeleteTarget(null)}
+          previewEndpoint={`/users/${deleteTarget.id}/deletion-preview`}
+          deleteEndpoint={`/users/${deleteTarget.id}?cascade=true`}
+          title={`Supprimer ${deleteTarget.companyName ?? deleteTarget.name} ?`}
+          description="Le client et tout son historique seront supprimés. Cette action est irréversible."
+          successMessage="Client et données liées supprimés"
+          requireTypedText={deleteTarget.companyName ?? deleteTarget.name}
+          anonymize={{
+            endpoint: `/users/${deleteTarget.id}/anonymize`,
+            successMessage: "Client anonymisé — ses factures sont conservées",
+          }}
+          scopes={["client"]}
+        />
+      )}
     </>
   );
 }

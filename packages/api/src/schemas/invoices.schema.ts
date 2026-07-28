@@ -38,8 +38,35 @@ export const updateInvoiceStatusSchema = z.object({
 
 // ---- Liste / filtres ----
 
+/**
+ * Statuts à exclure, en CSV : `?excludeStatus=DRAFT` ou `?excludeStatus=DRAFT,CANCELLED`.
+ *
+ * Répond au besoin « que les brouillons cessent de polluer la vue » : le filtre
+ * `status` ne retient qu'UN statut, si bien que l'admin devait tout charger puis
+ * filtrer côté client — ce qui vidait les pages de leur contenu (la pagination
+ * compte les brouillons, l'affichage non) et faisait disparaître des factures
+ * réelles. Exclure côté serveur rend la pagination exacte à nouveau.
+ *
+ * Un statut inconnu est ignoré silencieusement plutôt que rejeté : ce filtre est
+ * un confort d'affichage, il ne doit jamais transformer une liste en erreur 400.
+ */
+const excludeStatusSchema = z
+  .string()
+  .optional()
+  .transform((raw) =>
+    raw
+      ? raw
+          .split(",")
+          .map((s) => s.trim().toUpperCase())
+          .filter((s): s is (typeof INVOICE_STATUSES)[number] =>
+            (INVOICE_STATUSES as readonly string[]).includes(s),
+          )
+      : [],
+  );
+
 export const listInvoicesQuerySchema = z.object({
   status: z.enum(INVOICE_STATUSES).optional(),
+  excludeStatus: excludeStatusSchema,
   /** Millésime de la facture (numérotation FACT-YYYY-NNNN). */
   year: z.coerce.number().int().min(2000).max(2200).optional(),
   search: z.string().max(200).optional(),

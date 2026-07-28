@@ -7,7 +7,7 @@ import { PieChart } from "react-native-gifted-charts";
 import { ScreenWrapper } from "@/components/ScreenWrapper";
 import { Card } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
-import { StatusBadge } from "@/components/StatusBadge";
+import { StatusBadge, statusMeta } from "@/components/StatusBadge";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { ProgressRing } from "@/components/ProgressRing";
@@ -27,6 +27,19 @@ import {
 } from "@/lib/api";
 import type { Order, DashboardAlert, DeliveryStop } from "@/lib/api";
 import { colors, font, spacing, radius } from "@/lib/theme";
+
+/** Date civile locale au format YYYY-MM-DD, sans passer par toISOString() (UTC). */
+function localYmd(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/** Parse une date civile en heure locale (cf. localYmd). */
+function parseYmd(iso: string): Date {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
 
 // ─── Quick action button ─────────────────────────────────────────
 
@@ -97,7 +110,19 @@ function ClientHome() {
     );
   }
 
-  const nextOrder = orders.data?.find((o) => o.status !== "DELIVERED" && o.status !== "CANCELLED");
+  // GET /orders trie par date de CRÉATION décroissante : prendre le premier
+  // élément ouvert donnait la commande la plus récemment passée, pas la
+  // prochaine livrée. On écarte aussi les dates dépassées, sinon une commande
+  // jamais traitée reste affichée comme « prochaine » avec une date révolue.
+  const todayYmd = localYmd(new Date());
+  const nextOrder = orders.data
+    ?.filter(
+      (o) =>
+        o.status !== "DELIVERED" &&
+        o.status !== "CANCELLED" &&
+        (o.deliveryDate ?? "").slice(0, 10) >= todayYmd,
+    )
+    .sort((a, b) => a.deliveryDate.localeCompare(b.deliveryDate))[0];
   const totalClean = stock.data?.stocks.reduce((s, st) => s + st.cleanSets, 0) ?? 0;
   const totalDirty = stock.data?.stocks.reduce((s, st) => s + st.dirtySets, 0) ?? 0;
   const totalCirc = stock.data?.stocks.reduce((s, st) => s + st.totalInCirculation, 0) ?? 0;
@@ -119,7 +144,7 @@ function ClientHome() {
             <Text style={styles.heroPillText}>
               {/* Nom du plan : depuis la config (Pack Sérénité) ou legacy */}
               {subConfig.data?.planName ?? sub.data.plan ?? "Abonnement"} ·{" "}
-              {sub.data.status === "ACTIVE" ? "Actif" : sub.data.status}
+              {statusMeta("subscription", sub.data.status).label}
             </Text>
           </View>
         )}
@@ -186,10 +211,10 @@ function ClientHome() {
               <View style={styles.deliveryRow}>
                 <View style={styles.deliveryDateBox}>
                   <Text style={styles.deliveryDay}>
-                    {new Date(nextOrder.deliveryDate).getDate()}
+                    {parseYmd(nextOrder.deliveryDate).getDate()}
                   </Text>
                   <Text style={styles.deliveryMonth}>
-                    {new Date(nextOrder.deliveryDate).toLocaleDateString("fr-FR", {
+                    {parseYmd(nextOrder.deliveryDate).toLocaleDateString("fr-FR", {
                       month: "short",
                     })}
                   </Text>
@@ -263,9 +288,9 @@ const PendingOrderCard = ({ order, index }: { order: Order; index: number }) => 
       <Card style={styles.pendingCard}>
         <View style={styles.deliveryRow}>
           <View style={styles.deliveryDateBox}>
-            <Text style={styles.deliveryDay}>{new Date(order.deliveryDate).getDate()}</Text>
+            <Text style={styles.deliveryDay}>{parseYmd(order.deliveryDate).getDate()}</Text>
             <Text style={styles.deliveryMonth}>
-              {new Date(order.deliveryDate).toLocaleDateString("fr-FR", { month: "short" })}
+              {parseYmd(order.deliveryDate).toLocaleDateString("fr-FR", { month: "short" })}
             </Text>
           </View>
           <View style={{ flex: 1 }}>
@@ -609,7 +634,7 @@ function DriverHome() {
   const completed = todayRound?.stops.filter((s) => s.status === "COMPLETED").length ?? 0;
   const total = todayRound?.stops.length ?? 0;
   const currentStop = todayRound?.stops
-    .filter((s) => s.status !== "COMPLETED")
+    .filter((s) => s.status === "PENDING")
     .sort((a, b) => a.stopOrder - b.stopOrder)[0];
 
   return (

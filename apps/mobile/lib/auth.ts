@@ -32,6 +32,7 @@ interface MeResponse {
 }
 
 export function useLogin() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: LoginPayload) => {
       const loginRes = await apiFetch<LoginResponse>("/auth/login", {
@@ -59,6 +60,12 @@ export function useLogin() {
     },
     onSuccess: ({ user, accessToken, refreshToken }) => {
       useAuthStore.getState().setAuth(user, accessToken, refreshToken);
+      // Purge le cache du compte précédent AVANT d'entrer dans l'app. Une
+      // session expirée en cours de route (401 → logout dans apiFetch) ne passe
+      // pas par useLogout et ne vide donc rien : sans ce clear, l'utilisateur
+      // suivant verrait les commandes et clients du précédent le temps que
+      // chaque requête se rafraîchisse — y compris avec un autre rôle.
+      qc.clear();
       router.replace("/(tabs)");
     },
   });

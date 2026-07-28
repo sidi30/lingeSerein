@@ -550,6 +550,9 @@ export class QuotesService {
         "CLIENT_REQUIRED",
       );
     }
+    // Capturé ici : le rétrécissement de type se perd dans la transaction plus
+    // bas, et c'est ce qui avait justifié un `!` à la création de la commande.
+    const clientUserId = quote.userId;
 
     // Valider le mapping lignes → produits
     const quoteLineIds = new Set(quote.lignes.map((l) => l.id));
@@ -568,7 +571,9 @@ export class QuotesService {
       where: { id: { in: productIds }, isActive: true, deletedAt: null },
     });
 
-    if (products.length !== productIds.length) {
+    // Identifiants DISTINCTS : deux lignes de devis mappées sur le même produit
+    // faisaient échouer la conversion en « produits invalides ».
+    if (products.length !== new Set(productIds).size) {
       throw new UnprocessableEntityError(
         "Un ou plusieurs produits du mapping sont invalides",
         "INVALID_PRODUCTS",
@@ -580,8 +585,14 @@ export class QuotesService {
     // Construire les items de la commande depuis le mapping
     const lineMap = new Map(quote.lignes.map((l) => [l.id, l]));
     const orderItems = input.lineMappings.map((m) => {
-      const line = lineMap.get(m.quoteLineId)!;
-      const product = productMap.get(m.productId)!;
+      const line = lineMap.get(m.quoteLineId);
+      const product = productMap.get(m.productId);
+      if (!line || !product) {
+        throw new UnprocessableEntityError(
+          "Un ou plusieurs produits du mapping sont invalides",
+          "INVALID_PRODUCTS",
+        );
+      }
       return {
         productId: m.productId,
         quantity: line.qty,
@@ -601,7 +612,7 @@ export class QuotesService {
     const { order } = await this.prisma.$transaction(async (tx) => {
       const createdOrder = await tx.order.create({
         data: {
-          userId: quote.userId!,
+          userId: clientUserId,
           orderNumber,
           totalCents,
           source: "QUOTE_CONVERSION",

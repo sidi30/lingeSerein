@@ -10,15 +10,17 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DeleteAction } from "@/components/ui/delete-action";
 import { Table, Thead, Th, Td, Tr } from "@/components/ui/table";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DetailFallback } from "@/components/ui/detail-fallback";
+import { detailState, invalidateAfter } from "@/lib/query";
 import { useToast } from "@/lib/toast";
 import { formatPrice, formatDate } from "@/lib/format";
 import { loadInvoicePdf } from "@/lib/invoice-pdf";
 import { INVOICE_TRANSITIONS } from "@/lib/types";
 import { normalizeInvoiceLines, InvoiceTotalsMismatchError } from "@lingengo/shared";
 import type { InvoiceDTO, InvoiceStatus } from "@/lib/types";
-import { Download, Trash2, FileText, AlertCircle } from "lucide-react";
+import { Download, FileText, AlertCircle } from "lucide-react";
 
 type BadgeVariant = "default" | "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -46,7 +48,6 @@ export default function FactureDetailPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [pdfAvailable, setPdfAvailable] = useState(false);
 
@@ -62,10 +63,12 @@ export default function FactureDetailPage() {
     };
   }, []);
 
-  const { data: invoice, isLoading } = useQuery({
+  const invoiceQuery = useQuery({
     queryKey: ["invoice", id],
     queryFn: () => api.get<InvoiceDTO>(`/invoices/${id}`),
   });
+  const invoice = invoiceQuery.data;
+  const state = detailState(invoiceQuery, Boolean(id));
 
   const statusMutation = useMutation({
     mutationFn: (status: InvoiceStatus) =>
@@ -73,21 +76,12 @@ export default function FactureDetailPage() {
     onSuccess: () => {
       toast("Statut mis à jour");
       setConfirmCancel(false);
-      queryClient.invalidateQueries({ queryKey: ["invoice", id] });
-      queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      // Encaisser ou annuler une facture déplace aussi le chiffre d’affaires du
+      // tableau de bord et l’état de la commande adossée.
+      void invalidateAfter(queryClient, "invoice");
     },
     onError: (err: unknown) =>
       toast(err instanceof Error ? err.message : "Erreur lors du changement de statut", "error"),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: () => api.delete(`/invoices/${id}`),
-    onSuccess: () => {
-      toast("Facture supprimée");
-      router.push("/factures");
-    },
-    onError: (err: unknown) =>
-      toast(err instanceof Error ? err.message : "Erreur lors de la suppression", "error"),
   });
 
   const handlePdf = async () => {
@@ -120,25 +114,15 @@ export default function FactureDetailPage() {
     }
   };
 
-  if (isLoading) {
+  if (state !== "ready" || !invoice) {
     return (
       <>
         <Header title="Facture" />
-        <div className="space-y-6 p-4 sm:p-6">
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
-      </>
-    );
-  }
-
-  if (!invoice) {
-    return (
-      <>
-        <Header title="Facture" />
-        <div className="flex items-center justify-center p-12 text-gray-400">
-          Facture introuvable
-        </div>
+        <DetailFallback
+          state={state === "ready" ? "loading" : state}
+          label="Cette facture"
+          onRetry={() => void invoiceQuery.refetch()}
+        />
       </>
     );
   }
@@ -167,12 +151,26 @@ export default function FactureDetailPage() {
                 Télécharger PDF
               </Button>
             )}
-            {canDelete && (
-              <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
-                <Trash2 className="h-4 w-4" aria-hidden="true" />
-                Supprimer
-              </Button>
-            )}
+            {/* Bouton toujours présent, désactivé hors brouillon avec sa raison :
+                le propriétaire doit comprendre POURQUOI il ne peut pas supprimer
+                une facture émise, pas juste ne rien trouver à cliquer. */}
+            <DeleteAction
+              endpoint={`/invoices/${invoice.id}`}
+              itemLabel={`la facture ${invoice.invoiceNumber}`}
+              label="Supprimer"
+              variant="danger"
+              title="Supprimer le brouillon ?"
+              description={`Le brouillon ${invoice.invoiceNumber} sera supprimé. Aucune écriture comptable n'existe pour un brouillon : rien d'autre n'est affecté.`}
+              successMessage="Brouillon supprimé"
+              disabledReason={
+                canDelete
+                  ? null
+                  : "Une facture émise est une pièce comptable : la loi impose de la conserver 10 ans. Elle ne peut pas être supprimée — annulez-la plutôt, elle restera dans la piste d'audit."
+              }
+              scopes={["invoice"]}
+              removeKeys={[["invoice", id]]}
+              onDeleted={() => router.push("/factures")}
+            />
           </div>
         }
       />
@@ -398,18 +396,6 @@ export default function FactureDetailPage() {
         title="Annuler la facture ?"
         description={`La facture ${invoice.invoiceNumber} passera au statut « Annulée ». C'est définitif : elle est conservée pour la piste d'audit, mais ne pourra plus changer d'état.`}
         confirmLabel="Annuler la facture"
-      />
-
-      {/* Confirmation suppression — brouillon uniquement */}
-      <ConfirmDialog
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        onConfirm={() => deleteMutation.mutate()}
-        loading={deleteMutation.isPending}
-        variant="danger"
-        title="Supprimer le brouillon ?"
-        description={`Le brouillon ${invoice.invoiceNumber} sera supprimé. Une fois envoyée, une facture ne peut plus être supprimée, seulement annulée.`}
-        confirmLabel="Supprimer"
       />
     </>
   );

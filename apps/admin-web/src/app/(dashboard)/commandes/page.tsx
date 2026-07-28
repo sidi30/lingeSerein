@@ -14,10 +14,14 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonTable } from "@/components/ui/skeleton";
 import { EmailText } from "@/components/ui/email-text";
 import { Modal } from "@/components/ui/modal";
+import { DeleteAction } from "@/components/ui/delete-action";
+import { DELETE_BLOCKED } from "@/lib/deletion";
 import { OrderForm } from "@/components/orders/order-form";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClipboardList, ArrowRight, Plus } from "lucide-react";
+import { invalidateAfter } from "@/lib/query";
+import { useClampedPage } from "@/lib/use-clamped-page";
 
 interface OrderItem {
   id: string;
@@ -69,6 +73,10 @@ const statusConfig: Record<
   CANCELLED: { label: "Annulée", variant: "danger" },
 };
 
+/** MIROIR de `ORDER_DELETABLE` (packages/api/src/services/orders.service.ts),
+ *  qui reste l'autorité : l'API refuse en 422 même si l'UI proposait le bouton. */
+const ORDER_DELETABLE: string[] = ["PENDING", "CANCELLED"];
+
 const nextStatusMap: Record<string, OrderStatus> = {
   PENDING: "CONFIRMED",
   CONFIRMED: "IN_DELIVERY",
@@ -108,13 +116,14 @@ export default function CommandesPage() {
   const orders = data?.data ?? [];
   const pagination = data?.pagination;
   const totalPages = pagination?.totalPages ?? 0;
+  useClampedPage(page, totalPages, setPage);
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       api.patch(`/orders/${id}/status`, { status }),
     onSuccess: () => {
       toast("Statut mis à jour");
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      void invalidateAfter(queryClient, "order");
     },
     onError: () => toast("Erreur lors de la mise à jour", "error"),
   });
@@ -246,19 +255,35 @@ export default function CommandesPage() {
                         )}
                       </Td>
                       <Td>
-                        {nextStatus && nextLabel && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            loading={statusMutation.isPending}
-                            onClick={() =>
-                              statusMutation.mutate({ id: order.id, status: nextStatus })
+                        <div className="flex items-center justify-end gap-1">
+                          {nextStatus && nextLabel && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              loading={statusMutation.isPending}
+                              onClick={() =>
+                                statusMutation.mutate({ id: order.id, status: nextStatus })
+                              }
+                            >
+                              <ArrowRight className="h-3.5 w-3.5" />
+                              {nextLabel}
+                            </Button>
+                          )}
+                          {/* PENDING ou CANCELLED uniquement (ORDER_DELETABLE) :
+                              au-delà, la commande est adossée à une tournée et
+                              à une facture. */}
+                          <DeleteAction
+                            endpoint={`/orders/${order.id}`}
+                            itemLabel={`la commande ${order.orderNumber}`}
+                            title="Supprimer cette commande ?"
+                            description={`La commande ${order.orderNumber} (${order.user.name}) sera supprimée. Cette action n'est pas réversible depuis l'admin.`}
+                            successMessage="Commande supprimée"
+                            disabledReason={
+                              ORDER_DELETABLE.includes(order.status) ? null : DELETE_BLOCKED.order
                             }
-                          >
-                            <ArrowRight className="h-3.5 w-3.5" />
-                            {nextLabel}
-                          </Button>
-                        )}
+                            scopes={["order"]}
+                          />
+                        </div>
                       </Td>
                     </Tr>
                   );

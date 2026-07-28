@@ -20,7 +20,7 @@ import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { StepIndicator } from "@/components/StepIndicator";
-import { useProducts, useCreateOrder, formatCents } from "@/lib/api";
+import { useProducts, useCreateOrder, formatCents, errorMessage } from "@/lib/api";
 import type { Product, ProductKind } from "@/lib/api";
 import { colors, font, spacing, radius, MIN_HIT_TARGET } from "@/lib/theme";
 
@@ -103,6 +103,17 @@ function localYmd(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/**
+ * Parse une date civile « YYYY-MM-DD » dans le fuseau LOCAL.
+ * `new Date("2026-08-03")` est interprété par la spec comme minuit UTC : à
+ * l'ouest de UTC, l'affichage recule d'un jour et la confirmation contredit la
+ * date réellement envoyée à l'API.
+ */
+function parseYmd(ymd: string): Date {
+  const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
 function tomorrowYmd(): string {
@@ -315,6 +326,10 @@ export default function NewOrderScreen() {
   };
 
   const sendOrder = () => {
+    // Le dialogue de confirmation peut être ouvert deux fois avant que la
+    // mutation ne passe en `isPending` : sans cette garde, deux POST /orders
+    // partent et le client est facturé deux fois (l'API n'a pas d'idempotence).
+    if (createOrder.isPending) return;
     createOrder.mutate(
       {
         items: cart.map((c) => ({ productId: c.product.id, quantity: c.quantity })),
@@ -327,23 +342,27 @@ export default function NewOrderScreen() {
           if (Platform.OS !== "web") {
             void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           }
+          // On vide le panier et on quitte AVANT d'alerter. Sur Android une
+          // alerte se ferme par le bouton retour sans jamais exécuter `onPress` :
+          // on restait alors sur le récapitulatif, panier plein et bouton actif,
+          // ce qui invitait à recommander la même chose.
+          setCart([]);
+          setStep(0);
+          router.back();
           Alert.alert(
             "Commande envoyée !",
-            `${order.orderNumber} — Livraison le ${new Date(selectedDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}`,
-            [{ text: "Parfait", onPress: () => router.back() }],
+            `${order.orderNumber} — Livraison le ${parseYmd(selectedDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}`,
           );
         },
         onError: (e) => {
-          Alert.alert(
-            "Échec de la commande",
-            e instanceof Error ? e.message : "Une erreur est survenue. Réessayez.",
-          );
+          Alert.alert("Échec de la commande", errorMessage(e));
         },
       },
     );
   };
 
   const handleSubmit = () => {
+    if (createOrder.isPending) return;
     const minAtSubmit = tomorrowYmd();
     if (selectedDate < minAtSubmit) {
       setSelectedDate(minAtSubmit);
@@ -353,7 +372,7 @@ export default function NewOrderScreen() {
 
     // Dernier garde-fou avant l'envoi : la commande engage le client, on lui
     // rappelle montant, date et créneau en toutes lettres.
-    const dateLabel = new Date(selectedDate).toLocaleDateString("fr-FR", {
+    const dateLabel = parseYmd(selectedDate).toLocaleDateString("fr-FR", {
       weekday: "long",
       day: "numeric",
       month: "long",
@@ -571,6 +590,7 @@ export default function NewOrderScreen() {
             value={notes}
             onChangeText={setNotes}
             multiline
+            maxLength={1000}
             placeholder="Instructions spéciales, code d'accès..."
             placeholderTextColor={colors.textTertiary}
             accessibilityLabel="Notes de livraison"
@@ -594,7 +614,7 @@ export default function NewOrderScreen() {
               <Ionicons name="calendar-outline" size={20} color={colors.primary} />
               <Text style={styles.recapLabel}>Livraison le</Text>
               <Text style={styles.recapValue}>
-                {new Date(selectedDate).toLocaleDateString("fr-FR", {
+                {parseYmd(selectedDate).toLocaleDateString("fr-FR", {
                   weekday: "long",
                   day: "numeric",
                   month: "long",

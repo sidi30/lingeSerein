@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
 import { dayKeyFromISO, daysBetweenKeys, todayKey } from "@/lib/calendar";
+import { invalidateAfter } from "./query";
 
 /* ─── Contrat d'API (GET /rotations, GET /stock) ─── */
 
@@ -155,8 +156,7 @@ export function useSaveReprise() {
       dateRepriseReelle?: string;
     }) => api.patch(`/rotations/${id}/reprise`, { lignes, dateRepriseReelle }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["rotations"] });
-      queryClient.invalidateQueries({ queryKey: ["stock"] });
+      void invalidateAfter(queryClient, "rotation");
     },
   });
 }
@@ -167,7 +167,7 @@ export function useUpdateRotationStatus() {
     mutationFn: ({ id, status }: { id: string; status: RotationStatus }) =>
       api.patch(`/rotations/${id}/status`, { status }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["rotations"] });
+      void invalidateAfter(queryClient, "rotation");
     },
   });
 }
@@ -221,7 +221,7 @@ export function useUpdateStockOwned() {
       // des identifiants de produit.
       api.patch(`/stock/item/${productSlug}`, { totalOwned }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["stock"] });
+      void invalidateAfter(queryClient, "stock");
     },
   });
 }

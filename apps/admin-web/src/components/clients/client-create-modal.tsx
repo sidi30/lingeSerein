@@ -26,6 +26,7 @@ import {
   type CreateClientResult,
   type DeliveryZoneDTO,
 } from "@/lib/types";
+import { invalidateAfter } from "@/lib/query";
 
 const inputCls =
   "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-base sm:py-2 sm:text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500";
@@ -173,7 +174,7 @@ export function ClientCreateModal({
   const createMutation = useMutation({
     mutationFn: (force: boolean) => api.post<CreateClientResult>("/clients", buildPayload(force)),
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      void invalidateAfter(queryClient, "client");
       setDuplicate(null);
 
       // Un mot de passe temporaire ne se réaffiche jamais : on le garde à

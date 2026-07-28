@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { StockService } from "../../services/stock.service.js";
 import { StockItemsService } from "../../services/stock-items.service.js";
-import { ValidationError } from "../../utils/errors.js";
+import { ValidationError, NotFoundError } from "../../utils/errors.js";
 import { requireRole } from "../../middleware/rbac.js";
 import {
   stockAdjustmentSchema,
@@ -20,7 +20,11 @@ export default async function stockRoutes(app: FastifyInstance): Promise<void> {
       where: { id: userId },
       select: { operatorId: true },
     });
-    if (!user) throw new Error("Utilisateur introuvable");
+    // `NotFoundError` et non `Error` : une Error nue sort en 500 « erreur
+    // interne », alors que le compte a simplement disparu depuis l'émission
+    // du jeton. Le client ne peut rien faire d'un 500, il sait quoi faire
+    // d'un 404.
+    if (!user) throw new NotFoundError("Utilisateur", userId);
     return user.operatorId;
   }
 

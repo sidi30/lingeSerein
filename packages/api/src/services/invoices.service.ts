@@ -92,7 +92,7 @@ export class InvoicesService {
   // ---- Liste ----
 
   async list(query: ListInvoicesQuery, operatorId: string) {
-    const { page, limit, status, year, search } = query;
+    const { page, limit, status, excludeStatus, year, search } = query;
     const skip = (page - 1) * limit;
 
     // Basculer les impayés avant de répondre (même filet idempotent que les devis)
@@ -101,7 +101,14 @@ export class InvoicesService {
     const where: Prisma.InvoiceWhereInput = {
       operatorId,
       deletedAt: null,
-      ...(status ? { status } : {}),
+      // `status` (filtre positif) l'emporte sur `excludeStatus` : les deux
+      // portent sur la même clé Prisma, et demander explicitement un statut est
+      // une intention plus forte que d'en masquer d'autres.
+      ...(status
+        ? { status }
+        : excludeStatus.length > 0
+          ? { status: { notIn: excludeStatus } }
+          : {}),
       ...(year ? { invoiceNumber: { startsWith: `FACT-${year}-` } } : {}),
       ...(search
         ? {

@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { PauseCircle, PlayCircle, Plus, XCircle } from "lucide-react";
+import { PauseCircle, PlayCircle, Plus, Trash2, XCircle } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { Header } from "@/components/header";
@@ -23,7 +23,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CascadeDeleteDialog } from "@/components/ui/cascade-delete-dialog";
+import { DetailFallback } from "@/components/ui/detail-fallback";
+import { detailState, invalidateAfter } from "@/lib/query";
 import { EmailText } from "@/components/ui/email-text";
 import { RatingStars } from "@/components/clients/rating-stars";
 import { OrderForm } from "@/components/orders/order-form";
@@ -136,6 +138,37 @@ function GaugeBar({
   );
 }
 
+/**
+ * L'abonnement renvoyé par la fiche client n'expose pas toujours son `id`
+ * (le DTO le déclare optionnel). Sans identifiant, aucune route de suppression
+ * n'est adressable : on désactive en le disant, plutôt que d'appeler
+ * `/subscriptions/undefined`.
+ */
+function SubscriptionDeleteButton({
+  subscriptionId,
+  onOpen,
+}: {
+  subscriptionId?: string;
+  onOpen: () => void;
+}) {
+  if (!subscriptionId) {
+    return (
+      <span title="Identifiant d'abonnement absent de la fiche : suppression impossible depuis cet écran.">
+        <Button size="sm" variant="ghost" disabled>
+          <Trash2 className="h-4 w-4 text-danger-600" aria-hidden="true" />
+          Supprimer
+        </Button>
+      </span>
+    );
+  }
+  return (
+    <Button size="sm" variant="ghost" onClick={onOpen}>
+      <Trash2 className="h-4 w-4 text-danger-600" aria-hidden="true" />
+      Supprimer
+    </Button>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-gray-50 p-3">
@@ -155,12 +188,16 @@ export default function ClientDetailPage() {
   const [orderModal, setOrderModal] = useState(false);
   const [linkSubModal, setLinkSubModal] = useState(false);
   const [confirmCancelSub, setConfirmCancelSub] = useState(false);
+  const [deleteClientOpen, setDeleteClientOpen] = useState(false);
+  const [deleteSubOpen, setDeleteSubOpen] = useState(false);
   const [subPlan, setSubPlan] = useState("");
 
-  const { data: client, isLoading } = useQuery({
+  const clientQuery = useQuery({
     queryKey: ["client", id],
     queryFn: () => api.get<ClientDetailDTO>(`/clients/${id}`),
   });
+  const client = clientQuery.data;
+  const state = detailState(clientQuery, Boolean(id));
 
   const { data: zones } = useQuery({
     queryKey: ["settings", "zones"],
@@ -177,8 +214,7 @@ export default function ClientDetailPage() {
     mutationFn: (patch: Partial<EditableFields>) => api.patch(`/clients/${id}`, patch),
     onSuccess: () => {
       toast("Client mis à jour");
-      queryClient.invalidateQueries({ queryKey: ["client", id] });
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      void invalidateAfter(queryClient, "client");
     },
     onError: (err: unknown) =>
       toast(err instanceof Error ? err.message : "Erreur lors de la mise à jour", "error"),
@@ -213,7 +249,7 @@ export default function ClientDetailPage() {
       setLinkSubModal(false);
       setConfirmCancelSub(false);
       setEngagementBloquant(null);
-      queryClient.invalidateQueries({ queryKey: ["client", id] });
+      void invalidateAfter(queryClient, "subscription", "client");
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Erreur sur l'abonnement";
@@ -237,26 +273,29 @@ export default function ClientDetailPage() {
     return Math.round(client.revenueCents / client.ordersCount);
   }, [client]);
 
-  if (isLoading || !form) {
+  // L’ordre compte : tester `!form` en premier, comme avant, transformait un
+  // client absent en squelette éternel — `form` n’est alimenté que par l’effet
+  // qui suit la réponse, donc jamais sur un 404, et la branche « introuvable »
+  // en dessous était inatteignable.
+  if (state !== "ready" || !client) {
     return (
       <>
         <Header title="Client" />
-        <div className="space-y-6 p-4 sm:p-6">
-          <Skeleton className="h-48 w-full" />
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
+        <DetailFallback
+          state={state === "ready" ? "loading" : state}
+          label="Ce client"
+          onRetry={() => void clientQuery.refetch()}
+        />
       </>
     );
   }
 
-  if (!client) {
+  // Donnée reçue, formulaire local pas encore hydraté (un rendu d’écart).
+  if (!form) {
     return (
       <>
         <Header title="Client" />
-        <div className="flex items-center justify-center p-12 text-gray-400">
-          Client introuvable
-        </div>
+        <DetailFallback state="loading" label="Ce client" />
       </>
     );
   }
@@ -296,10 +335,16 @@ export default function ClientDetailPage() {
       <Header
         title={client.companyName ?? client.name}
         actions={
-          <Button size="sm" onClick={() => setOrderModal(true)}>
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            Créer une commande
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => setOrderModal(true)}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Créer une commande
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => setDeleteClientOpen(true)}>
+              <Trash2 className="h-4 w-4 text-danger-600" aria-hidden="true" />
+              Supprimer le client
+            </Button>
+          </div>
         }
       />
 
@@ -555,11 +600,26 @@ export default function ClientDetailPage() {
                   <XCircle className="h-4 w-4" aria-hidden="true" />
                   Résilier
                 </Button>
+                {/* Résilier ≠ supprimer. Résilier arrête le service en gardant
+                    l'historique ; supprimer efface l'abonnement et ce qu'il a
+                    engendré. Les deux sont proposés, avec des mots distincts. */}
+                <SubscriptionDeleteButton
+                  subscriptionId={subscription.id}
+                  onOpen={() => setDeleteSubOpen(true)}
+                />
               </div>
             ) : (
-              <Button size="sm" onClick={() => setLinkSubModal(true)}>
-                Lier un abonnement
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => setLinkSubModal(true)}>
+                  Lier un abonnement
+                </Button>
+                {subscription && (
+                  <SubscriptionDeleteButton
+                    subscriptionId={subscription.id}
+                    onOpen={() => setDeleteSubOpen(true)}
+                  />
+                )}
+              </div>
             )
           }
         >
@@ -831,6 +891,42 @@ Vous pouvez résilier malgré tout : ce sera un geste commercial de votre part, 
         confirmLabel="Résilier quand même"
         cancelLabel="Respecter l'engagement"
       />
+
+      {/* ─── Suppression en cascade du client ─── */}
+      {deleteClientOpen && (
+        <CascadeDeleteDialog
+          open
+          onClose={() => setDeleteClientOpen(false)}
+          previewEndpoint={`/users/${client.id}/deletion-preview`}
+          deleteEndpoint={`/users/${client.id}?cascade=true`}
+          title={`Supprimer ${client.companyName ?? client.name} ?`}
+          description="Le client et tout son historique seront supprimés. Cette action est irréversible."
+          successMessage="Client et données liées supprimés"
+          requireTypedText={client.companyName ?? client.name}
+          anonymize={{
+            endpoint: `/users/${client.id}/anonymize`,
+            successMessage: "Client anonymisé — ses factures sont conservées",
+          }}
+          scopes={["client"]}
+          removeKeys={[["client", id]]}
+          onDeleted={() => router.push("/clients")}
+        />
+      )}
+
+      {/* ─── Suppression en cascade de l'abonnement ─── */}
+      {deleteSubOpen && subscription?.id && (
+        <CascadeDeleteDialog
+          open
+          onClose={() => setDeleteSubOpen(false)}
+          previewEndpoint={`/subscriptions/${subscription.id}/deletion-preview`}
+          deleteEndpoint={`/subscriptions/${subscription.id}?cascade=true`}
+          title="Supprimer cet abonnement ?"
+          description="L'abonnement et les rotations qu'il a engendrées seront supprimés. Les factures déjà émises, elles, sont conservées. Cette action est irréversible."
+          successMessage="Abonnement supprimé"
+          requireTypedText={subscription.plan}
+          scopes={["subscription", "client"]}
+        />
+      )}
     </>
   );
 }

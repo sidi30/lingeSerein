@@ -7,6 +7,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { Card } from "@/components/Card";
 import { StatusBadge, statusMeta } from "@/components/StatusBadge";
 import { EmptyState } from "@/components/EmptyState";
+import { ErrorState } from "@/components/ErrorState";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { useOrders, useIsClient, formatCents, formatDateShort } from "@/lib/api";
 import type { Order } from "@/lib/api";
@@ -22,13 +23,15 @@ const FILTERS = [
 
 export default function OrdersListScreen() {
   const [filter, setFilter] = useState<string | undefined>(undefined);
-  const { data, isLoading, refetch, isRefetching } = useOrders(filter);
+  const { data, isLoading, isError, refetch, isRefetching } = useOrders(filter);
   const isClient = useIsClient();
   const insets = useSafeAreaInsets();
 
   const renderOrder = ({ item, index }: { item: Order; index: number }) => {
     const meta = statusMeta("order", item.status);
-    const itemCount = item.items.reduce((n, i) => n + i.quantity, 0);
+    // `items` n'est pas garanti : plusieurs réponses de mutation renvoient la
+    // commande sans ses lignes. Sans ce garde, la liste entière plante.
+    const itemCount = (item.items ?? []).reduce((n, i) => n + i.quantity, 0);
     return (
       <Animated.View entering={FadeInDown.delay(Math.min(index, 8) * 50).springify()}>
         <Pressable
@@ -111,6 +114,8 @@ export default function OrdersListScreen() {
 
       {isLoading ? (
         <LoadingScreen />
+      ) : isError ? (
+        <ErrorState what="vos commandes" onRetry={() => void refetch()} />
       ) : (
         <FlatList
           data={data}

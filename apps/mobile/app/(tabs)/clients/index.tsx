@@ -7,6 +7,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { Card } from "@/components/Card";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
+import { ErrorState } from "@/components/ErrorState";
 import { useClients, clientSubtitle } from "@/lib/api";
 import type { ClientListItem } from "@/lib/api";
 import { colors, font, spacing, radius, shadow, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
@@ -114,7 +115,9 @@ export default function ClientsListScreen() {
     if (initialSearch) setSearch(initialSearch);
   }, [initialSearch]);
   const debouncedSearch = useDebounce(search, 300);
-  const { data, isLoading, refetch, isRefetching } = useClients(debouncedSearch || undefined);
+  const { data, isLoading, isError, refetch, isRefetching } = useClients(
+    debouncedSearch || undefined,
+  );
   const insets = useSafeAreaInsets();
 
   const renderClient = useCallback(
@@ -154,6 +157,8 @@ export default function ClientsListScreen() {
 
       {isLoading ? (
         <ClientListSkeleton />
+      ) : isError ? (
+        <ErrorState what="la liste des clients" onRetry={() => void refetch()} />
       ) : (
         <FlatList
           data={data ?? []}

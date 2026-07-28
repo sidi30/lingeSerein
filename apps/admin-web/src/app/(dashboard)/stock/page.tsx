@@ -22,6 +22,7 @@ import {
   useUpdateStockOwned,
   type StockItemDTO,
 } from "@/lib/rotations";
+import { invalidateAfter } from "@/lib/query";
 
 interface OperatorStock {
   id: string;
@@ -335,7 +336,7 @@ function LegacyStock() {
     mutationFn: () => api.post("/stock/adjustment", adjustForm),
     onSuccess: () => {
       toast("Ajustement enregistré");
-      queryClient.invalidateQueries({ queryKey: ["stock"] });
+      void invalidateAfter(queryClient, "stock");
       setAdjustOpen(false);
       setAdjustForm({ userId: "", type: "clean", quantity: 0, reason: "" });
     },

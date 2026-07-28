@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { idParamSchema } from "@lingengo/shared";
 import { InvoicesService } from "../../services/invoices.service.js";
-import { ValidationError } from "../../utils/errors.js";
+import { ValidationError, NotFoundError } from "../../utils/errors.js";
 import { requireRole } from "../../middleware/rbac.js";
 import {
   createInvoiceFromQuoteSchema,
@@ -19,7 +19,11 @@ export default async function invoiceRoutes(app: FastifyInstance): Promise<void>
       where: { id: userId },
       select: { operatorId: true },
     });
-    if (!user) throw new Error("Utilisateur introuvable");
+    // `NotFoundError` et non `Error` : une Error nue sort en 500 « erreur
+    // interne », alors que le compte a simplement disparu depuis l'émission
+    // du jeton. Le client ne peut rien faire d'un 500, il sait quoi faire
+    // d'un 404.
+    if (!user) throw new NotFoundError("Utilisateur", userId);
     return user.operatorId;
   }
 
@@ -91,6 +95,12 @@ export default async function invoiceRoutes(app: FastifyInstance): Promise<void>
           type: "object",
           properties: {
             status: { type: "string", enum: [...INVOICE_STATUSES] },
+            excludeStatus: {
+              type: "string",
+              description:
+                "Statuts à masquer, en CSV (ex. `DRAFT` ou `DRAFT,CANCELLED`). " +
+                "Ignoré si `status` est fourni. Filtre appliqué en base : la pagination reste exacte.",
+            },
             year: { type: "integer" },
             search: { type: "string" },
             page: { type: "integer", minimum: 1 },

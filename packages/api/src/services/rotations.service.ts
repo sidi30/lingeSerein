@@ -205,9 +205,17 @@ export class RotationsService {
 
   // ---- Détail ----
 
-  async getById(id: string, operatorId: string): Promise<RotationView> {
+  /**
+   * @param userId restreint la rotation à son propriétaire (rôle CLIENT).
+   *
+   * `GET /rotations?mine=1` est ouvert à tout compte authentifié, mais le
+   * détail était réservé aux admins : un client qui touchait sa notification de
+   * rappel — dont le lien porte `rotationId` — recevait un 403 sur sa propre
+   * rotation.
+   */
+  async getById(id: string, operatorId: string, userId?: string): Promise<RotationView> {
     const rotation = await this.prisma.rotation.findFirst({
-      where: { id, operatorId, deletedAt: null },
+      where: { id, operatorId, deletedAt: null, ...(userId ? { userId } : {}) },
       include: { lignes: true },
     });
 

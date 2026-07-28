@@ -1,6 +1,14 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { router } from "expo-router";
 import { useAuthStore } from "./store";
+import { invalidateAfter } from "./query";
+import { queryClient, SHARED_STATE_STALE_TIME } from "./queryClient";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -10,6 +18,9 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3001/api/v1
 // module. Un throw au top-level planterait le bundle release au lancement
 // (l'écran de login importe ce fichier) → l'app se fermerait aussitôt ouverte.
 const CLEARTEXT_IN_PROD = !__DEV__ && API_URL.startsWith("http://");
+
+/** Délai au-delà duquel une requête est abandonnée (réseau mobile dégradé). */
+const REQUEST_TIMEOUT_MS = 20_000;
 
 export class ApiError extends Error {
   constructor(
@@ -22,6 +33,18 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+ * Message affichable pour une erreur de mutation.
+ *
+ * `fetch` échoue avec des messages anglais bruts (« Network request failed »)
+ * qu'on ne montre jamais tels quels dans une interface française. Seules les
+ * ApiError portent un message rédigé par le serveur, donc affichable.
+ */
+export function errorMessage(e: unknown): string {
+  if (e instanceof ApiError && e.status !== 0) return e.message;
+  return "Connexion au serveur impossible. Vérifiez votre réseau, puis réessayez.";
 }
 
 /**
@@ -94,15 +117,35 @@ export async function apiFetch<T>(
   const token = useAuthStore.getState().accessToken;
   const hasBody = options?.body != null;
 
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      ...(hasBody ? { "Content-Type": "application/json" } : {}),
-      ...options?.headers,
-      // Authorization placé en dernier pour ne pas être écrasé par options.headers
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  // Sans délai maximal, une requête émise dans une zone blanche reste en vol
+  // jusqu'au timeout de l'OS (~60 s sur iOS) : le livreur voit un bouton qui
+  // tourne indéfiniment et finit par revalider son arrêt. On coupe court.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        ...(hasBody ? { "Content-Type": "application/json" } : {}),
+        ...options?.headers,
+        // Authorization placé en dernier pour ne pas être écrasé par options.headers
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+  } catch (e) {
+    // status 0 = pas de réponse du serveur (abandon ou réseau). `errorMessage`
+    // le traduit en message français ; le message natif est en anglais.
+    const aborted = (e as { name?: string } | null)?.name === "AbortError";
+    throw new ApiError(
+      0,
+      aborted ? "Délai dépassé — le serveur ne répond pas." : "Réseau indisponible.",
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 
   // 401 sur une route protégée → tenter un refresh une seule fois, puis rejouer.
   // Les routes /auth/* (login, refresh, logout) sont exclues : un 401 y est
@@ -118,7 +161,11 @@ export async function apiFetch<T>(
       return apiFetch<T>(path, options, true);
     }
     // Refresh impossible → session expirée : on purge et on renvoie au login.
+    // `qc.clear()` est indispensable ici : ce chemin ne passe pas par
+    // `useLogout`, et sans lui le compte suivant retrouvait à l'écran les
+    // données du précédent — y compris avec un autre rôle.
     useAuthStore.getState().logout();
+    queryClient.clear();
     router.replace("/(auth)/login");
     throw new ApiError(401, "Session expirée, veuillez vous reconnecter.");
   }
@@ -483,6 +530,11 @@ export function useOrders(status?: string) {
       return res.data;
     },
     enabled: !!token,
+    // L'admin confirme ou annule des commandes sans que le mobile en soit averti.
+    staleTime: SHARED_STATE_STALE_TIME,
+    // Changer de filtre crée une nouvelle clé : sans ça la liste se vide et
+    // affiche un squelette à chaque bascule d'onglet.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -490,6 +542,8 @@ export function useOrder(id: string) {
   const token = useAuthStore((s) => s.accessToken);
   return useQuery<Order>({
     queryKey: ["order", id],
+    // Cf. useOrders : état partagé avec l'admin.
+    staleTime: SHARED_STATE_STALE_TIME,
     queryFn: async () => {
       const res = await apiFetch<ApiRes<Order>>(`/orders/${id}`);
       return res.data;
@@ -513,10 +567,35 @@ export function useCreateOrder() {
       });
       return res.data;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["orders"] });
+    onSuccess: (order) => {
+      // La réponse de création contient déjà la commande complète : on amorce
+      // le cache de détail pour qu'une navigation immédiate vers
+      // /orders/<id> affiche le contenu au lieu de « Commande introuvable »
+      // le temps du premier GET.
+      qc.setQueryData(["order", order.id], order);
+      invalidateAfter(qc, "order");
     },
   });
+}
+
+/**
+ * Applique au cache de détail la commande renvoyée par une mutation.
+ *
+ * ⚠️ `PATCH /orders/:id/cancel` et `/status` répondent avec la ligne Prisma
+ * NUE : `prisma.order.update()` sans `include`, donc **sans `items`**. Écraser
+ * l'entrée du cache avec cet objet fait disparaître les articles, et l'écran de
+ * détail plante sur `order.items.map()`. On fusionne donc les champs mis à jour
+ * en conservant les relations déjà connues.
+ */
+function mergeOrderIntoCache(qc: QueryClient, id: string, updated: Order | undefined): void {
+  if (!updated) return;
+  qc.setQueryData<Order>(["order", id], (prev) =>
+    prev
+      ? { ...prev, ...updated, items: prev.items, user: prev.user ?? updated.user }
+      : // Sans commande en cache, on ne peut rien reconstituer : laisser vide
+        // force un vrai GET plutôt que de stocker un objet incomplet.
+        undefined,
+  );
 }
 
 export function useCancelOrder() {
@@ -529,9 +608,9 @@ export function useCancelOrder() {
       });
       return res.data;
     },
-    onSuccess: (_data, { id }) => {
-      qc.invalidateQueries({ queryKey: ["orders"] });
-      qc.invalidateQueries({ queryKey: ["order", id] });
+    onSuccess: (order, { id }) => {
+      mergeOrderIntoCache(qc, id, order);
+      invalidateAfter(qc, "order");
     },
   });
 }
@@ -539,12 +618,17 @@ export function useCancelOrder() {
 // ─── Hooks: Products ─────────────────────────────────────────────
 
 export function useProducts() {
+  const token = useAuthStore((s) => s.accessToken);
   return useQuery<Product[]>({
     queryKey: ["products"],
     queryFn: async () => {
       const res = await apiFetch<ApiListRes<Product>>("/products?limit=100");
       return res.data;
     },
+    // Garde `enabled` comme tous les autres hooks : sans elle, le vidage du
+    // cache à la déconnexion relançait aussitôt un GET /products sans jeton,
+    // qui repartait en 401.
+    enabled: !!token,
   });
 }
 
@@ -620,10 +704,7 @@ export function useSubscribeToPackSerenite() {
       });
       return res.data;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["subscription-me"] });
-      qc.invalidateQueries({ queryKey: ["subscription-config"] });
-    },
+    onSuccess: () => invalidateAfter(qc, "subscription"),
   });
 }
 
@@ -631,7 +712,7 @@ export function usePauseSubscription() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch("/subscriptions/me/pause", { method: "PATCH" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["subscription-me"] }),
+    onSuccess: () => invalidateAfter(qc, "subscription"),
   });
 }
 
@@ -639,7 +720,7 @@ export function useResumeSubscription() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch("/subscriptions/me/resume", { method: "PATCH" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["subscription-me"] }),
+    onSuccess: () => invalidateAfter(qc, "subscription"),
   });
 }
 
@@ -647,7 +728,7 @@ export function useCancelSubscription() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch("/subscriptions/me/cancel", { method: "PATCH" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["subscription-me"] }),
+    onSuccess: () => invalidateAfter(qc, "subscription"),
   });
 }
 
@@ -671,7 +752,7 @@ export function useMarkNotificationRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => apiFetch(`/notifications/${id}/read`, { method: "PATCH" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: () => invalidateAfter(qc, "notification"),
   });
 }
 
@@ -679,7 +760,7 @@ export function useMarkAllNotificationsRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch("/notifications/read-all", { method: "PATCH" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: () => invalidateAfter(qc, "notification"),
   });
 }
 
@@ -740,21 +821,22 @@ export function useTodayRound() {
       }
     },
     enabled: !!token && role === "ROLE_LIVREUR",
+    // Une tournée replanifiée depuis l'admin doit apparaître au retour dans
+    // l'app, pas deux minutes plus tard.
+    staleTime: SHARED_STATE_STALE_TIME,
   });
 }
 
 /**
  * Corps de PATCH /deliveries/stops/:id/complete.
  *
- * `setsDelivered` / `dirtyPickedUp` / `qrCodeScanned` sont acceptés par l'API
- * aujourd'hui. Les quatre champs de bon de livraison ci-dessous NE LE SONT PAS
- * ENCORE : le schéma Zod serveur n'est pas strict, il les ignore donc en
- * silence — l'arrêt se valide normalement, seule la signature n'est pas
- * persistée tant que le backend n'a pas livré sa part.
+ * Les quatre champs de bon de livraison sont désormais acceptés ET persistés
+ * par l'API (`completeStopSchema`, colonnes dédiées).
  *
- * On n'utilise volontairement PAS la colonne existante `signatureUrl`
- * (VarChar(500) + `z.string().url().max(500)`) : une signature ne tient pas en
- * 500 caractères, l'envoyer là renverrait un 400.
+ * On n'utilise volontairement PAS la colonne `signatureUrl` (VarChar(500) +
+ * `z.string().url().max(500)`) : une signature ne tient pas en 500 caractères,
+ * l'envoyer là renverrait un 400. `signatureDataUrl` est plafonné à 256 Ko
+ * côté serveur — largement au-dessus des ~6 Ko d'une signature SVG.
  */
 export interface CompleteStopInput {
   setsDelivered: number;
@@ -770,44 +852,30 @@ export interface CompleteStopInput {
 }
 
 /**
- * Deux routes coexistent pour valider un arrêt :
- *  - `PATCH /deliveries/stops/:id`          — contrat de l'ADR rotations, porte la signature ;
- *  - `PATCH /deliveries/stops/:id/complete` — route historique, seule déployée à ce jour.
+ * Valide un arrêt de tournée.
  *
- * On tente l'ADR d'abord et on retombe sur l'historique en 404. Le livreur peut
- * ainsi valider ses arrêts aujourd'hui, et la signature sera persistée dès que
- * le backend aura livré la nouvelle route — sans nouvelle version du mobile.
+ * Le backend porte la signature sur `PATCH /deliveries/stops/:id/complete` —
+ * la route historique, enrichie des champs du bon de livraison
+ * (`completeStopSchema`). Il n'existe pas de route `PATCH /stops/:id` : la
+ * tentative-puis-repli qui existait ici ne faisait que payer un 404 par session.
  *
- * Le résultat est mémorisé pour la session : sans ça, chaque validation d'arrêt
- * paierait un aller-retour 404 inutile.
+ * `ALREADY_COMPLETED` est traité comme un SUCCÈS et non comme une erreur. C'est
+ * l'échec typique du terrain : la requête aboutit, la réponse se perd (tunnel,
+ * ascenseur), le livreur réessaie. Lui afficher « Erreur de validation » pour
+ * une livraison bel et bien enregistrée le pousse à recommencer en boucle.
+ * `null` signale « déjà validé, rien de neuf à appliquer ».
  */
-let stopRouteSupportsAdr: boolean | null = null;
-
-async function patchStop(stopId: string, data: CompleteStopInput): Promise<DeliveryStop> {
-  const body = JSON.stringify(data);
-
-  if (stopRouteSupportsAdr !== false) {
-    try {
-      const res = await apiFetch<ApiRes<DeliveryStop>>(`/deliveries/stops/${stopId}`, {
-        method: "PATCH",
-        body,
-      });
-      stopRouteSupportsAdr = true;
-      return res.data;
-    } catch (e) {
-      // Seul un 404 signifie « route absente ». Un 400/403/409 vient de la
-      // logique métier et doit remonter tel quel, surtout pas être rejoué sur
-      // l'autre route (on validerait deux fois le même arrêt).
-      if (!(e instanceof ApiError) || e.status !== 404) throw e;
-      stopRouteSupportsAdr = false;
-    }
+async function patchStop(stopId: string, data: CompleteStopInput): Promise<DeliveryStop | null> {
+  try {
+    const res = await apiFetch<ApiRes<DeliveryStop>>(`/deliveries/stops/${stopId}/complete`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return res.data;
+  } catch (e) {
+    if (e instanceof ApiError && e.code === "ALREADY_COMPLETED") return null;
+    throw e;
   }
-
-  const res = await apiFetch<ApiRes<DeliveryStop>>(`/deliveries/stops/${stopId}/complete`, {
-    method: "PATCH",
-    body,
-  });
-  return res.data;
 }
 
 export function useCompleteStop() {
@@ -815,7 +883,9 @@ export function useCompleteStop() {
   return useMutation({
     mutationFn: ({ stopId, data }: { stopId: string; data: CompleteStopInput }) =>
       patchStop(stopId, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["today-round"] }),
+    // Valider un arrêt bouge la tournée, la commande liée, les stocks, la
+    // rotation du client et les compteurs admin — pas seulement la tournée.
+    onSuccess: () => invalidateAfter(qc, "delivery"),
   });
 }
 
@@ -882,7 +952,7 @@ export function useCompleteRound() {
       });
       return res.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["today-round"] }),
+    onSuccess: () => invalidateAfter(qc, "delivery"),
   });
 }
 
@@ -900,10 +970,9 @@ export function useUpdateOrderStatus() {
       });
       return res.data;
     },
-    onSuccess: (_data, { id }) => {
-      qc.invalidateQueries({ queryKey: ["orders"] });
-      qc.invalidateQueries({ queryKey: ["order", id] });
-      qc.invalidateQueries({ queryKey: ["dashboard-kpis"] });
+    onSuccess: (order, { id }) => {
+      mergeOrderIntoCache(qc, id, order);
+      invalidateAfter(qc, "order");
     },
   });
 }
@@ -923,6 +992,9 @@ export function useClients(search?: string) {
       return res.data;
     },
     enabled: !!token && (role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN"),
+    // La recherche re-clé la requête à chaque frappe débouncée : on conserve
+    // les résultats précédents pour éviter le clignotement.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -981,9 +1053,14 @@ export function useCreateClient() {
       });
       return res.data;
     },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["clients"] });
-      void qc.invalidateQueries({ queryKey: ["dashboard-kpis"] });
+    onSuccess: async () => {
+      // Surtout NE PAS amorcer ["client", id] avec cette réponse : `POST
+      // /clients` renvoie 22 champs plats, sans `stocks` ni `orders`
+      // (clients.service.ts), et la fiche fait `client.stocks.reduce()` dès le
+      // premier rendu — l'écran plantait à chaque création de client. Le GET
+      // qui suit ramène la fiche complète, et `detailState` affiche un
+      // chargement en attendant, plus « introuvable ».
+      await invalidateAfter(qc, "client");
     },
   });
 }
@@ -1018,6 +1095,7 @@ export function useClientStocks(search?: string) {
       return res.data;
     },
     enabled: !!token && (role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN"),
+    placeholderData: keepPreviousData,
   });
 }
 

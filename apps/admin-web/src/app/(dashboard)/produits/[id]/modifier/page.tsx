@@ -5,11 +5,13 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useRouter, useParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { detailState, invalidateAfter } from "@/lib/query";
 import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { DetailFallback } from "@/components/ui/detail-fallback";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { ArrowLeft, Package } from "lucide-react";
 import Link from "next/link";
@@ -56,24 +58,25 @@ export default function ModifierProduitPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const {
-    data: product,
-    isLoading,
-    isError,
-  } = useQuery({
+  const productQuery = useQuery({
     queryKey: ["product", productId],
     queryFn: async () => {
       // GET /products liste + filtre côté client (l'API ne fournit pas de GET /products/:id public)
       const res = await api.getRaw<{ success: boolean; data: ProductV2DTO[] }>("/products", {
-        limit: 100,
+        limit: 200,
         page: 1,
       });
       const found = res.data.find((p) => p.id === productId);
-      if (!found) throw new Error("Produit introuvable");
+      // ApiError(404) et non Error : c’est ce qui permet de distinguer « ce
+      // produit n’existe pas » d’une panne réseau. Une Error nue faisait
+      // afficher « introuvable » sur une simple coupure.
+      if (!found) throw new ApiError(404, "Produit introuvable");
       return found;
     },
     enabled: !!productId,
   });
+  const product = productQuery.data;
+  const state = detailState(productQuery, Boolean(productId));
 
   const {
     register,
@@ -103,10 +106,10 @@ export default function ModifierProduitPage() {
         priceCents: Math.round(values.priceEuros * 100),
         slug: values.slug || undefined,
       }),
-    onSuccess: (updated) => {
+    onSuccess: async (updated) => {
       toast("Produit mis à jour");
-      queryClient.invalidateQueries({ queryKey: ["products-v2"] });
       queryClient.setQueryData(["product", productId], updated);
+      await invalidateAfter(queryClient, "product");
       router.push("/produits");
     },
     onError: (err: unknown) => {
@@ -119,10 +122,10 @@ export default function ModifierProduitPage() {
       api.patch<ProductV2DTO>(`/products/${productId}/price`, {
         priceCents: Math.round(priceEuros * 100),
       }),
-    onSuccess: (updated) => {
+    onSuccess: async (updated) => {
       toast("Prix mis à jour");
-      queryClient.invalidateQueries({ queryKey: ["products-v2"] });
       queryClient.setQueryData(["product", productId], updated);
+      await invalidateAfter(queryClient, "product");
       router.push("/produits");
     },
     onError: (err: unknown) => {
@@ -132,7 +135,7 @@ export default function ModifierProduitPage() {
 
   // ─── Rendu états ───
 
-  if (isLoading) {
+  if (state === "loading") {
     return (
       <>
         <Header title="Modifier le produit" />
@@ -147,7 +150,20 @@ export default function ModifierProduitPage() {
     );
   }
 
-  if (isError || !product) {
+  if (state === "unavailable") {
+    return (
+      <>
+        <Header title="Modifier le produit" />
+        <DetailFallback
+          state="unavailable"
+          label="Ce produit"
+          onRetry={() => void productQuery.refetch()}
+        />
+      </>
+    );
+  }
+
+  if (!product) {
     return (
       <>
         <Header title="Modifier le produit" />

@@ -320,6 +320,8 @@ export interface SubscriptionConfigPublicDTO {
   kitLitQty: number;
   minEngagementMonths: number;
   noticePeriodDays: number;
+  /** Facturation récurrente avec TVA. Absent des API plus anciennes. */
+  tvaApplicable?: boolean;
 }
 
 export interface SubscriptionConfigDTO extends SubscriptionConfigPublicDTO {

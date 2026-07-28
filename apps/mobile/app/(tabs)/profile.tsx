@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { ScreenWrapper } from "@/components/ScreenWrapper";
 import { Card } from "@/components/Card";
@@ -414,7 +415,10 @@ export default function ProfileScreen() {
         accessibilityHint="Se déconnecter de l'application"
       />
 
-      <Text style={styles.version}>Linge Serein v0.1.1</Text>
+      {/* Lue depuis app.json : écrite en dur, elle annonçait v0.1.1 sur une
+          app en 0.3.0, et le propriétaire ne pouvait pas savoir quelle
+          version tournait réellement sur le téléphone d'un livreur. */}
+      <Text style={styles.version}>Linge Serein v{Constants.expoConfig?.version ?? ""}</Text>
     </ScreenWrapper>
   );
 }

@@ -13,7 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DetailFallback } from "@/components/ui/detail-fallback";
+import { detailState, invalidateAfter } from "@/lib/query";
 import { useToast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
@@ -124,10 +125,12 @@ export default function UtilisateurDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [newPassword, setNewPassword] = useState<string | null>(null);
 
-  const { data: user, isLoading } = useQuery({
+  const userQuery = useQuery({
     queryKey: ["user", id],
     queryFn: () => api.get<UserDTO>(`/users/${id}`),
   });
+  const user = userQuery.data;
+  const state = detailState(userQuery, Boolean(id));
 
   const { data: zones } = useQuery({
     queryKey: ["zones-select"],
@@ -174,8 +177,7 @@ export default function UtilisateurDetailPage() {
     onSuccess: () => {
       toast("Utilisateur mis à jour");
       setEditMode(false);
-      queryClient.invalidateQueries({ queryKey: ["user", id] });
-      queryClient.invalidateQueries({ queryKey: ["users"] });
+      void invalidateAfter(queryClient, "user");
     },
     onError: (err: unknown) => {
       toast(err instanceof Error ? err.message : "Erreur lors de la mise à jour", "error");
@@ -187,8 +189,7 @@ export default function UtilisateurDetailPage() {
     onSuccess: () => {
       toast("Compte désactivé");
       setConfirmDeactivate(false);
-      queryClient.invalidateQueries({ queryKey: ["user", id] });
-      queryClient.invalidateQueries({ queryKey: ["users"] });
+      void invalidateAfter(queryClient, "user");
     },
     onError: (err: unknown) => {
       toast(err instanceof Error ? err.message : "Erreur lors de la désactivation", "error");
@@ -200,8 +201,7 @@ export default function UtilisateurDetailPage() {
     onSuccess: () => {
       toast("Compte réactivé");
       setConfirmReactivate(false);
-      queryClient.invalidateQueries({ queryKey: ["user", id] });
-      queryClient.invalidateQueries({ queryKey: ["users"] });
+      void invalidateAfter(queryClient, "user");
     },
     onError: (err: unknown) => {
       toast(err instanceof Error ? err.message : "Erreur lors de la réactivation", "error");
@@ -213,7 +213,7 @@ export default function UtilisateurDetailPage() {
     onSuccess: (result) => {
       setConfirmResetPwd(false);
       setNewPassword(result.temporaryPassword);
-      queryClient.invalidateQueries({ queryKey: ["user", id] });
+      void invalidateAfter(queryClient, "user");
     },
     onError: (err: unknown) => {
       toast(err instanceof Error ? err.message : "Erreur lors du reset", "error");
@@ -222,10 +222,14 @@ export default function UtilisateurDetailPage() {
 
   const deleteMutation = useMutation({
     mutationFn: () => api.delete<{ id: string }>(`/users/${id}`),
-    onSuccess: () => {
+    onSuccess: async () => {
       setConfirmDelete(false);
-      queryClient.invalidateQueries({ queryKey: ["users"] });
+      // Purger la fiche AVANT d’invalider : encore montée, elle relancerait un
+      // GET sur un compte qui n’existe plus et afficherait « introuvable » le
+      // temps que la navigation aboutisse.
+      queryClient.removeQueries({ queryKey: ["user", id] });
       toast("Compte supprimé définitivement");
+      await invalidateAfter(queryClient, "user");
       router.push("/utilisateurs");
     },
     onError: (err: unknown) => {
@@ -234,25 +238,15 @@ export default function UtilisateurDetailPage() {
     },
   });
 
-  if (isLoading) {
+  if (state !== "ready" || !user) {
     return (
       <>
         <Header title="Utilisateur" />
-        <div className="space-y-6 p-4 sm:p-6">
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-48 w-full" />
-        </div>
-      </>
-    );
-  }
-
-  if (!user) {
-    return (
-      <>
-        <Header title="Utilisateur" />
-        <div className="flex items-center justify-center p-12 text-gray-400">
-          Utilisateur introuvable
-        </div>
+        <DetailFallback
+          state={state === "ready" ? "loading" : state}
+          label="Ce compte"
+          onRetry={() => void userQuery.refetch()}
+        />
       </>
     );
   }
@@ -453,8 +447,11 @@ export default function UtilisateurDetailPage() {
         loading={deleteMutation.isPending}
         variant="danger"
         title="Supprimer définitivement ce compte ?"
-        description={`Supprimer définitivement ${user.name} ? Cette action désactive le compte et révoque ses accès.`}
+        description={`Supprimer définitivement ${user.name} ? Cette action désactive le compte et révoque ses accès. Son historique reste attaché à son nom.`}
         confirmLabel="Supprimer définitivement"
+        // Même garde-fou que dans la liste : une suppression définitive ne doit
+        // pas pouvoir partir sur un clic réflexe.
+        requireTypedText={user.name}
       />
     </>
   );

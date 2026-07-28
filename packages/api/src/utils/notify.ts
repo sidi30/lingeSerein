@@ -1,4 +1,5 @@
 import type { PrismaClient, Prisma, NotificationChannel, NotificationType } from "@prisma/client";
+import { sendExpoPush, type PushMessage } from "./push.js";
 
 /**
  * Point d'émission UNIQUE d'une notification IN-APP.
@@ -36,19 +37,88 @@ export interface NotifyResult {
 }
 
 /**
- * ⚠️ POINT DE BRANCHEMENT PUSH — non câblé.
- *
- * La table `DeviceToken` existe désormais et se remplit (POST
- * /api/v1/notifications/device-token), mais l'appel à l'API Expo Push reste à
- * écrire, et le mobile doit d'abord embarquer `expo-notifications` — ce qui exige
- * un rebuild EAS, un OTA crasherait. `EXPO_ACCESS_TOKEN` est déjà prévu dans le
- * schéma d'environnement (packages/shared/src/env.ts).
- *
- * Volontairement silencieux : un push est un confort, son absence ne doit pas
- * noyer les logs d'un cron qui, lui, a bien fait son travail.
+ * Canal Android sur lequel le mobile a déclaré ses notifications
+ * (`Notifications.setNotificationChannelAsync("default", …)`). Un `channelId`
+ * inconnu de l'appareil rend la notification MUETTE au lieu de la faire échouer :
+ * ce littéral doit rester aligné sur `apps/mobile/lib/notifications.ts`.
  */
-async function deliverPush(_notification: { id: string; userId: string }): Promise<void> {
-  // Intentionnellement vide — voir le commentaire ci-dessus.
+const CANAL_ANDROID = "default";
+
+/** Notification telle que Prisma vient de la créer — tout ce dont le push a besoin. */
+interface NotificationEnvoyee {
+  id: string;
+  userId: string;
+  title: string;
+  body: string;
+  data: Prisma.JsonValue;
+}
+
+/**
+ * Distribue la notification aux appareils de l'utilisateur via Expo Push.
+ *
+ * **Ne lève jamais.** Un push est un confort : son échec ne doit ni faire échouer
+ * le cron appelant, ni empêcher la notification in-app, qui elle est déjà en base
+ * au moment où l'on arrive ici.
+ *
+ * Deux effets de bord assumés :
+ *   - les jetons morts (`DeviceNotRegistered`) sont SUPPRIMÉS. C'est le seul
+ *     mécanisme qui empêche la table de se remplir d'appareils fantômes ;
+ *   - la pastille iOS porte le nombre réel de notifications non lues. L'index
+ *     `(userId, readAt)` existe précisément pour ce comptage.
+ */
+async function deliverPush(prisma: PrismaClient, notification: NotificationEnvoyee): Promise<void> {
+  try {
+    const appareils = await prisma.deviceToken.findMany({
+      where: { userId: notification.userId },
+      select: { token: true },
+    });
+
+    if (appareils.length === 0) return;
+
+    const badge = await prisma.notification.count({
+      where: { userId: notification.userId, readAt: null },
+    });
+
+    // `data` part TEL QUEL : c'est ce que le mobile lit pour ouvrir le bon écran
+    // au tap. Le vider ou le réécrire ici, c'est une notification qui n'ouvre
+    // rien. Seule une valeur non-objet (null, tableau, scalaire) est écartée,
+    // faute d'être transmissible.
+    const data =
+      notification.data !== null &&
+      typeof notification.data === "object" &&
+      !Array.isArray(notification.data)
+        ? (notification.data as Record<string, unknown>)
+        : {};
+
+    const messages: PushMessage[] = appareils.map((appareil) => ({
+      to: appareil.token,
+      title: notification.title,
+      body: notification.body,
+      data,
+      sound: "default",
+      channelId: CANAL_ANDROID,
+      badge,
+    }));
+
+    const result = await sendExpoPush(messages);
+
+    if (result.jetonsMorts.length > 0) {
+      const { count } = await prisma.deviceToken.deleteMany({
+        where: { token: { in: result.jetonsMorts } },
+      });
+      console.log(`[push] ${count} jeton(s) mort(s) supprimé(s) (DeviceNotRegistered)`);
+    }
+
+    for (const erreur of result.erreurs) {
+      // Erreurs non fatales pour le jeton : on trace sans rien supprimer. C'est
+      // la seule piste exploitable quand un push n'arrive pas.
+      console.error(`[push] Échec partiel (notification ${notification.id}) : ${erreur}`);
+    }
+  } catch (err) {
+    // Filet de dernier recours : même une panne Prisma ne doit pas remonter.
+    const raison = err instanceof Error ? err.message : String(err);
+    console.error(`[push] Distribution abandonnée (notification ${notification.id}) : ${raison}`);
+  }
 }
 
 /**
@@ -81,8 +151,10 @@ export async function notify(prisma: PrismaClient, input: NotifyInput): Promise<
     },
   });
 
+  // Le filtrage par canal est fait ICI, une seule fois : `deliverPush` ne
+  // relit pas les préférences, il ne les connaît même pas.
   if (effectiveChannel === "PUSH" || effectiveChannel === "BOTH") {
-    await deliverPush(notification);
+    await deliverPush(prisma, notification);
   }
 
   return { notificationId: notification.id, skipped: false };

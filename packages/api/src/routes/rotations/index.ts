@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { idParamSchema } from "@lingengo/shared";
+import { idParamSchema, ROLES } from "@lingengo/shared";
 import { RotationsService } from "../../services/rotations.service.js";
-import { ValidationError } from "../../utils/errors.js";
+import { ValidationError, NotFoundError } from "../../utils/errors.js";
 import { requireRole } from "../../middleware/rbac.js";
 import {
   createRotationSchema,
@@ -22,7 +22,11 @@ export default async function rotationRoutes(app: FastifyInstance): Promise<void
       where: { id: userId },
       select: { operatorId: true },
     });
-    if (!user) throw new Error("Utilisateur introuvable");
+    // `NotFoundError` et non `Error` : une Error nue sort en 500 « erreur
+    // interne », alors que le compte a simplement disparu depuis l'émission
+    // du jeton. Le client ne peut rien faire d'un 500, il sait quoi faire
+    // d'un 404.
+    if (!user) throw new NotFoundError("Utilisateur", userId);
     return user.operatorId;
   }
 
@@ -192,7 +196,9 @@ export default async function rotationRoutes(app: FastifyInstance): Promise<void
   app.get<{ Params: { id: string } }>(
     "/:id",
     {
-      preHandler: adminMiddleware,
+      // Authentification seule, comme `GET /rotations?mine=1` : le périmètre
+      // est forcé plus bas côté serveur, un non-admin ne voit que ses rotations.
+      preHandler: [app.authenticate],
       schema: {
         tags: ["Rotations"],
         summary: "Détail d'une rotation",
@@ -208,7 +214,12 @@ export default async function rotationRoutes(app: FastifyInstance): Promise<void
       }
 
       const operatorId = await getOperatorId(request.user.sub);
-      const rotation = await service.getById(paramsParsed.data.id, operatorId);
+      const isAdmin = request.user.role === ROLES.ADMIN || request.user.role === ROLES.SUPER_ADMIN;
+      const rotation = await service.getById(
+        paramsParsed.data.id,
+        operatorId,
+        isAdmin ? undefined : request.user.sub,
+      );
       return reply.send({ success: true, data: rotation });
     },
   );
