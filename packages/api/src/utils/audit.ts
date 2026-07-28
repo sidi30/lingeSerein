@@ -1,7 +1,14 @@
 import type { PrismaClient, AuditAction, Prisma } from "@prisma/client";
 
 interface AuditLogParams {
-  prisma: PrismaClient;
+  /**
+   * `Pick` et non `PrismaClient` : un client de transaction
+   * (`Prisma.TransactionClient`) n'expose pas `$connect`/`$transaction` et n'est
+   * donc pas assignable au client complet. Or l'audit doit pouvoir être écrit
+   * DANS la transaction qu'il journalise — sinon une écriture annulée laisse
+   * derrière elle la trace d'un événement qui n'a pas eu lieu.
+   */
+  prisma: Pick<PrismaClient, "auditLog">;
   userId?: string;
   action: AuditAction;
   entity: string;
@@ -16,7 +23,9 @@ interface AuditLogParams {
  * Les données personnelles sont automatiquement exclues du champ `changes`.
  */
 export async function createAuditLog(params: AuditLogParams): Promise<void> {
-  const sanitizedChanges = (params.changes ? stripPii(params.changes) : {}) as Prisma.InputJsonValue;
+  const sanitizedChanges = (
+    params.changes ? stripPii(params.changes) : {}
+  ) as Prisma.InputJsonValue;
 
   await params.prisma.auditLog.create({
     data: {
