@@ -159,16 +159,31 @@ export async function notify(prisma: PrismaClient, input: NotifyInput): Promise<
   // relit pas les préférences, il ne les connaît même pas.
   if (effectiveChannel === "PUSH" || effectiveChannel === "BOTH") {
     const queue = getPushQueue();
+    let misEnFile = false;
+
     if (queue) {
       // Sortie du fil de la requête : joindre Expo peut prendre jusqu'à 10 s
       // (son timeout), et rien ne justifie de faire attendre l'utilisateur qui
       // vient de valider une commande. La notification, elle, est DÉJÀ écrite —
       // le badge bouge tout de suite. En prime, BullMQ réessaie trois fois là où
       // l'appel direct perdait le push au premier hoquet réseau.
-      await queue.add(JOB_PUSH, { notificationId: notification.id });
-    } else {
-      // Ni file ni Redis (tests, scripts, seed) : envoi direct, comportement
-      // identique à celui d'avant.
+      try {
+        await queue.add(JOB_PUSH, { notificationId: notification.id });
+        misEnFile = true;
+      } catch (err) {
+        // Redis indisponible. Le contrat de ce module est qu'un échec de push ne
+        // remonte JAMAIS à l'appelant : une commande validée ne doit pas échouer
+        // parce qu'une notification n'a pas pu partir. On retombe donc sur
+        // l'envoi direct, qui absorbe déjà ses propres erreurs.
+        console.error(
+          `[notify] Mise en file du push impossible (${err instanceof Error ? err.message : "inconnu"}) — envoi direct`,
+        );
+      }
+    }
+
+    if (!misEnFile) {
+      // Ni file, ni Redis (tests, scripts, seed), ou file en panne : envoi
+      // direct, comportement identique à celui d'avant.
       await deliverPush(prisma, notification);
     }
   }

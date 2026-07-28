@@ -331,6 +331,26 @@ describe("le push ne bloque plus la requête", () => {
     assert.equal(lotsEnvoyes.length, 0);
   });
 
+  it("retombe sur l'envoi direct si la file est en panne, sans faire échouer l'appelant", async () => {
+    // Redis indisponible. Le contrat du module est qu'un échec de push ne
+    // remonte jamais : une commande validée ne doit pas échouer parce qu'une
+    // notification n'a pas pu partir.
+    setPushQueue({
+      add: () => Promise.reject(new Error("Redis injoignable")),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    simulerExpo();
+
+    const fake = createFakePrisma([{ token: JETON_A, userId: "user-1" }]);
+    const resultat = await notify(asPrisma(fake), RAPPEL);
+
+    setPushQueue(null);
+
+    assert.ok(resultat.notificationId);
+    // Le push est parti quand même, par le chemin direct.
+    assert.equal(lotsEnvoyes.length, 1);
+  });
+
   it("retombe sur l'envoi direct quand aucune file n'est enregistrée", async () => {
     // Tests, scripts, seed : pas de Redis, donc comportement d'avant.
     setPushQueue(null);
