@@ -320,6 +320,279 @@ export function devisClientConfirmationEmail(name: string): string {
   `);
 }
 
+// ─── Rotations de linge (API → /api/internal/notify) ───
+
+/**
+ * Ligne de linge concernée par un passage. `qty` est un entier validé en amont
+ * par zod : jamais interpolée depuis une source non fiable.
+ */
+export interface RotationLigneData {
+  designation: string;
+  qty: number;
+}
+
+/** Régime contractuel de la rotation — libellés figés, jamais saisis. */
+const FORMULE_LABELS: Record<string, string> = {
+  PONCTUEL: "Location ponctuelle",
+  ABONNEMENT: "Pack Sérénité",
+};
+
+const JOURS_FR = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+const MOIS_FR = [
+  "janvier",
+  "février",
+  "mars",
+  "avril",
+  "mai",
+  "juin",
+  "juillet",
+  "août",
+  "septembre",
+  "octobre",
+  "novembre",
+  "décembre",
+];
+
+/**
+ * Formate une date « AAAA-MM-JJ » en français lisible (« lundi 3 août 2026 »).
+ *
+ * Pas d'`Intl` — même raison que {@link formatEuroCents} : le rendu doit être
+ * identique quel que soit l'ICU embarqué dans l'image Node de production.
+ * La date est décomposée à la main puis reconstruite en heure LOCALE : passer
+ * la chaîne à `new Date()` la lirait en UTC et pourrait décaler le jour de la
+ * semaine d'un cran selon le fuseau.
+ */
+function formatDateFr(isoDate: string): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  if (!y || !m || !d) return esc(isoDate);
+  const date = new Date(y, m - 1, d);
+  return `${JOURS_FR[date.getDay()]} ${d} ${MOIS_FR[m - 1]} ${y}`;
+}
+
+/** Tableau des articles d'un passage. Toute désignation est échappée. */
+function lignesTable(lignes: RotationLigneData[]): string {
+  const rows = lignes
+    .map((l, i) => {
+      const bg = i % 2 === 0 ? "#ffffff" : BRAND.lavender50;
+      return `<tr>
+        <td style="padding:10px 12px;font-size:14px;color:#374151;border-bottom:1px solid #e5e7eb;background-color:${bg};">${esc(
+          l.designation,
+        )}</td>
+        <td align="center" style="padding:10px 12px;font-size:14px;color:${BRAND.forest};font-weight:600;border-bottom:1px solid #e5e7eb;background-color:${bg};">${l.qty}</td>
+      </tr>`;
+    })
+    .join("");
+
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+      <thead>
+        <tr style="background-color:${BRAND.forest};">
+          <th align="left" style="padding:10px 12px;font-size:12px;color:#ffffff;text-transform:uppercase;letter-spacing:0.5px;">Article</th>
+          <th align="center" style="padding:10px 12px;font-size:12px;color:#ffffff;text-transform:uppercase;letter-spacing:0.5px;">Qté</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+export interface RotationReminderClientData {
+  clientNom: string;
+  /** Date du passage au format AAAA-MM-JJ. */
+  datePassage: string;
+  /** Créneau annoncé, ex. « 08:00-12:00 ». */
+  creneau?: string;
+  lignes: RotationLigneData[];
+}
+
+/**
+ * Rappel CLIENT envoyé la veille du passage (J-1 à 18h).
+ *
+ * Le message demande une ACTION précise (sortir le linge sale en sac fermé)
+ * plutôt que d'informer : c'est ce qui fait la différence entre un rappel utile
+ * et un rappel ignoré. La porte de sortie (« besoin de décaler ») est mise en
+ * avant pour éviter le passage à vide, bien plus coûteux qu'un report.
+ */
+export function rotationReminderClientEmail(data: RotationReminderClientData): string {
+  const creneauBlock = data.creneau
+    ? `<p style="margin:0 0 16px;font-size:15px;color:${BRAND.gray};line-height:1.7;">
+         Créneau prévu : <strong style="color:${BRAND.forest};">${esc(data.creneau)}</strong>
+       </p>`
+    : "";
+
+  const lignesBlock = data.lignes.length > 0 ? lignesTable(data.lignes) : "";
+
+  return layout(`
+    <h2 style="margin:0 0 20px;font-size:22px;color:${BRAND.forest};font-weight:600;">
+      Votre passage est prévu demain, ${esc(data.clientNom)}
+    </h2>
+    <div style="background-color:${BRAND.lavender50};border-radius:12px;padding:20px 24px;margin-bottom:24px;border-left:4px solid ${BRAND.lavender};">
+      <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:${BRAND.forest};text-transform:uppercase;letter-spacing:0.5px;">Date du passage</p>
+      <p style="margin:0;font-size:18px;color:${BRAND.forest};font-weight:700;">${formatDateFr(
+        data.datePassage,
+      )}</p>
+    </div>
+    ${creneauBlock}
+    <p style="margin:0 0 24px;font-size:15px;color:${BRAND.gray};line-height:1.7;">
+      Merci de <strong style="color:${BRAND.forest};">préparer votre linge sale dans un sac fermé</strong>
+      avant notre arrivée. Nous le récupérons et vous déposons votre linge propre dans le même passage.
+    </p>
+    ${lignesBlock}
+    <p style="margin:0;font-size:14px;color:${BRAND.gray};line-height:1.7;">
+      Besoin de décaler ? Appelez-nous au
+      <a href="tel:+33685218270" style="color:${BRAND.forest};font-weight:600;text-decoration:none;">06 85 21 82 70</a>
+      — un report coûte toujours moins cher qu'un passage à vide.
+    </p>
+  `);
+}
+
+export interface RotationPassageData {
+  clientNom: string;
+  clientAdresse?: string;
+  /** PONCTUEL ou ABONNEMENT. */
+  formule?: string;
+  creneau?: string;
+  lignes: RotationLigneData[];
+}
+
+export interface RotationReminderOwnerData {
+  /** Date des passages au format AAAA-MM-JJ. */
+  datePassage: string;
+  passages: RotationPassageData[];
+}
+
+/**
+ * Récapitulatif GESTIONNAIRE des passages du lendemain (J-1 à 18h).
+ *
+ * Sert de feuille de route imprimable : une section par client, avec l'adresse
+ * et les articles à charger. Les passages arrivent dans l'ordre fourni par
+ * l'API — le tri (par tournée, par zone) est une décision d'appelant.
+ */
+export function rotationReminderOwnerEmail(data: RotationReminderOwnerData): string {
+  const count = data.passages.length;
+
+  const blocks = data.passages
+    .map((p, i) => {
+      const adresse = p.clientAdresse
+        ? `<p style="margin:0 0 2px;font-size:14px;color:${BRAND.gray};line-height:1.6;">${esc(
+            p.clientAdresse,
+          )}</p>`
+        : "";
+      const formule = p.formule
+        ? `<span style="display:inline-block;background-color:${BRAND.lavender50};color:${BRAND.forest};font-size:12px;font-weight:600;padding:3px 10px;border-radius:50px;">${esc(
+            FORMULE_LABELS[p.formule] ?? p.formule,
+          )}</span>`
+        : "";
+      const creneau = p.creneau
+        ? `<p style="margin:6px 0 0;font-size:13px;color:${BRAND.gray};">Créneau : <strong style="color:${BRAND.forest};">${esc(
+            p.creneau,
+          )}</strong></p>`
+        : "";
+
+      return `<div style="border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:16px;">
+          <p style="margin:0 0 6px;font-size:16px;color:${BRAND.forest};font-weight:700;">
+            ${i + 1}. ${esc(p.clientNom)}
+          </p>
+          ${adresse}
+          ${formule}
+          ${creneau}
+          <div style="margin-top:14px;">${
+            p.lignes.length > 0
+              ? lignesTable(p.lignes)
+              : `<p style="margin:0;font-size:13px;color:${BRAND.gray};font-style:italic;">Aucun article renseigné.</p>`
+          }</div>
+        </div>`;
+    })
+    .join("");
+
+  const body =
+    count > 0
+      ? blocks
+      : `<p style="margin:0;font-size:15px;color:${BRAND.gray};line-height:1.7;">Aucun passage prévu demain.</p>`;
+
+  return layout(`
+    <h2 style="margin:0 0 8px;font-size:22px;color:${BRAND.forest};font-weight:600;">
+      Passages de demain
+    </h2>
+    <p style="margin:0 0 24px;font-size:15px;color:${BRAND.gray};line-height:1.7;">
+      ${formatDateFr(data.datePassage)} &mdash;
+      <strong style="color:${BRAND.forest};">${count} passage${count > 1 ? "s" : ""}</strong>
+    </p>
+    ${body}
+  `);
+}
+
+export interface RotationOverdueData {
+  clientNom: string;
+  clientAdresse?: string;
+  /** Date de reprise prévue au format AAAA-MM-JJ. */
+  dateReprisePrevue: string;
+  joursDeRetard: number;
+  lignes: RotationLigneData[];
+  /** Vrai au-delà du seuil d'escalade : le remplacement devient facturable. */
+  facturableRemplacement?: boolean;
+  /** Montant du barème de remplacement, en centimes, si l'appelant le fournit. */
+  montantRemplacementCents?: number;
+}
+
+/**
+ * Alerte GESTIONNAIRE — linge non restitué (cron quotidien 09h).
+ *
+ * Le bandeau d'escalade n'apparaît qu'au-delà du seuil de tolérance et rappelle
+ * que la facturation reste une DÉCISION HUMAINE : cet email signale, il ne
+ * déclenche rien.
+ */
+export function rotationOverdueEmail(data: RotationOverdueData): string {
+  const jours = data.joursDeRetard;
+
+  const adresse = data.clientAdresse
+    ? `<p style="margin:0 0 16px;font-size:14px;color:${BRAND.gray};line-height:1.6;">${esc(
+        data.clientAdresse,
+      )}</p>`
+    : "";
+
+  const bareme =
+    data.montantRemplacementCents !== undefined
+      ? ` Barème de remplacement applicable : <strong>${formatEuroCents(
+          data.montantRemplacementCents,
+        )}</strong>.`
+      : "";
+
+  const escalade = data.facturableRemplacement
+    ? `<div style="background-color:#fef3c7;border-radius:12px;padding:18px 22px;margin-bottom:24px;border-left:4px solid #b45309;">
+         <p style="margin:0;font-size:14px;color:#7c2d12;line-height:1.7;">
+           <strong>Seuil d'escalade dépassé.</strong> Le linge est réputé non restitué :
+           son remplacement devient facturable.${bareme}
+           La facturation reste une décision à prendre manuellement.
+         </p>
+       </div>`
+    : "";
+
+  return layout(`
+    <h2 style="margin:0 0 8px;font-size:22px;color:${BRAND.forest};font-weight:600;">
+      Linge non restitué &mdash; ${esc(data.clientNom)}
+    </h2>
+    ${adresse}
+    <div style="background-color:${BRAND.lavender50};border-radius:12px;padding:20px 24px;margin-bottom:24px;border-left:4px solid ${BRAND.lavender};">
+      <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:${BRAND.forest};text-transform:uppercase;letter-spacing:0.5px;">Reprise attendue le</p>
+      <p style="margin:0 0 10px;font-size:16px;color:${BRAND.forest};font-weight:700;">${formatDateFr(
+        data.dateReprisePrevue,
+      )}</p>
+      <p style="margin:0;font-size:15px;color:${BRAND.gray};">
+        Retard : <strong style="color:#b45309;">${jours} jour${jours > 1 ? "s" : ""}</strong>
+      </p>
+    </div>
+    ${escalade}
+    <h3 style="margin:0 0 12px;font-size:16px;color:${BRAND.forest};font-weight:600;">Articles concernés</h3>
+    ${
+      data.lignes.length > 0
+        ? lignesTable(data.lignes)
+        : `<p style="margin:0 0 24px;font-size:14px;color:${BRAND.gray};font-style:italic;">Aucun article renseigné.</p>`
+    }
+    <p style="margin:0;font-size:14px;color:${BRAND.gray};line-height:1.7;">
+      Contacter le client au plus tôt pour convenir d'une reprise.
+    </p>
+  `);
+}
+
 export function notificationEmail(data: ContactData): string {
   return layout(`
     <h2 style="margin:0 0 20px;font-size:22px;color:${BRAND.forest};font-weight:600;">

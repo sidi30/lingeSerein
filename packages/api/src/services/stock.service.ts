@@ -128,10 +128,42 @@ export class StockService {
     });
 
     if (existingStock) {
-      const cleanDelta = data.type === "DELIVERY" || data.type === "WASH_COMPLETE" || data.type === "ADJUSTMENT"
-        ? data.quantity
-        : 0;
-      const dirtyDelta = data.type === "PICKUP_DIRTY" ? Math.abs(data.quantity) : 0;
+      // Deux bugs corrigés ici.
+      //
+      // 1. PICKUP_DIRTY DÉCRÉMENTAIT `dirtySets`. Récupérer du linge sale chez le
+      //    client le RETIRE de son stock (il ne l'a plus) : c'est `cleanSets` et
+      //    `totalInCirculation` qui baissent, pas une pile de sale qui devient
+      //    négative. L'ancien signe faisait plonger `dirtySets` sous zéro à chaque
+      //    tournée, et le ratio d'alerte de stock devenait ininterprétable.
+      //
+      // 2. Un ADJUSTMENT négatif ne touchait que `cleanSets`, laissant
+      //    `totalInCirculation` inchangé : une correction à la baisse gonflait
+      //    artificiellement le dénominateur du seuil d'alerte, qui finissait par
+      //    ne plus jamais se déclencher.
+      const quantite = Math.abs(data.quantity);
+
+      const cleanDelta =
+        data.type === "DELIVERY" || data.type === "WASH_COMPLETE"
+          ? quantite
+          : data.type === "PICKUP_DIRTY" || data.type === "RETIREMENT"
+            ? -quantite
+            : data.type === "ADJUSTMENT"
+              ? data.quantity // seul cas où le signe saisi fait foi
+              : 0;
+
+      // Le linge sale en attente chez l'opérateur monte à la reprise et retombe
+      // au lavage.
+      const dirtyDelta =
+        data.type === "PICKUP_DIRTY" ? quantite : data.type === "WASH_COMPLETE" ? -quantite : 0;
+
+      const circulationDelta =
+        data.type === "DELIVERY"
+          ? quantite
+          : data.type === "PICKUP_DIRTY" || data.type === "RETIREMENT"
+            ? -quantite
+            : data.type === "ADJUSTMENT"
+              ? data.quantity
+              : 0;
 
       await this.prisma.clientStock.update({
         where: {
@@ -142,12 +174,8 @@ export class StockService {
         },
         data: {
           cleanSets: { increment: cleanDelta },
-          dirtySets: data.type === "PICKUP_DIRTY" ? { decrement: dirtyDelta } : undefined,
-          totalInCirculation: data.type === "RETIREMENT"
-            ? { decrement: Math.abs(data.quantity) }
-            : data.type === "DELIVERY"
-              ? { increment: data.quantity }
-              : undefined,
+          dirtySets: { increment: dirtyDelta },
+          totalInCirculation: { increment: circulationDelta },
         },
       });
     } else {

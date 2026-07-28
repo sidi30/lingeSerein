@@ -3,7 +3,7 @@
     "name": "Linge Serein",
     "slug": "linge-serein",
     "owner": "sidi30",
-    "version": "0.2.1",
+    "version": "0.3.0",
     "scheme": "linge-serein",
     "platforms": ["ios", "android", "web"],
     "orientation": "portrait",
@@ -21,6 +21,9 @@
       },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Linge Serein utilise votre position pour afficher la carte de votre tournée de livraison."
+      },
+      "entitlements": {
+        "aps-environment": "production"
       }
     },
     "android": {
@@ -35,7 +38,8 @@
       },
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -51,7 +55,15 @@
         {
           "locationWhenInUsePermission": "Linge Serein utilise votre position pour afficher la carte de votre tournée de livraison."
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#1B5E20",
+          "defaultChannel": "default"
+        }
+      ],
+      "expo-web-browser"
     ],
     "extra": {
       "router": {},

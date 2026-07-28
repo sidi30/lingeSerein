@@ -292,6 +292,7 @@ export default function NewOrderScreen() {
   );
 
   const total = cart.reduce((s, c) => s + c.product.priceCents * c.quantity, 0);
+  const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
 
   const getCartQty = useCallback(
     (id: string) => cart.find((c) => c.product.id === id)?.quantity ?? 0,
@@ -313,14 +314,7 @@ export default function NewOrderScreen() {
     setStep((s) => Math.max(s - 1, 0));
   };
 
-  const handleSubmit = () => {
-    const minAtSubmit = tomorrowYmd();
-    if (selectedDate < minAtSubmit) {
-      setSelectedDate(minAtSubmit);
-      Alert.alert("Date à confirmer", "La date de livraison doit être au minimum demain.");
-      return;
-    }
-
+  const sendOrder = () => {
     createOrder.mutate(
       {
         items: cart.map((c) => ({ productId: c.product.id, quantity: c.quantity })),
@@ -346,6 +340,34 @@ export default function NewOrderScreen() {
           );
         },
       },
+    );
+  };
+
+  const handleSubmit = () => {
+    const minAtSubmit = tomorrowYmd();
+    if (selectedDate < minAtSubmit) {
+      setSelectedDate(minAtSubmit);
+      Alert.alert("Date à confirmer", "La date de livraison doit être au minimum demain.");
+      return;
+    }
+
+    // Dernier garde-fou avant l'envoi : la commande engage le client, on lui
+    // rappelle montant, date et créneau en toutes lettres.
+    const dateLabel = new Date(selectedDate).toLocaleDateString("fr-FR", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    });
+    const qty = cart.reduce((s, c) => s + c.quantity, 0);
+
+    Alert.alert(
+      "Confirmer la commande",
+      `${qty} article${qty > 1 ? "s" : ""} pour ${formatCents(total)}\n` +
+        `Livraison le ${dateLabel}, créneau ${timeSlot}.`,
+      [
+        { text: "Modifier", style: "cancel" },
+        { text: "Confirmer et envoyer", onPress: sendOrder },
+      ],
     );
   };
 
@@ -386,24 +408,31 @@ export default function NewOrderScreen() {
     <ScreenWrapper>
       <StepIndicator steps={STEPS} current={step} />
 
+      {/* Total en direct — visible à chaque étape, pas seulement au récap */}
+      {cart.length > 0 && (
+        <Card style={styles.cartSummary}>
+          <View style={styles.cartSummaryRow}>
+            <Ionicons name="cart" size={22} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cartSummaryText}>
+                {cartCount} article{cartCount > 1 ? "s" : ""} sélectionné
+                {cartCount > 1 ? "s" : ""}
+              </Text>
+              <Text style={styles.cartSummaryHint}>Total estimé</Text>
+            </View>
+            <Text
+              style={styles.cartSummaryTotal}
+              accessibilityLabel={`Total de la commande : ${formatCents(total)}`}
+            >
+              {formatCents(total)}
+            </Text>
+          </View>
+        </Card>
+      )}
+
       {/* ── Step 0: Articles ── */}
       {step === 0 && (
         <Animated.View entering={FadeInRight.duration(200)}>
-          {/* Récap panier flottant */}
-          {cart.length > 0 && (
-            <Card style={styles.cartSummary}>
-              <View style={styles.cartSummaryRow}>
-                <Ionicons name="cart" size={20} color={colors.primary} />
-                <Text style={styles.cartSummaryText}>
-                  {cart.reduce((s, c) => s + c.quantity, 0)} article
-                  {cart.reduce((s, c) => s + c.quantity, 0) > 1 ? "s" : ""} sélectionné
-                  {cart.reduce((s, c) => s + c.quantity, 0) > 1 ? "s" : ""}
-                </Text>
-                <Text style={styles.cartSummaryTotal}>{formatCents(total)}</Text>
-              </View>
-            </Card>
-          )}
-
           {/* ── Section KITS — affiché en premier (AC-F5-01) ── */}
           {kits.length > 0 && (
             <View>
@@ -655,13 +684,18 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   cartSummaryText: {
-    flex: 1,
     fontSize: font.sizes.sm,
     fontWeight: font.weights.semibold,
     color: colors.primary,
   },
+  cartSummaryHint: {
+    fontSize: font.sizes.xs,
+    color: colors.primary,
+    opacity: 0.75,
+    marginTop: 2,
+  },
   cartSummaryTotal: {
-    fontSize: font.sizes.md,
+    fontSize: font.sizes.xl,
     fontWeight: font.weights.heavy,
     color: colors.primary,
   },

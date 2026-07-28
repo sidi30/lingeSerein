@@ -1,6 +1,7 @@
 import { Worker, type ConnectionOptions, type Job } from "bullmq";
 import type { PrismaClient, NotificationType, NotificationChannel, Prisma } from "@prisma/client";
 import { QUEUE_NAMES } from "./queue.js";
+import { notify } from "../utils/notify.js";
 
 export interface NotificationJobData {
   userId: string;
@@ -12,11 +13,12 @@ export interface NotificationJobData {
 }
 
 /**
- * Notification dispatch worker.
+ * Worker de distribution des notifications.
  *
- * - Creates a Notification record in the database.
- * - Placeholder for Expo push notification dispatch.
- * - Placeholder for Resend email dispatch.
+ * Il ne fait qu'exécuter en asynchrone le chemin d'émission commun
+ * (`utils/notify.ts`) : préférences utilisateur, création de l'enregistrement,
+ * puis distribution push/email. Les appelants synchrones (crons de rotation)
+ * appellent `notify()` directement — même code, mêmes règles.
  */
 export function createNotificationWorker(
   connection: ConnectionOptions,
@@ -25,45 +27,15 @@ export function createNotificationWorker(
   const worker = new Worker<NotificationJobData>(
     QUEUE_NAMES.NOTIFICATIONS,
     async (job: Job<NotificationJobData>) => {
-      const { userId, type, channel, title, body, data } = job.data;
+      const result = await notify(prisma, job.data);
 
-      // Check notification settings for this user/type
-      const setting = await prisma.notificationSetting.findUnique({
-        where: { userId_type: { userId, type } },
-      });
-
-      if (setting && !setting.enabled) {
-        console.log(`[notification] Skipped — user ${userId} disabled ${type} notifications`);
-        return;
+      if (result.skipped) {
+        console.log(
+          `[notification] Ignorée — l'utilisateur ${job.data.userId} a désactivé ${job.data.type}`,
+        );
       }
 
-      const effectiveChannel = setting?.channel ?? channel;
-
-      // Create notification record
-      const notification = await prisma.notification.create({
-        data: {
-          userId,
-          type,
-          channel: effectiveChannel,
-          title,
-          body,
-          data: data ?? {},
-          sentAt: new Date(),
-        },
-      });
-
-      // Dispatch based on channel
-      if (effectiveChannel === "PUSH" || effectiveChannel === "BOTH") {
-        // TODO: Integrate Expo push notifications
-        console.log(`[notification] PUSH placeholder — id=${notification.id}, user=${userId}, title="${title}"`);
-      }
-
-      if (effectiveChannel === "EMAIL" || effectiveChannel === "BOTH") {
-        // TODO: Integrate Resend email service
-        console.log(`[notification] EMAIL placeholder — id=${notification.id}, user=${userId}, title="${title}"`);
-      }
-
-      return { notificationId: notification.id };
+      return { notificationId: result.notificationId };
     },
     { connection },
   );

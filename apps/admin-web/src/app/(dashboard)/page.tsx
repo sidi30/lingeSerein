@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SkeletonCard, Skeleton } from "@/components/ui/skeleton";
+import { RotationsReminders } from "@/components/dashboard/rotations-reminders";
 import {
   AreaChart,
   Area,
@@ -309,6 +310,9 @@ export default function DashboardPage() {
             )}
           </Card>
         </div>
+
+        {/* Rappels de rotations : ce qui doit revenir, ce qui aurait dû revenir. */}
+        <RotationsReminders />
       </div>
     </>
   );

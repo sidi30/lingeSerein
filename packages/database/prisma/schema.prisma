@@ -133,6 +133,14 @@ enum NotificationType {
   ORDER_CREATED
   USER_CREATED
   STOCK_LOW
+  // Calendrier de rotations — relances de reprise du linge loué.
+  // Ces valeurs n'alimentent AUCUN badge admin : NotificationsService.SECTION_BY_TYPE
+  // ignore silencieusement les types qu'il ne connaît pas, les compteurs existants
+  // (devis/commandes/utilisateurs/stock) sont donc inchangés.
+  ROTATION_REMINDER
+  ROTATION_TODAY
+  ROTATION_OVERDUE
+  ROTATION_PICKED_UP
   DELIVERY_REMINDER
   DELIVERY_CONFIRMED
   DELIVERY_CANCELLED
@@ -149,6 +157,21 @@ enum NotificationChannel {
   PUSH
   EMAIL
   BOTH
+}
+
+/// Régime contractuel d'une rotation — conditionne la durée de détention (7 j / 14 j).
+enum RotationFormule {
+  PONCTUEL
+  ABONNEMENT
+}
+
+/// Cycle de vie d'une rotation. Miroir de RotationStatus (@lingengo/shared/rotation).
+enum RotationStatus {
+  PLANIFIEE
+  LIVREE
+  REPRISE
+  EN_RETARD
+  ANNULEE
 }
 
 enum AuditAction {
@@ -193,6 +216,8 @@ model Operator {
   deliveryRounds     DeliveryRound[]
   invoices           Invoice[]
   quotes             Quote[]
+  rotations          Rotation[]
+  stockItems         StockItem[]
   subscriptionConfig SubscriptionConfig? // V2 — config Pack Sérénité (ADR-V2-002)
 
   @@map("operators")
@@ -209,9 +234,10 @@ model DeliveryZone {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
-  operator       Operator        @relation(fields: [operatorId], references: [id])
+  operator       Operator           @relation(fields: [operatorId], references: [id])
   users          User[]
   deliveryRounds DeliveryRound[]
+  schedules      DeliverySchedule[]
 
   @@map("delivery_zones")
 }
@@ -263,6 +289,7 @@ model User {
   stockMovements       StockMovement[]
   notifications        Notification[]
   notificationSettings NotificationSetting[]
+  deviceTokens         DeviceToken[]
   consents             Consent[]
   deliveryStops        DeliveryStop[]        @relation("ClientStops")
   deliveredStops       DeliveryStop[]        @relation("DriverStops")
@@ -271,6 +298,7 @@ model User {
   auditLogs            AuditLog[]
   quotesAsClient       Quote[]               @relation("QuoteClient")
   quotesCreated        Quote[]               @relation("QuoteCreator")
+  rotations            Rotation[]            @relation("RotationClient")
 
   @@index([email])
   @@index([role])
@@ -538,8 +566,9 @@ model Quote {
   user     User?       @relation("QuoteClient", fields: [userId], references: [id])
   creator  User        @relation("QuoteCreator", fields: [createdBy], references: [id])
   order    Order?      @relation("QuoteOrder", fields: [convertedToOrderId], references: [id])
-  lignes   QuoteLine[]
-  invoices Invoice[]
+  lignes    QuoteLine[]
+  invoices  Invoice[]
+  rotations Rotation[]
 
   @@index([operatorId])
   @@index([status])
@@ -607,16 +636,29 @@ model DeliveryStop {
   dirtyPickedUp       Int?               @map("dirty_picked_up") // sets sales récupérés
   qrCodeScanned       Boolean            @default(false) @map("qr_code_scanned")
   photoUrl            String?            @map("photo_url") @db.VarChar(500) // preuve de dépôt (S3 chiffré)
+  /// @deprecated Réservé à une URL d'image hébergée. NE PAS y écrire la signature
+  /// capturée sur mobile : une data-URL SVG pèse ~6,4 Ko et ne tient pas dans 500
+  /// caractères. Utiliser `signatureData` ci-dessous.
   signatureUrl        String?            @map("signature_url") @db.VarChar(500)
+  /// Signature manuscrite du client, capturée sur mobile (data-URL SVG/PNG).
+  /// TEXT et non VarChar : c'est la preuve de remise, elle ne doit jamais être tronquée.
+  signatureData       String?            @map("signature_data") @db.Text
+  signataireNom       String?            @map("signataire_nom") @db.VarChar(200)
+  /// Le client déclare la livraison conforme. null = non renseigné (arrêts antérieurs
+  /// à la capture de signature), distinct de false qui est un refus explicite.
+  conforme            Boolean?
+  /// Réserves émises à la remise — le texte fait foi en cas de litige.
+  reserves            String?            @db.Text
   specialInstructions String?            @map("special_instructions") @db.Text
   completedAt         DateTime?          @map("completed_at")
   createdAt           DateTime           @default(now()) @map("created_at")
   updatedAt           DateTime           @updatedAt @map("updated_at")
 
-  round  DeliveryRound @relation(fields: [roundId], references: [id])
-  order  Order?        @relation(fields: [orderId], references: [id])
-  client User          @relation("ClientStops", fields: [clientId], references: [id])
-  driver User          @relation("DriverStops", fields: [driverId], references: [id])
+  round     DeliveryRound @relation(fields: [roundId], references: [id])
+  order     Order?        @relation(fields: [orderId], references: [id])
+  client    User          @relation("ClientStops", fields: [clientId], references: [id])
+  driver    User          @relation("DriverStops", fields: [driverId], references: [id])
+  rotations Rotation[]
 
   @@index([roundId])
   @@index([clientId])
@@ -728,8 +770,9 @@ model Invoice {
   // onDelete: Restrict explicite — le défaut Prisma d'une relation optionnelle est
   // SET NULL, qui viderait le client ou le devis source d'une facture déjà émise.
   // Une facture est une pièce comptable : elle ne doit jamais perdre son rattachement.
-  user  User?  @relation(fields: [userId], references: [id], onDelete: Restrict)
-  quote Quote? @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  user      User?      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  quote     Quote?     @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  rotations Rotation[]
 
   @@index([userId])
   @@index([quoteId])
@@ -737,6 +780,133 @@ model Invoice {
   @@index([periodStart, periodEnd])
   @@index([invoiceNumber])
   @@map("invoices")
+}
+
+// ============================================================================
+// ROTATIONS (calendrier de reprise du linge loué)
+// ============================================================================
+
+/// Rotation — un aller-retour de linge loué.
+///
+/// Le linge PART chez le client et DOIT revenir : cette table est ce qui manquait
+/// pour suivre ce cycle. Une rotation naît de l'événement qui fait sortir le linge
+/// (émission d'une facture, ou passage d'une tournée) et se clôt à la reprise.
+///
+/// `dateReprisePrevue` = `dateLivraison` + la durée de détention de la formule
+/// (7 jours en ponctuel — seuil hebdomadaire para-hôtelier ; 14 jours en
+/// abonnement — article 7 du contrat). Voir DETENTION_DAYS dans
+/// @lingengo/shared/rotation : la règle vit là-bas, pas ici.
+///
+/// Snapshot client dénormalisé (clientNom/Email/Adresse) et `userId` nullable :
+/// même parti pris que Quote et Invoice — le client d'un devis n'a très souvent
+/// aucun compte dans `users`, et une tournée déjà effectuée ne doit pas changer
+/// d'adresse parce que la fiche client a été corrigée depuis.
+model Rotation {
+  id             String          @id @default(uuid()) @db.Uuid
+  operatorId     String          @map("operator_id") @db.Uuid
+  userId         String?         @map("user_id") @db.Uuid // null : client sans compte
+  clientNom      String          @map("client_nom") @db.VarChar(200)
+  clientEmail    String?         @map("client_email") @db.VarChar(320)
+  clientAdresse  String?         @map("client_adresse") @db.Text
+  quoteId        String?         @map("quote_id") @db.Uuid
+  invoiceId      String?         @map("invoice_id") @db.Uuid
+  deliveryStopId String?         @map("delivery_stop_id") @db.Uuid // arrêt de tournée qui a livré
+  formule        RotationFormule @default(PONCTUEL)
+  status         RotationStatus  @default(PLANIFIEE)
+  dateLivraison  DateTime        @map("date_livraison") @db.Date
+  dateReprisePrevue DateTime     @map("date_reprise_prevue") @db.Date
+  dateRepriseReelle DateTime?    @map("date_reprise_reelle") @db.Date
+  /// N° de passage pour un abonnement (1, 2, 3…) — null en location ponctuelle.
+  passage        Int?
+  /// Retard > RETARD_ESCALADE_JOURS : le remplacement DEVIENT facturable au barème.
+  /// Posé par le cron, jamais facturé automatiquement — la décision reste humaine.
+  facturableRemplacement Boolean  @default(false) @map("facturable_remplacement")
+  /// Horodatage de l'EMAIL de rappel J-1 réellement accepté par le mailer (HTTP 200).
+  /// Distinct de la notification in-app : si le mailer est indisponible, la notification
+  /// part quand même et ce champ reste null, ce qui autorise une nouvelle tentative au
+  /// prochain passage du cron. Marquer avant d'avoir la confirmation ferait taire
+  /// définitivement un rappel jamais envoyé.
+  reminderSentAt    DateTime? @map("reminder_sent_at")
+  /// Idem pour l'email de relance de retard.
+  overdueNotifiedAt DateTime? @map("overdue_notified_at")
+  notes          String?         @db.Text
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  deletedAt      DateTime?       @map("deleted_at")
+
+  operator     Operator      @relation(fields: [operatorId], references: [id])
+  // onDelete: SetNull explicite sur le client : supprimer un compte ne doit pas
+  // effacer la trace du linge encore dehors — le snapshot nominatif suffit à
+  // identifier chez qui aller le reprendre.
+  user         User?         @relation("RotationClient", fields: [userId], references: [id], onDelete: SetNull)
+  quote        Quote?        @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  invoice      Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  deliveryStop DeliveryStop? @relation(fields: [deliveryStopId], references: [id], onDelete: SetNull)
+  lignes       RotationLine[]
+
+  @@index([operatorId, status])
+  @@index([operatorId, dateReprisePrevue])
+  @@index([dateReprisePrevue])
+  @@index([userId])
+  @@index([invoiceId])
+  @@index([deliveryStopId])
+  @@map("rotations")
+}
+
+/// Ligne de rotation — ce qui est réellement sorti, et ce qui est réellement revenu.
+///
+/// `productSlug` est NULLABLE et sans clé étrangère vers `products` : il vaut null
+/// quand la désignation libre de la facture n'a pas pu être rapprochée du catalogue
+/// (resolveProductSlug ne devine pas). La ligne reste alors parfaitement valide pour
+/// le suivi de reprise — elle ne bouge simplement pas le stock. Mieux vaut un stock
+/// incomplet qu'un stock faux.
+model RotationLine {
+  id          String  @id @default(uuid()) @db.Uuid
+  rotationId  String  @map("rotation_id") @db.Uuid
+  productSlug String? @map("product_slug") @db.VarChar(60)
+  designation String  @db.VarChar(300)
+  qtyLivree   Int     @map("qty_livree")
+  /// null = reprise pas encore saisie. 0 = rien n'est revenu (constat, pas absence de saisie).
+  qtyReprise  Int?    @map("qty_reprise")
+  position    Int     @default(0)
+
+  rotation Rotation @relation(fields: [rotationId], references: [id], onDelete: Cascade)
+
+  @@index([rotationId])
+  @@index([productSlug])
+  @@map("rotation_lines")
+}
+
+/// Parc de linge de l'opérateur, PAR SLUG catalogue.
+///
+/// Comble le trou du modèle actuel : StockMovement / ClientStock / OperatorStock
+/// sont clés par ProductRange (CONFORT/HOTEL/PRESTIGE), gammes héritées de la v1
+/// qui ne décrivent pas le catalogue vendu aujourd'hui (kit-bain, kit-complet…).
+/// Ces tables restent en place et intactes — celle-ci s'ajoute, elle ne remplace rien.
+///
+/// `disponible` n'est PAS stocké : c'est totalOwned − inCirculation − dirtyPending
+/// − retired, calculé à la lecture. Une quantité dérivée qu'on persiste finit
+/// toujours par mentir quand une des trois autres bouge sans elle.
+model StockItem {
+  id            String   @id @default(uuid()) @db.Uuid
+  operatorId    String   @map("operator_id") @db.Uuid
+  productSlug   String   @map("product_slug") @db.VarChar(60)
+  /// Parc total possédé (saisi par l'exploitant à l'inventaire).
+  totalOwned    Int      @default(0) @map("total_owned")
+  /// Sorti, actuellement chez les clients.
+  inCirculation Int      @default(0) @map("in_circulation")
+  /// Revenu sale, en attente de lavage.
+  dirtyPending  Int      @default(0) @map("dirty_pending")
+  /// Réformé (usure, perte, non restitué).
+  retired       Int      @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  operator Operator @relation(fields: [operatorId], references: [id])
+
+  @@unique([operatorId, productSlug])
+  @@index([operatorId])
+  @@map("stock_items")
 }
 
 // ============================================================================
@@ -762,6 +932,32 @@ model Notification {
   @@index([type])
   @@index([createdAt])
   @@map("notifications")
+}
+
+/// Jeton de notification push d'un appareil (Expo).
+///
+/// Sans cette table, aucun push ne peut partir : le worker n'a aucune adresse où
+/// écrire. Un même utilisateur peut avoir plusieurs appareils, d'où la clé sur le
+/// jeton et non sur l'utilisateur.
+///
+/// `token` est unique GLOBALEMENT et non par utilisateur : réinstaller l'app sur un
+/// téléphone revendu réattribue le même jeton à quelqu'un d'autre. L'upsert sur le
+/// jeton transfère alors la propriété au dernier inscrit — sans quoi l'ancien
+/// propriétaire continuerait de recevoir les notifications du nouveau.
+model DeviceToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  token      String   @unique @db.VarChar(255)
+  /// "ios" | "android" | "web" — normalisé en minuscules côté API.
+  platform   String   @db.VarChar(20)
+  createdAt  DateTime @default(now()) @map("created_at")
+  /// Dernière présentation du jeton — permet de purger les appareils dormants.
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("device_tokens")
 }
 
 /// Préférences de notification par utilisateur et par type
@@ -837,7 +1033,12 @@ model AuditLog {
 // JOURS DE TOURNÉE CONFIGURABLES
 // ============================================================================
 
-/// Jours de livraison configurables par zone (ex: lundi et jeudi)
+/// Jours de livraison configurables par zone (ex: lundi et jeudi).
+///
+/// Déjà seedé depuis l'origine (seed.ts) mais resté inexploitable : sans relation
+/// Prisma, aucune requête ne pouvait joindre une zone à ses jours de tournée. La
+/// relation ci-dessous le raccorde — c'est la base du calendrier des passages,
+/// qu'il aurait été absurde de réinventer sous forme d'un moteur de récurrence.
 model DeliverySchedule {
   id        String  @id @default(uuid()) @db.Uuid
   zoneId    String  @map("zone_id") @db.Uuid
@@ -846,6 +1047,9 @@ model DeliverySchedule {
   timeEnd   String  @map("time_end") @db.VarChar(5) // ex: "12:00"
   isActive  Boolean @default(true) @map("is_active")
 
+  zone DeliveryZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
   @@unique([zoneId, dayOfWeek])
+  @@index([zoneId])
   @@map("delivery_schedules")
 }

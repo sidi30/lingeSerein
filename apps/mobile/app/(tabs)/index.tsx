@@ -11,12 +11,14 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { ProgressRing } from "@/components/ProgressRing";
+import { MonLingeCard } from "@/components/MonLingeCard";
 import { useAuthStore } from "@/lib/store";
 import {
   useProfile,
   useMyStock,
   useMySubscription,
   useSubscriptionConfig,
+  useMyRotations,
   useOrders,
   useDashboardKpis,
   useDashboardAlerts,
@@ -71,6 +73,7 @@ function ClientHome() {
   const sub = useMySubscription();
   const subConfig = useSubscriptionConfig();
   const orders = useOrders();
+  const rotations = useMyRotations();
 
   const isLoading = profile.isLoading || stock.isLoading || sub.isLoading || orders.isLoading;
   const refreshing =
@@ -81,6 +84,7 @@ function ClientHome() {
     void sub.refetch();
     void subConfig.refetch();
     void orders.refetch();
+    void rotations.refetch();
   };
 
   if (isLoading && !profile.data) {
@@ -165,6 +169,9 @@ function ClientHome() {
           </View>
         </Card>
       </Pressable>
+
+      {/* Ce que le client détient et quand il doit être repris */}
+      <MonLingeCard />
 
       {/* Next delivery */}
       {nextOrder && (

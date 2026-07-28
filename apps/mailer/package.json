@@ -7,7 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsc && node --test dist/templates.test.js",
+    "test": "tsc && node --test \"dist/**/*.test.js\"",
     "clean": "rm -rf dist"
   },
   "dependencies": {

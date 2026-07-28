@@ -5,6 +5,9 @@ import {
   notificationEmail,
   devisNotificationEmail,
   devisClientConfirmationEmail,
+  rotationReminderClientEmail,
+  rotationReminderOwnerEmail,
+  rotationOverdueEmail,
 } from "./templates.js";
 
 // Regression: HTML / script injection via les champs du formulaire public.
@@ -93,7 +96,129 @@ test("devisClientConfirmationEmail échappe le nom et n'expose aucun détail", (
   assert.ok(!html.includes("Total TTC"), "aucun détail de devis dans la confirmation visiteur");
 });
 
-// Le logo est servi par la vitrine. Ce test verrouille sa présence dans les 5
+// ─── Templates de rotation (API → /api/internal/notify) ───
+
+// Les données viennent de l'API, donc d'un devis saisi à la main par
+// l'exploitant : une désignation reste du texte libre et doit être échappée
+// au même titre qu'un champ de formulaire public.
+const xssLigne = { designation: "<img src=x onerror=alert(1)>", qty: 2 };
+
+test("rotationReminderClientEmail échappe les données et demande une action", () => {
+  const html = rotationReminderClientEmail({
+    clientNom: "<script>alert(1)</script>",
+    datePassage: "2026-08-03",
+    creneau: "08:00-12:00",
+    lignes: [xssLigne],
+  });
+
+  assert.ok(!html.includes("<script>alert(1)</script>"), "nom non échappé");
+  assert.ok(!html.includes("<img src=x onerror"), "désignation non échappée");
+  assert.ok(html.includes("&lt;script&gt;"), "entités HTML attendues");
+  // L'action demandée est le cœur du message — un rappel qui n'en demande
+  // aucune ne sert à rien.
+  assert.ok(html.includes("sac fermé"), "consigne de préparation attendue");
+  assert.ok(html.includes("08:00-12:00"), "créneau attendu");
+  assert.ok(html.includes("06 85 21 82 70"), "numéro pour décaler attendu");
+});
+
+test("rotationReminderClientEmail rend la date en français, sans décalage de fuseau", () => {
+  const html = rotationReminderClientEmail({
+    clientNom: "Alice",
+    datePassage: "2026-08-03",
+    lignes: [],
+  });
+  // 3 août 2026 est un lundi. Une lecture en UTC puis un rendu en local
+  // pourrait afficher « dimanche 2 » selon le fuseau.
+  assert.ok(html.includes("lundi 3 août 2026"), "date française attendue");
+});
+
+test("rotationReminderClientEmail supporte l'absence de créneau et de lignes", () => {
+  const html = rotationReminderClientEmail({
+    clientNom: "Alice",
+    datePassage: "2026-01-01",
+    lignes: [],
+  });
+  assert.ok(html.includes("jeudi 1 janvier 2026"), "date française attendue");
+  assert.ok(!html.includes("Créneau prévu"), "pas de bloc créneau vide");
+  assert.ok(!html.includes("<th"), "pas de tableau d'articles vide");
+});
+
+test("rotationReminderOwnerEmail liste les passages et compte correctement", () => {
+  const html = rotationReminderOwnerEmail({
+    datePassage: "2026-08-03",
+    passages: [
+      {
+        clientNom: "<b>Gîte</b> des Oliviers",
+        clientAdresse: "12 rue des Vignes, Orange",
+        formule: "ABONNEMENT",
+        creneau: "08:00-12:00",
+        lignes: [xssLigne],
+      },
+      {
+        clientNom: "Hôtel Test",
+        formule: "PONCTUEL",
+        lignes: [{ designation: "Kit Lit", qty: 4 }],
+      },
+    ],
+  });
+
+  assert.ok(!html.includes("<b>Gîte</b>"), "nom client non échappé");
+  assert.ok(!html.includes("<img src=x onerror"), "désignation non échappée");
+  assert.ok(html.includes("2 passages"), "compte des passages attendu");
+  assert.ok(html.includes("12 rue des Vignes, Orange"), "adresse attendue");
+  // Les libellés de formule sont figés côté template, jamais saisis.
+  assert.ok(html.includes("Pack Sérénité"), "libellé ABONNEMENT attendu");
+  assert.ok(html.includes("Location ponctuelle"), "libellé PONCTUEL attendu");
+});
+
+test("rotationReminderOwnerEmail reste lisible sans aucun passage", () => {
+  const html = rotationReminderOwnerEmail({ datePassage: "2026-08-03", passages: [] });
+  assert.ok(html.includes("Aucun passage prévu demain"), "état vide explicite attendu");
+  assert.ok(html.includes("0 passage"), "compte à zéro attendu");
+});
+
+test("rotationOverdueEmail affiche le retard et n'escalade qu'au-delà du seuil", () => {
+  const base = {
+    clientNom: "Gîte des Oliviers",
+    clientAdresse: "12 rue des Vignes",
+    dateReprisePrevue: "2026-08-03",
+    lignes: [{ designation: "Kit Bain", qty: 4 }],
+  };
+
+  const sousSeuil = rotationOverdueEmail({ ...base, joursDeRetard: 2 });
+  assert.ok(sousSeuil.includes("2 jours"), "retard affiché attendu");
+  assert.ok(!sousSeuil.includes("Seuil d'escalade dépassé"), "pas d'escalade sous le seuil");
+
+  const escalade = rotationOverdueEmail({
+    ...base,
+    joursDeRetard: 5,
+    facturableRemplacement: true,
+    montantRemplacementCents: 4250,
+  });
+  assert.ok(escalade.includes("Seuil d'escalade dépassé"), "bandeau d'escalade attendu");
+  // formatEuroCents sépare le montant du symbole par une espace INSÉCABLE,
+  // pour que le montant ne soit jamais coupé en fin de ligne. Une espace
+  // ordinaire dans cette assertion la ferait échouer de façon invisible.
+  assert.ok(escalade.includes("42,50 €"), "barème formaté attendu");
+  // La facturation reste une décision humaine : le mail ne doit jamais laisser
+  // croire qu'elle est automatique.
+  assert.ok(escalade.includes("décision à prendre manuellement"), "réserve humaine attendue");
+});
+
+test("rotationOverdueEmail échappe le nom et la désignation", () => {
+  const html = rotationOverdueEmail({
+    clientNom: "<script>alert(1)</script>",
+    dateReprisePrevue: "2026-08-03",
+    joursDeRetard: 1,
+    lignes: [xssLigne],
+  });
+  assert.ok(!html.includes("<script>alert(1)</script>"), "nom non échappé");
+  assert.ok(!html.includes("<img src=x onerror"), "désignation non échappée");
+  assert.ok(html.includes("1 jour"), "singulier attendu");
+  assert.ok(!html.includes("1 jours"), "pas de pluriel à un jour");
+});
+
+// Le logo est servi par la vitrine. Ce test verrouille sa présence dans TOUS les
 // emails, avec un alt (repli quand le client bloque les images distantes) et une
 // URL absolue en https — une URL relative ne veut rien dire dans un email.
 test("tous les emails affichent le logo du site avec un alt et une URL absolue", () => {
@@ -108,6 +233,14 @@ test("tous les emails affichent le logo du site avec un alt et une URL absolue",
       phone: "0102030405",
       lignes: [{ designation: "Kit Bain", qty: 2, unitCents: 1200 }],
       livraisonCents: 0,
+    }),
+    rotationReminderClientEmail({ clientNom: "Alice", datePassage: "2026-08-03", lignes: [] }),
+    rotationReminderOwnerEmail({ datePassage: "2026-08-03", passages: [] }),
+    rotationOverdueEmail({
+      clientNom: "Alice",
+      dateReprisePrevue: "2026-08-03",
+      joursDeRetard: 4,
+      lignes: [],
     }),
   ];
 

@@ -11,26 +11,57 @@ const sectionParamSchema = z.object({
   section: z.enum(NOTIFICATION_SECTIONS),
 });
 
+/**
+ * Miroir EXHAUSTIF de l'enum Prisma `NotificationType`.
+ *
+ * Il manquait QUOTE_CREATED / ORDER_CREATED / USER_CREATED : un utilisateur ne
+ * pouvait donc pas régler — ni couper — les notifications qui alimentent les
+ * badges de l'admin, la requête étant rejetée en 400. Toute valeur ajoutée à
+ * l'enum doit être reportée ici, sans quoi elle devient impossible à paramétrer.
+ */
+const NOTIFICATION_TYPES = [
+  "QUOTE_CREATED",
+  "ORDER_CREATED",
+  "USER_CREATED",
+  "STOCK_LOW",
+  "ROTATION_REMINDER",
+  "ROTATION_TODAY",
+  "ROTATION_OVERDUE",
+  "ROTATION_PICKED_UP",
+  "DELIVERY_REMINDER",
+  "DELIVERY_CONFIRMED",
+  "DELIVERY_CANCELLED",
+  "DELIVERY_DELAYED",
+  "PAYMENT_FAILED",
+  "PAYMENT_SUCCESS",
+  "SUBSCRIPTION_RENEWED",
+  "SUBSCRIPTION_EXPIRING",
+  "ACCOUNT_LOCKED",
+  "GENERAL",
+] as const;
+
 const updateSettingsSchema = z.object({
   settings: z.array(
     z.object({
-      type: z.enum([
-        "STOCK_LOW",
-        "DELIVERY_REMINDER",
-        "DELIVERY_CONFIRMED",
-        "DELIVERY_CANCELLED",
-        "DELIVERY_DELAYED",
-        "PAYMENT_FAILED",
-        "PAYMENT_SUCCESS",
-        "SUBSCRIPTION_RENEWED",
-        "SUBSCRIPTION_EXPIRING",
-        "ACCOUNT_LOCKED",
-        "GENERAL",
-      ]),
+      type: z.enum(NOTIFICATION_TYPES),
       channel: z.enum(["PUSH", "EMAIL", "BOTH"]),
       enabled: z.boolean(),
     }),
   ),
+});
+
+/**
+ * Jeton push d'un appareil. `platform` est normalisé en minuscules : le mobile
+ * envoie tantôt « iOS » tantôt « ios » selon l'API consultée, et une casse
+ * divergente créerait deux lignes pour le même appareil.
+ */
+const deviceTokenSchema = z.object({
+  token: z.string().min(1).max(255),
+  platform: z
+    .string()
+    .max(20)
+    .transform((p) => p.toLowerCase())
+    .pipe(z.enum(["ios", "android", "web"])),
 });
 
 export default async function notificationRoutes(app: FastifyInstance): Promise<void> {
@@ -110,4 +141,54 @@ export default async function notificationRoutes(app: FastifyInstance): Promise<
     const settings = await service.updateSettings(request.user.sub, parsed.data.settings);
     return reply.send({ success: true, data: settings });
   });
+
+  // ---- POST /notifications/device-token (authenticated) ----
+  // Sans cette route, aucun push ne peut partir : le serveur n'a aucune adresse
+  // où écrire. L'échec était silencieux côté mobile.
+  app.post(
+    "/device-token",
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        tags: ["Notifications"],
+        summary: "Enregistrer le jeton push de l'appareil courant",
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: "object",
+          required: ["token", "platform"],
+          properties: {
+            token: { type: "string" },
+            platform: { type: "string", enum: ["ios", "android", "web"] },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const parsed = deviceTokenSchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.flatten().fieldErrors as Record<string, string[]>);
+      }
+
+      // Upsert sur le JETON et non sur (user, jeton) : réinstaller l'application
+      // sur un téléphone revendu réattribue le même jeton Expo à quelqu'un
+      // d'autre. Réassigner `userId` transfère la propriété au dernier inscrit —
+      // sans quoi l'ancien propriétaire recevrait les notifications du nouveau.
+      const record = await app.prisma.deviceToken.upsert({
+        where: { token: parsed.data.token },
+        create: {
+          userId: request.user.sub,
+          token: parsed.data.token,
+          platform: parsed.data.platform,
+        },
+        update: {
+          userId: request.user.sub,
+          platform: parsed.data.platform,
+          lastSeenAt: new Date(),
+        },
+        select: { id: true, platform: true, lastSeenAt: true },
+      });
+
+      return reply.send({ success: true, data: record });
+    },
+  );
 }

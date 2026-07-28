@@ -7,6 +7,7 @@ import { useState } from "react";
 import {
   View,
   Text,
+  TextInput,
   Pressable,
   StyleSheet,
   Alert,
@@ -24,8 +25,10 @@ import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
+import { SignaturePad, strokesToDataUrl } from "@/components/SignaturePad";
+import type { SignatureStroke } from "@/components/SignaturePad";
 import { useTodayRound, useCompleteStop } from "@/lib/api";
-import type { DeliveryStop } from "@/lib/api";
+import type { DeliveryStop, CompleteStopInput } from "@/lib/api";
 import { colors, font, spacing, radius, MIN_HIT_TARGET, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
 
 // ─── Stepper ──────────────────────────────────────────────────────
@@ -99,6 +102,16 @@ export default function StopDetailScreen() {
   const [dirtyPickedUp, setDirtyPickedUp] = useState(0);
   const [confirmed, setConfirmed] = useState(false);
 
+  // Bon de livraison : signature manuscrite + identité du signataire + réserves,
+  // pour coller au bon papier déjà utilisé sur le terrain.
+  const [strokes, setStrokes] = useState<SignatureStroke[]>([]);
+  const [padSize, setPadSize] = useState({ width: 0, height: 0 });
+  const [signataireNom, setSignataireNom] = useState("");
+  const [conforme, setConforme] = useState(true);
+  const [reserves, setReserves] = useState("");
+
+  const hasSignature = strokes.length > 0;
+
   // Pre-fill when stop data loads
   const setsVal = setsDelivered ?? stop?.setsToDeliver ?? 0;
 
@@ -161,25 +174,26 @@ export default function StopDetailScreen() {
     })();
   };
 
-  const handleValidate = () => {
-    if (!confirmed) {
-      // First press = confirmation step
-      if (Platform.OS !== "web") {
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      }
-      setConfirmed(true);
-      return;
-    }
-
-    // Second press = actual submit
+  const submit = () => {
     if (Platform.OS !== "web") {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
 
+    const data: CompleteStopInput = {
+      setsDelivered: setsVal,
+      dirtyPickedUp,
+      conforme,
+    };
+    if (hasSignature) {
+      data.signatureDataUrl = strokesToDataUrl(strokes, padSize.width, padSize.height);
+    }
+    if (signataireNom.trim()) data.signataireNom = signataireNom.trim();
+    if (!conforme && reserves.trim()) data.reserves = reserves.trim();
+
     completeStop.mutate(
       {
         stopId: stop.id,
-        data: { setsDelivered: setsVal, dirtyPickedUp },
+        data,
       },
       {
         onSuccess: () => {
@@ -203,6 +217,9 @@ export default function StopDetailScreen() {
           }
         },
         onError: (e) => {
+          // On ne réinitialise que l'étape de confirmation : la signature, le
+          // nom et les réserves restent saisis pour pouvoir réessayer sans
+          // redemander au client de signer une seconde fois.
           Alert.alert(
             "Erreur de validation",
             e instanceof Error ? e.message : "Une erreur est survenue.",
@@ -211,6 +228,34 @@ export default function StopDetailScreen() {
         },
       },
     );
+  };
+
+  const handleValidate = () => {
+    if (!confirmed) {
+      // First press = confirmation step
+      if (Platform.OS !== "web") {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+      setConfirmed(true);
+      return;
+    }
+
+    if (!conforme && !reserves.trim()) {
+      Alert.alert("Réserves à préciser", "Décrivez brièvement le problème constaté.");
+      return;
+    }
+
+    // La signature n'est pas bloquante : un client absent ne doit pas empêcher
+    // le livreur de finir sa tournée. On demande une confirmation explicite.
+    if (!hasSignature) {
+      Alert.alert("Aucune signature", "Le client n'a pas signé. Valider quand même cet arrêt ?", [
+        { text: "Revenir signer", style: "cancel", onPress: () => setConfirmed(false) },
+        { text: "Valider sans signature", style: "destructive", onPress: submit },
+      ]);
+      return;
+    }
+
+    submit();
   };
 
   return (
@@ -325,15 +370,111 @@ export default function StopDetailScreen() {
               label="Sets sales récupérés"
             />
 
+            {/* Bon de livraison — miroir du bon papier utilisé sur le terrain */}
+            <View style={styles.bonCard}>
+              <Text style={styles.bonTitle}>Bon de livraison</Text>
+
+              <Text style={styles.fieldLabel}>État de la livraison</Text>
+              <View style={styles.segmentRow}>
+                <Pressable
+                  onPress={() => {
+                    setConforme(true);
+                    setConfirmed(false);
+                  }}
+                  style={[styles.segment, conforme && styles.segmentActiveOk]}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: conforme }}
+                  accessibilityLabel="Livraison conforme"
+                >
+                  <Ionicons
+                    name="checkmark-circle-outline"
+                    size={20}
+                    color={conforme ? colors.successText : colors.textTertiary}
+                  />
+                  <Text style={[styles.segmentText, conforme && styles.segmentTextOk]}>
+                    Conforme
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setConforme(false);
+                    setConfirmed(false);
+                  }}
+                  style={[styles.segment, !conforme && styles.segmentActiveWarn]}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: !conforme }}
+                  accessibilityLabel="Livraison avec réserves"
+                >
+                  <Ionicons
+                    name="alert-circle-outline"
+                    size={20}
+                    color={!conforme ? colors.warningText : colors.textTertiary}
+                  />
+                  <Text style={[styles.segmentText, !conforme && styles.segmentTextWarn]}>
+                    Réserves
+                  </Text>
+                </Pressable>
+              </View>
+
+              {!conforme && (
+                <Animated.View entering={FadeInUp.duration(180)}>
+                  <Text style={styles.fieldLabel}>Détail des réserves</Text>
+                  <TextInput
+                    style={styles.textArea}
+                    value={reserves}
+                    onChangeText={(t) => {
+                      setReserves(t);
+                      setConfirmed(false);
+                    }}
+                    multiline
+                    placeholder="Linge manquant, article abîmé, adresse inaccessible..."
+                    placeholderTextColor={colors.textTertiary}
+                    accessibilityLabel="Détail des réserves"
+                    textAlignVertical="top"
+                  />
+                </Animated.View>
+              )}
+
+              <Text style={styles.fieldLabel}>Nom du signataire</Text>
+              <TextInput
+                style={styles.textInput}
+                value={signataireNom}
+                onChangeText={(t) => {
+                  setSignataireNom(t);
+                  setConfirmed(false);
+                }}
+                placeholder={stop.client.name}
+                placeholderTextColor={colors.textTertiary}
+                autoCapitalize="words"
+                accessibilityLabel="Nom de la personne qui signe"
+              />
+
+              <SignaturePad
+                onChange={(s, size) => {
+                  setStrokes(s);
+                  setPadSize(size);
+                  setConfirmed(false);
+                }}
+              />
+            </View>
+
             {/* Confirmation step */}
             {confirmed && (
               <Animated.View entering={FadeInUp.duration(200)}>
                 <Card style={styles.confirmCard}>
                   <Ionicons name="information-circle-outline" size={20} color={colors.accent} />
-                  <Text style={styles.confirmText}>
-                    Confirmer : {setsVal} sets livrés + {dirtyPickedUp} sales récupérés chez{" "}
-                    <Text style={styles.confirmBold}>{stop.client.name}</Text> ?
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.confirmText}>
+                      Confirmer : {setsVal} sets livrés + {dirtyPickedUp} sales récupérés chez{" "}
+                      <Text style={styles.confirmBold}>{stop.client.name}</Text> ?
+                    </Text>
+                    <Text style={styles.confirmMeta}>
+                      {conforme ? "Livraison conforme" : "Avec réserves"} ·{" "}
+                      {hasSignature
+                        ? `signé${signataireNom.trim() ? ` par ${signataireNom.trim()}` : ""}`
+                        : "sans signature"}
+                    </Text>
+                  </View>
                 </Card>
               </Animated.View>
             )}
@@ -527,10 +668,89 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   confirmText: {
-    flex: 1,
     fontSize: font.sizes.md,
     color: colors.textSecondary,
     lineHeight: 22,
+  },
+  confirmMeta: {
+    fontSize: font.sizes.sm,
+    color: colors.textTertiary,
+    marginTop: spacing.xs,
+  },
+  // Bon de livraison
+  bonCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    gap: spacing.sm,
+  },
+  bonTitle: {
+    fontSize: font.sizes.lg,
+    fontWeight: font.weights.bold,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  fieldLabel: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.semibold,
+    color: colors.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginTop: spacing.md,
+  },
+  segmentRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  segment: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    minHeight: MIN_HIT_TARGET,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  segmentActiveOk: {
+    borderColor: colors.success,
+    backgroundColor: colors.successLight,
+  },
+  segmentActiveWarn: {
+    borderColor: colors.warning,
+    backgroundColor: colors.warningLight,
+  },
+  segmentText: {
+    fontSize: font.sizes.md,
+    fontWeight: font.weights.semibold,
+    color: colors.textTertiary,
+  },
+  segmentTextOk: { color: colors.successText },
+  segmentTextWarn: { color: colors.warningText },
+  textInput: {
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    minHeight: MIN_HIT_TARGET,
+    fontSize: font.sizes.md,
+    color: colors.textPrimary,
+    backgroundColor: colors.surface,
+  },
+  textArea: {
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    minHeight: 80,
+    fontSize: font.sizes.md,
+    color: colors.textPrimary,
+    backgroundColor: colors.surface,
   },
   confirmBold: {
     fontWeight: font.weights.bold,

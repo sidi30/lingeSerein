@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, font, radius, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
 import { useNotifications, useOrders } from "@/lib/api";
+import { usePushNotifications } from "@/lib/notifications";
 import { useAuthStore } from "@/lib/store";
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -76,6 +77,10 @@ function PendingOrdersIcon({ focused }: { focused: boolean }) {
 export default function TabsLayout() {
   const role = useAuthStore((s) => s.user?.role);
   const insets = useSafeAreaInsets();
+
+  // Monté une seule fois sous l'arbre authentifié : permission, token device,
+  // et navigation au tap sur une notification push.
+  usePushNotifications();
   const isClient = role === "ROLE_CLIENT";
   const isDriver = role === "ROLE_LIVREUR";
   const isAdmin = role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN";

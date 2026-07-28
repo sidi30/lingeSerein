@@ -1,404 +1,220 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
-import { useToast } from "@/lib/toast";
+import { useMemo, useState } from "react";
+import { CalendarDays, Search } from "lucide-react";
+import { SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
 import { Header } from "@/components/header";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Modal } from "@/components/ui/modal";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ModuleUnavailable } from "@/components/ui/module-unavailable";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmailText } from "@/components/ui/email-text";
-import type { PaginatedResponse } from "@/lib/types";
-import { useState, useMemo } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { RotationCalendar, type CalendarMode } from "@/components/planning/rotation-calendar";
+import { RotationDetail } from "@/components/planning/rotation-detail";
+import { RoundsTab } from "@/components/planning/rounds-tab";
+import { addDays, dayKey, monthGrid, nextSevenDays } from "@/lib/calendar";
+import {
+  ROTATION_STATUSES,
+  ROTATION_STATUS_LABELS,
+  rotationEvents,
+  useRotations,
+  type RotationDTO,
+  type RotationStatus,
+} from "@/lib/rotations";
 
-interface RoundStop {
-  id: string;
-  clientName: string;
-  address: string;
-  order: number;
-  status: string;
-}
-
-interface Round {
-  id: string;
-  date: string;
-  driver: string;
-  status: string;
-  stops: RoundStop[];
-}
-
-interface RoundsResponse {
-  data: Round[];
-  pagination: { page: number; pageSize: number; total: number; totalPages: number };
-}
-
-interface ClientOption {
-  id: string;
-  name: string;
-  companyName?: string | null;
-  email: string | null;
-}
-
-const dayNames = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
-
-function getWeekDates(offset: number): Date[] {
-  const today = new Date();
-  const monday = new Date(today);
-  const day = monday.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  monday.setDate(monday.getDate() + diff + offset * 7);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    return d;
-  });
-}
-
-function dateKey(d: Date): string {
-  return d.toISOString().split("T")[0] ?? "";
-}
-
-function statusBadge(s: string) {
-  switch (s) {
-    case "completed":
-      return <Badge variant="success">Terminée</Badge>;
-    case "in_progress":
-      return <Badge variant="info">En cours</Badge>;
-    default:
-      return <Badge variant="neutral">Planifiée</Badge>;
-  }
-}
+type Tab = "calendrier" | "tournees";
 
 export default function PlanningPage() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [selectedRound, setSelectedRound] = useState<Round | null>(null);
-  const [form, setForm] = useState({ date: "", driverId: "", clientIds: [] as string[] });
+  const [tab, setTab] = useState<Tab>("calendrier");
+  const [mode, setMode] = useState<CalendarMode>("mois");
+  const [month, setMonth] = useState(
+    () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  );
+  const [status, setStatus] = useState<RotationStatus | "">("");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<RotationDTO | null>(null);
 
-  const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset]);
+  /**
+   * Fenêtre demandée à l'API.
+   *
+   * Deux subtilités :
+   * - la grille mensuelle déborde sur les semaines voisines, on part donc de sa
+   *   première case et non du 1er du mois ;
+   * - côté API, `from`/`to` filtrent sur la date de REPRISE prévue. Une
+   *   livraison visible en fin de grille dont la reprise tombe le mois suivant
+   *   serait donc absente. On étend la borne haute de la durée de détention
+   *   maximale (14 j, Pack Sérénité) : toute rotation livrée dans la grille est
+   *   alors forcément ramenée. La borne basse n'a pas ce problème, une reprise
+   *   est toujours postérieure à sa livraison.
+   */
+  const range = useMemo(() => {
+    const days =
+      mode === "semaine" ? nextSevenDays() : monthGrid(month.getFullYear(), month.getMonth());
+    const start = days[0] ?? month;
+    const end = days[days.length - 1] ?? addDays(month, 41);
+    return {
+      from: dayKey(start),
+      to: dayKey(addDays(end, SUBSCRIPTION_DEFAULTS.MAX_LINEN_KEEP_DAYS)),
+    };
+  }, [mode, month]);
 
-  const { data: roundsData, isLoading } = useQuery({
-    queryKey: ["deliveries", "rounds", weekOffset],
-    queryFn: () =>
-      // getRaw : meme piege que commandes/stock — la grille etait toujours vide.
-      api.getRaw<RoundsResponse>("/deliveries/rounds", {
-        from: dateKey(weekDates[0] ?? new Date()),
-        to: dateKey(weekDates[6] ?? new Date()),
-      }),
+  const { rotations, available, isLoading, error } = useRotations({
+    from: range.from,
+    to: range.to,
+    status: status || undefined,
   });
 
-  const rounds = roundsData?.data ?? [];
+  const filtered = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return rotations;
+    return rotations.filter(
+      (r) =>
+        r.clientNom.toLowerCase().includes(needle) ||
+        (r.clientAdresse ?? "").toLowerCase().includes(needle),
+    );
+  }, [rotations, search]);
 
-  // Fetch clients for multi-select.
-  // `pageSize` n'existe pas dans le zod de l'API : il était silencieusement
-  // ignoré et la liste retombait sur le défaut (20 clients). Le paramètre
-  // s'appelle `limit`, plafonné à 100 côté schéma.
-  const { data: clientsData } = useQuery({
-    queryKey: ["clients", "all"],
-    queryFn: () => api.getRaw<PaginatedResponse<ClientOption>>("/clients", { page: 1, limit: 100 }),
-  });
+  const events = useMemo(() => rotationEvents(filtered), [filtered]);
 
-  const clients = clientsData?.data ?? [];
-
-  // Le formulaire demandait un nom de chauffeur en texte libre, alors que l'API
-  // exige l'identifiant d'un utilisateur LIVREUR : la création échouait donc
-  // toujours en 400. On propose les livreurs réels.
-  const { data: driversData } = useQuery({
-    queryKey: ["users", "livreurs"],
-    queryFn: () =>
-      api.getRaw<PaginatedResponse<{ id: string; name: string }>>("/users", {
-        role: "LIVREUR",
-        limit: 100,
-      }),
-  });
-  const drivers = driversData?.data ?? [];
-
-  const createMutation = useMutation({
-    mutationFn: () =>
-      // Le schéma attend `driverId` et un tableau `stops` structuré, pas une
-      // liste d'identifiants clients. L'ordre d'arrêt suit l'ordre de sélection.
-      api.post("/deliveries/rounds", {
-        date: form.date,
-        driverId: form.driverId,
-        stops: form.clientIds.map((clientId, i) => ({
-          clientId,
-          stopOrder: i + 1,
-          setsToDeliver: 0,
-        })),
-      }),
-    onSuccess: () => {
-      toast("Tournée créée");
-      queryClient.invalidateQueries({ queryKey: ["deliveries"] });
-      setCreateOpen(false);
-      setForm({ date: "", driverId: "", clientIds: [] });
-    },
-    onError: (err: unknown) =>
-      toast(err instanceof Error ? err.message : "Erreur lors de la création", "error"),
-  });
-
-  const roundsByDate = useMemo(() => {
-    const map: Record<string, Round[]> = {};
-    rounds.forEach((r) => {
-      const key = r.date.split("T")[0] ?? "";
-      if (!map[key]) map[key] = [];
-      (map[key] as Round[]).push(r);
-    });
-    return map;
-  }, [rounds]);
-
-  const hasAnyRounds = rounds.length > 0;
-
-  const toggleClient = (clientId: string) => {
-    setForm((prev) => ({
-      ...prev,
-      clientIds: prev.clientIds.includes(clientId)
-        ? prev.clientIds.filter((id) => id !== clientId)
-        : [...prev.clientIds, clientId],
-    }));
-  };
+  const enRetard = useMemo(
+    () => filtered.filter((r) => r.status === "EN_RETARD" || r.joursDeRetard > 0).length,
+    [filtered],
+  );
 
   return (
     <>
       <Header title="Planning" />
 
       <div className="space-y-6 p-4 sm:p-6">
-        {/* Navigation semaine */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button variant="secondary" size="sm" onClick={() => setWeekOffset(weekOffset - 1)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-medium text-gray-700">
-              Semaine du {(weekDates[0] ?? new Date()).toLocaleDateString("fr-FR")} au{" "}
-              {(weekDates[6] ?? new Date()).toLocaleDateString("fr-FR")}
-            </span>
-            <Button variant="secondary" size="sm" onClick={() => setWeekOffset(weekOffset + 1)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            {weekOffset !== 0 && (
-              <Button variant="ghost" size="sm" onClick={() => setWeekOffset(0)}>
-                Aujourd&apos;hui
-              </Button>
-            )}
-          </div>
-          <Button onClick={() => setCreateOpen(true)}>+ Nouvelle tournée</Button>
+        {/* Onglets */}
+        <div className="flex gap-1 border-b border-gray-200" role="tablist">
+          {(
+            [
+              ["calendrier", "Calendrier des rotations"],
+              ["tournees", "Tournées"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={tab === value}
+              onClick={() => setTab(value)}
+              className={`-mb-px min-h-11 border-b-2 px-3 text-sm font-medium transition-colors sm:px-4 ${
+                tab === value
+                  ? "border-primary-600 text-primary-700"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        {/* Calendrier hebdomadaire */}
-        {isLoading ? (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            {Array.from({ length: 7 }).map((_, i) => (
-              <Skeleton key={i} className="h-40" />
-            ))}
-          </div>
-        ) : !hasAnyRounds ? (
-          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-12 text-center">
-            <CalendarDays className="mx-auto h-12 w-12 text-gray-300" />
-            <h3 className="mt-4 text-sm font-semibold text-gray-900">
-              Aucune tournée cette semaine
-            </h3>
-            <p className="mt-1 text-sm text-gray-500">
-              Planifiez votre première tournée de livraison pour cette semaine.
-            </p>
-            <div className="mt-4">
-              <Button onClick={() => setCreateOpen(true)}>Créer une tournée</Button>
-            </div>
-          </div>
+        {tab === "tournees" ? (
+          <RoundsTab />
         ) : (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            {weekDates.map((date, idx) => {
-              const key = dateKey(date);
-              const dayRounds = roundsByDate[key] ?? [];
-              const isToday = dateKey(new Date()) === key;
-              return (
-                <div
-                  key={key}
-                  className={`min-h-[140px] rounded-xl border p-3 ${
-                    isToday ? "border-primary-300 bg-primary-50/30" : "border-gray-200 bg-white"
-                  }`}
+          <div className="space-y-4">
+            {/* Filtres */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="flex-1">
+                <label
+                  htmlFor="rotation-search"
+                  className="mb-1 block text-xs font-medium text-gray-700"
                 >
-                  <p
-                    className={`mb-2 text-xs font-semibold ${isToday ? "text-primary-600" : "text-gray-500"}`}
-                  >
-                    {dayNames[idx]} {date.getDate()}/{date.getMonth() + 1}
-                  </p>
-                  <div className="space-y-1.5">
-                    {dayRounds.length === 0 && (
-                      <p className="text-xs text-gray-300">Aucune tournée</p>
-                    )}
-                    {dayRounds.map((r) => (
-                      <button
-                        key={r.id}
-                        onClick={() => setSelectedRound(r)}
-                        className="w-full rounded-lg bg-gray-50 p-2 text-left text-xs hover:bg-gray-100"
-                      >
-                        <p className="font-medium text-gray-800">{r.driver}</p>
-                        <p className="text-gray-500">
-                          {r.stops.length} arrêt{r.stops.length > 1 ? "s" : ""}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
+                  Rechercher un client
+                </label>
+                <div className="relative">
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                    aria-hidden="true"
+                  />
+                  <input
+                    id="rotation-search"
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Nom ou adresse…"
+                    className="min-h-11 w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-base sm:min-h-0 sm:text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  />
                 </div>
-              );
-            })}
+              </div>
+              <div className="sm:w-56">
+                <label
+                  htmlFor="rotation-status"
+                  className="mb-1 block text-xs font-medium text-gray-700"
+                >
+                  Statut
+                </label>
+                <select
+                  id="rotation-status"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as RotationStatus | "")}
+                  className="min-h-11 w-full rounded-md border border-gray-300 px-3 py-2 text-base sm:min-h-0 sm:text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                >
+                  <option value="">Tous les statuts</option>
+                  {ROTATION_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {ROTATION_STATUS_LABELS[s]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {enRetard > 0 && (
+              <div className="flex items-center gap-2">
+                <Badge variant="danger">
+                  {enRetard} reprise{enRetard > 1 ? "s" : ""} en retard
+                </Badge>
+                <span className="text-xs text-gray-500">sur la période affichée</span>
+              </div>
+            )}
+
+            {!available && (
+              <ModuleUnavailable
+                title="Module rotations pas encore disponible"
+                description="Le serveur ne propose pas encore /rotations. Le calendrier s'affichera dès que l'API sera déployée ; l'onglet Tournées reste utilisable."
+              />
+            )}
+
+            {error && available && (
+              <ModuleUnavailable
+                title="Impossible de charger les rotations"
+                description={error.message}
+              />
+            )}
+
+            {isLoading ? (
+              <Skeleton className="h-96 w-full" />
+            ) : (
+              <>
+                <RotationCalendar
+                  events={events}
+                  mode={mode}
+                  onModeChange={setMode}
+                  month={month}
+                  onMonthChange={setMonth}
+                  onSelectEvent={(event) => setSelected(event.rotation)}
+                />
+
+                {available && filtered.length === 0 && (
+                  <EmptyState
+                    icon={<CalendarDays className="h-12 w-12" />}
+                    title="Aucune rotation sur cette période"
+                    description={
+                      search
+                        ? "Aucun client ne correspond à cette recherche."
+                        : "Les livraisons et reprises apparaîtront ici dès qu'une commande sera livrée."
+                    }
+                  />
+                )}
+              </>
+            )}
           </div>
         )}
       </div>
 
-      {/* Modal création de tournée */}
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nouvelle tournée">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            createMutation.mutate();
-          }}
-          className="space-y-4"
-        >
-          <Input
-            label="Date"
-            type="date"
-            value={form.date}
-            onChange={(e) => setForm({ ...form, date: e.target.value })}
-            required
-          />
-          <div>
-            <label
-              className="mb-1.5 block text-sm font-medium text-gray-700"
-              htmlFor="planning-driver"
-            >
-              Livreur
-            </label>
-            <select
-              id="planning-driver"
-              value={form.driverId}
-              onChange={(e) => setForm({ ...form, driverId: e.target.value })}
-              required
-              className="min-h-11 w-full rounded-md border border-gray-300 px-3 py-2 text-base sm:min-h-0 sm:text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-            >
-              <option value="">Choisir un livreur…</option>
-              {drivers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-            {drivers.length === 0 && (
-              <p className="mt-1 text-xs text-amber-600">
-                Aucun livreur enregistré. Créez-en un dans Utilisateurs.
-              </p>
-            )}
-          </div>
-          <div>
-            {/* Intitulé d'un GROUPE de cases à cocher : pas un <label> (il ne
-                pointe vers aucun champ unique) mais le nom du groupe. */}
-            <span
-              id="planning-clients-label"
-              className="mb-1.5 block text-sm font-medium text-gray-700"
-            >
-              Clients ({form.clientIds.length} sélectionné{form.clientIds.length > 1 ? "s" : ""})
-            </span>
-            <div
-              role="group"
-              aria-labelledby="planning-clients-label"
-              className="max-h-48 overflow-y-auto rounded-md border border-gray-300 p-2"
-            >
-              {clients.length === 0 ? (
-                <p className="p-2 text-xs text-gray-400">Aucun client disponible</p>
-              ) : (
-                clients.map((c) => (
-                  <label
-                    key={c.id}
-                    className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.clientIds.includes(c.id)}
-                      onChange={() => toggleClient(c.id)}
-                      className="h-5 w-5 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                    />
-                    <span className="min-w-0 truncate text-sm text-gray-700">
-                      {c.companyName ?? c.name}
-                    </span>
-                    <EmailText email={c.email} className="text-xs text-gray-400" />
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" type="button" onClick={() => setCreateOpen(false)}>
-              Annuler
-            </Button>
-            <Button
-              type="submit"
-              loading={createMutation.isPending}
-              disabled={form.clientIds.length === 0 || !form.driverId}
-            >
-              Créer
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Modal détail tournée */}
-      <Modal
-        open={!!selectedRound}
-        onClose={() => setSelectedRound(null)}
-        title={`Tournée — ${selectedRound?.driver ?? ""}`}
-        className="max-w-xl"
-      >
-        {selectedRound && (
-          <div className="space-y-4">
-            <div className="flex gap-4 text-sm">
-              <div>
-                <span className="text-gray-500">Date : </span>
-                <span className="font-medium">
-                  {new Date(selectedRound.date).toLocaleDateString("fr-FR")}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-500">Statut : </span>
-                {statusBadge(selectedRound.status)}
-              </div>
-            </div>
-
-            <div>
-              <h4 className="mb-2 text-sm font-semibold text-gray-900">
-                Arrêts ({selectedRound.stops.length})
-              </h4>
-              <div className="space-y-2">
-                {selectedRound.stops.length === 0 ? (
-                  <p className="text-sm text-gray-400">Aucun arrêt</p>
-                ) : (
-                  selectedRound.stops.map((stop) => (
-                    <div
-                      key={stop.id}
-                      className="flex items-center gap-3 rounded-lg border border-gray-100 p-3"
-                    >
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">
-                        {stop.order}
-                      </span>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-800">{stop.clientName}</p>
-                        <p className="text-xs text-gray-500">{stop.address}</p>
-                      </div>
-                      <Badge variant={stop.status === "completed" ? "success" : "neutral"}>
-                        {stop.status === "completed" ? "Fait" : "À faire"}
-                      </Badge>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <RotationDetail rotation={selected} onClose={() => setSelected(null)} />
     </>
   );
 }

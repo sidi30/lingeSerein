@@ -743,23 +743,133 @@ export function useTodayRound() {
   });
 }
 
+/**
+ * Corps de PATCH /deliveries/stops/:id/complete.
+ *
+ * `setsDelivered` / `dirtyPickedUp` / `qrCodeScanned` sont acceptés par l'API
+ * aujourd'hui. Les quatre champs de bon de livraison ci-dessous NE LE SONT PAS
+ * ENCORE : le schéma Zod serveur n'est pas strict, il les ignore donc en
+ * silence — l'arrêt se valide normalement, seule la signature n'est pas
+ * persistée tant que le backend n'a pas livré sa part.
+ *
+ * On n'utilise volontairement PAS la colonne existante `signatureUrl`
+ * (VarChar(500) + `z.string().url().max(500)`) : une signature ne tient pas en
+ * 500 caractères, l'envoyer là renverrait un 400.
+ */
+export interface CompleteStopInput {
+  setsDelivered: number;
+  dirtyPickedUp?: number;
+  /** Data URL SVG de la signature manuscrite (quelques Ko). */
+  signatureDataUrl?: string;
+  /** Nom de la personne qui a signé. */
+  signataireNom?: string;
+  /** false = le client émet des réserves sur la livraison. */
+  conforme?: boolean;
+  /** Détail des réserves, saisi seulement si `conforme === false`. */
+  reserves?: string;
+}
+
+/**
+ * Deux routes coexistent pour valider un arrêt :
+ *  - `PATCH /deliveries/stops/:id`          — contrat de l'ADR rotations, porte la signature ;
+ *  - `PATCH /deliveries/stops/:id/complete` — route historique, seule déployée à ce jour.
+ *
+ * On tente l'ADR d'abord et on retombe sur l'historique en 404. Le livreur peut
+ * ainsi valider ses arrêts aujourd'hui, et la signature sera persistée dès que
+ * le backend aura livré la nouvelle route — sans nouvelle version du mobile.
+ *
+ * Le résultat est mémorisé pour la session : sans ça, chaque validation d'arrêt
+ * paierait un aller-retour 404 inutile.
+ */
+let stopRouteSupportsAdr: boolean | null = null;
+
+async function patchStop(stopId: string, data: CompleteStopInput): Promise<DeliveryStop> {
+  const body = JSON.stringify(data);
+
+  if (stopRouteSupportsAdr !== false) {
+    try {
+      const res = await apiFetch<ApiRes<DeliveryStop>>(`/deliveries/stops/${stopId}`, {
+        method: "PATCH",
+        body,
+      });
+      stopRouteSupportsAdr = true;
+      return res.data;
+    } catch (e) {
+      // Seul un 404 signifie « route absente ». Un 400/403/409 vient de la
+      // logique métier et doit remonter tel quel, surtout pas être rejoué sur
+      // l'autre route (on validerait deux fois le même arrêt).
+      if (!(e instanceof ApiError) || e.status !== 404) throw e;
+      stopRouteSupportsAdr = false;
+    }
+  }
+
+  const res = await apiFetch<ApiRes<DeliveryStop>>(`/deliveries/stops/${stopId}/complete`, {
+    method: "PATCH",
+    body,
+  });
+  return res.data;
+}
+
 export function useCompleteStop() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({
-      stopId,
-      data,
-    }: {
-      stopId: string;
-      data: { setsDelivered: number; dirtyPickedUp?: number };
-    }) => {
-      const res = await apiFetch<ApiRes<DeliveryStop>>(`/deliveries/stops/${stopId}/complete`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      });
-      return res.data;
-    },
+    mutationFn: ({ stopId, data }: { stopId: string; data: CompleteStopInput }) =>
+      patchStop(stopId, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["today-round"] }),
+  });
+}
+
+// ─── Hooks: Rotations (client) ───────────────────────────────────
+
+/**
+ * Une rotation = le cycle « linge propre livré → linge sale repris ».
+ * Contrat visé : GET /rotations?mine=1. La route n'existe pas encore côté API
+ * (livraison backend en cours) : `useMyRotations` renvoie donc `null` sur 404,
+ * et l'écran d'accueil masque simplement la carte.
+ */
+/** Miroir de l'enum Prisma RotationStatus (packages/database/prisma/schema.prisma). */
+export type RotationStatus = "PLANIFIEE" | "LIVREE" | "REPRISE" | "EN_RETARD" | "ANNULEE";
+
+/** Statuts qui clôturent une rotation : le linge est rentré ou la rotation annulée. */
+export const ROTATION_TERMINAL: RotationStatus[] = ["REPRISE", "ANNULEE"];
+
+export interface RotationLine {
+  designation: string;
+  qtyLivree: number;
+  /** null = reprise pas encore saisie ; 0 = rien n'est revenu. */
+  qtyReprise?: number | null;
+}
+
+export interface Rotation {
+  id: string;
+  /** Typé large : le serveur peut ajouter un statut sans casser le mobile. */
+  status: RotationStatus | string;
+  dateLivraison: string;
+  /** Requis côté base, toléré absent tant que le DTO n'est pas figé. */
+  dateReprisePrevue: string | null;
+  /** > 0 = la reprise est en retard. Calculé côté mobile s'il est absent. */
+  joursDeRetard?: number | null;
+  lignes: RotationLine[];
+}
+
+export function useMyRotations() {
+  const token = useAuthStore((s) => s.accessToken);
+  const isClient = useIsClient();
+  return useQuery<Rotation[] | null>({
+    queryKey: ["rotations-me"],
+    queryFn: async () => {
+      try {
+        const res = await apiFetch<ApiListRes<Rotation>>("/rotations?mine=1");
+        return res.data;
+      } catch (e) {
+        // 404 : route pas encore déployée. 403 : rôle sans rotations.
+        if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return null;
+        throw e;
+      }
+    },
+    enabled: !!token && isClient,
+    // Inutile de réessayer en boucle tant que la route n'existe pas.
+    retry: false,
   });
 }
 

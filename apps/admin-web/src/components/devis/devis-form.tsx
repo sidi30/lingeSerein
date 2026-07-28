@@ -22,17 +22,35 @@ import {
 } from "@lingengo/shared";
 import type { DeliveryZone, UrgencyLevel } from "@lingengo/shared";
 import type { QuoteDTO, UserDTO } from "@/lib/types";
-import { Plus, Trash2, ChevronUp, ChevronDown, Search } from "lucide-react";
+import { useStockBySlug } from "@/lib/rotations";
+import { AlertTriangle, Plus, Trash2, ChevronUp, ChevronDown, Search } from "lucide-react";
 
 /* ─── Catalogue quick-add ───
  * Dérivé du catalogue canonique (@lingengo/shared) : aucun prix n'est retapé ici,
  * une évolution tarifaire se propage automatiquement au formulaire. */
 
 const CATALOG = CATALOG_PRODUCTS.map((p) => ({
+  slug: p.slug,
   label: p.name,
   designation: `${p.name} — ${p.description}`,
   cents: p.priceCents,
 }));
+
+/**
+ * Retrouve la référence catalogue d'une ligne à partir de sa désignation.
+ *
+ * Les lignes de devis restent du texte libre (l'admin doit pouvoir écrire ce
+ * qu'il veut) : le rapprochement avec le stock se fait donc sur le préfixe du
+ * nom, ce que produit l'ajout rapide. Les noms les plus longs sont testés en
+ * premier, sinon « Kit Complet (Bain + Lit) » serait capté par « Kit Bain ».
+ */
+const CATALOG_BY_NAME_LENGTH = [...CATALOG_PRODUCTS].sort((a, b) => b.name.length - a.name.length);
+
+function matchCatalogSlug(designation: string): string | null {
+  const needle = designation.trim().toLowerCase();
+  if (!needle) return null;
+  return CATALOG_BY_NAME_LENGTH.find((p) => needle.startsWith(p.name.toLowerCase()))?.slug ?? null;
+}
 
 /* ─── Schéma de validation ─── */
 
@@ -175,6 +193,47 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
   );
 
   const feeApplied = eurosToCents(Number(livraisonEuros) || 0) === deliveryFee.cents;
+
+  /* ─── Disponibilité du stock ───
+   * Avertissement seulement : survendre est une décision légitime (l'admin sait
+   * qu'il rachètera), mais il doit la prendre en connaissance de cause. */
+  const { items: stockItems, available: stockAvailable } = useStockBySlug();
+
+  const stockBySlug = useMemo(
+    () => new Map(stockItems.map((item) => [item.productSlug, item])),
+    [stockItems],
+  );
+
+  /** Quantité demandée par référence, CUMULÉE sur toutes les lignes du devis. */
+  const demandBySlug = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const ligne of lignes) {
+      const slug = matchCatalogSlug(ligne.designation);
+      if (!slug) continue;
+      map.set(slug, (map.get(slug) ?? 0) + (Number(ligne.qty) || 0));
+    }
+    return map;
+  }, [lignes]);
+
+  /** Références dont la demande dépasse le disponible. */
+  const overbooked = useMemo(() => {
+    const out: { slug: string; name: string; demande: number; disponible: number }[] = [];
+    for (const [slug, demande] of demandBySlug) {
+      const item = stockBySlug.get(slug);
+      if (item && demande > item.disponible) {
+        out.push({ slug, name: item.name, demande, disponible: item.disponible });
+      }
+    }
+    return out;
+  }, [demandBySlug, stockBySlug]);
+
+  const availableCatalog = useMemo(
+    () =>
+      CATALOG.map((entry) => ({ ...entry, stock: stockBySlug.get(entry.slug) }))
+        .filter((entry) => (entry.stock?.disponible ?? 0) > 0)
+        .sort((a, b) => (b.stock?.disponible ?? 0) - (a.stock?.disponible ?? 0)),
+    [stockBySlug],
+  );
 
   const totals = useMemo(() => {
     const lines = lignes.map((l) => ({
@@ -421,6 +480,31 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
           </div>
         </Card>
 
+        {/* ─── Ajout depuis le stock réellement disponible ─── */}
+        {stockAvailable && availableCatalog.length > 0 && (
+          <Card title="Ajouter depuis le stock disponible">
+            <p className="mb-3 text-xs text-gray-500">
+              Seules les références qu&apos;il reste en parc, de la plus fournie à la plus tendue.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {availableCatalog.map((entry) => (
+                <button
+                  key={entry.slug}
+                  type="button"
+                  onClick={() => addCatalogItem(entry.designation, entry.cents)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-success-500/40 bg-success-50 px-3 py-1.5 text-xs font-medium text-success-600 transition-colors hover:bg-success-50/70"
+                >
+                  <Plus className="h-3 w-3" aria-hidden="true" />
+                  {entry.label}
+                  <span className="rounded-full bg-white/70 px-1.5 py-0.5 tabular-nums">
+                    {entry.stock?.disponible} dispo
+                  </span>
+                </button>
+              ))}
+            </div>
+          </Card>
+        )}
+
         {/* ─── Lignes ─── */}
         <Card
           title="Lignes du devis"
@@ -442,6 +526,30 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
           )}
           {errors.lignes?.message && <p className={`${errorCls} mb-3`}>{errors.lignes.message}</p>}
 
+          {/* Avertissement NON bloquant : le devis reste enregistrable. */}
+          {overbooked.length > 0 && (
+            <div className="mb-3 flex items-start gap-2 rounded-lg border border-warning-500/40 bg-warning-50 p-3 text-xs text-warning-600">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <div>
+                <p className="font-medium">
+                  {overbooked.length} référence{overbooked.length > 1 ? "s" : ""} au-delà du stock
+                  disponible
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {overbooked.map((o) => (
+                    <li key={o.slug}>
+                      {o.name} : {o.demande} demandé{o.demande > 1 ? "s" : ""} pour {o.disponible}{" "}
+                      en stock
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 opacity-80">
+                  Le devis reste valide — prévoyez le rachat ou décalez la date de livraison.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* En-têtes */}
           <div className="mb-2 hidden grid-cols-[1fr_80px_100px_100px_80px_44px] gap-2 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:grid">
             <span>Désignation</span>
@@ -457,6 +565,12 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
               const qty = lignes[i]?.qty ?? 0;
               const unitCents = eurosToCents(lignes[i]?.unitCentsEuros ?? 0);
               const lineTotal = Math.round(qty * unitCents);
+              const slug = matchCatalogSlug(lignes[i]?.designation ?? "");
+              const stockItem = slug ? stockBySlug.get(slug) : undefined;
+              // On compare au CUMUL du devis : deux lignes du même article
+              // puisent dans le même parc.
+              const demande = slug ? (demandBySlug.get(slug) ?? 0) : 0;
+              const depasse = stockItem ? demande > stockItem.disponible : false;
               return (
                 <div
                   key={field.id}
@@ -471,6 +585,26 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
                     />
                     {errors.lignes?.[i]?.designation && (
                       <p className={errorCls}>{errors.lignes[i]?.designation?.message}</p>
+                    )}
+                    {stockItem && (
+                      <p
+                        className={`mt-1 text-[11px] ${depasse ? "font-medium text-warning-600" : "text-gray-500"}`}
+                      >
+                        {depasse ? (
+                          <>
+                            Dépasse le stock : {demande} demandé{demande > 1 ? "s" : ""} pour{" "}
+                            {stockItem.disponible} disponible
+                            {stockItem.disponible > 1 ? "s" : ""}
+                          </>
+                        ) : (
+                          <>
+                            Disponible : {stockItem.disponible} en parc
+                            {stockItem.inCirculation > 0
+                              ? ` · ${stockItem.inCirculation} en circulation`
+                              : ""}
+                          </>
+                        )}
+                      </p>
                     )}
                   </div>
                   <div>
