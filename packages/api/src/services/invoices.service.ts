@@ -95,9 +95,10 @@ export class InvoicesService {
     const { page, limit, status, excludeStatus, year, search } = query;
     const skip = (page - 1) * limit;
 
-    // Basculer les impayés avant de répondre (même filet idempotent que les devis)
-    await this.markOverdue(operatorId);
-
+    // Lecture pure — cf. `QuotesService.list`. La bascule SENT → OVERDUE revient
+    // au cron `invoice-overdue`, qui passe juste après minuit : `dueDate` est une
+    // DATE (sans heure), le statut ne peut donc changer qu'au passage de minuit,
+    // et le faire à cet instant-là ne laisse aucun décalage visible.
     const where: Prisma.InvoiceWhereInput = {
       operatorId,
       deletedAt: null,

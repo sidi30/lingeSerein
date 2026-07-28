@@ -25,9 +25,12 @@ export class QuotesService {
     const { page, limit, status, search, from, to } = query;
     const skip = (page - 1) * limit;
 
-    // Expirer les devis avant la réponse (ADR-008 — filet idempotent)
-    await this.expireOverdue(operatorId);
-
+    // Aucune écriture ici : lister est une LECTURE. Ce `expireOverdue` en tête de
+    // liste faisait basculer des devis ENVOYE → EXPIRE au simple rechargement de
+    // l'écran ; l'utilisateur voyait un statut changer sous ses yeux sans avoir
+    // rien fait, et une fiche ouverte juste après contredisait la liste qu'il
+    // venait de quitter. La bascule appartient au cron `quote-expiry`, qui passe
+    // toutes les heures et couvre tous les opérateurs.
     const where: Prisma.QuoteWhereInput = {
       operatorId,
       deletedAt: null,

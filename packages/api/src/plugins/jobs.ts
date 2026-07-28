@@ -4,7 +4,7 @@ import type { Worker } from "bullmq";
 import { createQueue, QUEUE_NAMES } from "../jobs/queue.js";
 import { createStockAlertWorker } from "../jobs/stock-alert.worker.js";
 import { createNotificationWorker } from "../jobs/notification.worker.js";
-import { createInvoiceWorker } from "../jobs/invoice.worker.js";
+import { createInvoiceWorker, JOB_OVERDUE } from "../jobs/invoice.worker.js";
 import { createQuoteExpiryWorker } from "../jobs/quote-expiry.worker.js";
 import { createRotationWorker } from "../jobs/rotation.worker.js";
 import { createDeviceTokenWorker, RETENTION_JETONS_JOURS } from "../jobs/device-token.worker.js";
@@ -54,10 +54,17 @@ export default fp(async (app: FastifyInstance) => {
     },
   );
 
-  // Quote expiry check — every day at 03:00
+  // Expiration des devis — TOUTES LES HEURES.
+  //
+  // Quotidien tant que `QuotesService.list` rattrapait le retard à chaque
+  // affichage ; maintenant que lister ne écrit plus rien, c'est ce cron seul qui
+  // fait foi. Un devis expire à `dateEnvoi + validiteJours`, heure d'envoi
+  // comprise — pas à minuit : un passage quotidien laisserait jusqu'à 24 h un
+  // devis périmé affiché comme encore valide, donc encore convertible.
+  // `tz` pour que l'heure reste stable de part et d'autre du changement d'heure.
   await quoteExpiryQueue.upsertJobScheduler(
     "quote-expiry-cron",
-    { pattern: "0 3 * * *" },
+    { pattern: "0 * * * *", tz: "Europe/Paris" },
     {
       name: "quote-expiry-check",
       data: {},
@@ -124,6 +131,23 @@ export default fp(async (app: FastifyInstance) => {
     { pattern: "0 5 * * *", tz: "Europe/Paris" },
     {
       name: "invoice-cycle",
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: { count: 100 } },
+    },
+  );
+
+  // Bascule des impayés — tous les jours à 00:15.
+  //
+  // `Invoice.dueDate` est une DATE sans heure : une facture ne devient en retard
+  // qu'au passage de minuit. Passer juste après, c'est ne laisser aucun décalage
+  // entre l'état réel et l'état affiché — ce que faisait auparavant un
+  // `markOverdue` glissé en tête de `InvoicesService.list`, au prix d'une
+  // écriture en base à chaque ouverture de l'écran Factures.
+  await invoicesQueue.upsertJobScheduler(
+    "invoice-overdue-cron",
+    { pattern: "15 0 * * *", tz: "Europe/Paris" },
+    {
+      name: JOB_OVERDUE,
       data: {},
       opts: { removeOnComplete: true, removeOnFail: { count: 100 } },
     },

@@ -79,13 +79,11 @@ export default async function rotationRoutes(app: FastifyInstance): Promise<void
 
       const operatorId = await getOperatorId(request.user.sub);
 
-      // Même filet idempotent que sur les factures : les retards sont à jour
-      // avant d'être affichés, sans attendre le passage du cron de 09:00.
-      // Réservé à l'admin — une lecture client ne doit pas déclencher d'écriture.
-      if (isAdmin) {
-        await service.markOverdue(operatorId);
-      }
-
+      // Aucune écriture ici : c'est une lecture. Ce filet réservé à l'admin
+      // rendait de surcroît la réponse DIFFÉRENTE selon le rôle de l'appelant,
+      // pour la même donnée. La bascule EN_RETARD appartient au cron
+      // `rotation-overdue` ; l'ancienneté du retard, elle, est déjà calculée à
+      // la lecture (`joursDeRetard`) sans rien persister.
       const result = await service.list(parsed.data, operatorId, forcedUserId);
       return reply.send({ success: true, ...result });
     },
@@ -105,7 +103,7 @@ export default async function rotationRoutes(app: FastifyInstance): Promise<void
     },
     async (request, reply) => {
       const operatorId = await getOperatorId(request.user.sub);
-      await service.markOverdue(operatorId);
+      // Lecture pure, cf. `GET /rotations` — le cron `rotation-overdue` bascule.
       const data = await service.summary(operatorId);
       return reply.send({ success: true, data });
     },

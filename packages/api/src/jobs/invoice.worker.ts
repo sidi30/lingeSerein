@@ -21,6 +21,9 @@ async function gestionnaires(prisma: PrismaClient): Promise<{ id: string }[]> {
   });
 }
 
+/** Nom du job de bascule des impayés — partagé avec `plugins/jobs.ts`. */
+export const JOB_OVERDUE = "invoice-overdue";
+
 export interface InvoiceJobData {
   /** Ne facturer que cet abonnement. Sinon, tous ceux dont la période est échue. */
   userId?: string;
@@ -322,6 +325,27 @@ export async function runInvoiceCycle(
 }
 
 /**
+ * Bascule SENT → OVERDUE, tous opérateurs confondus.
+ *
+ * Vit ici parce que c'est un job, et non plus en tête de `InvoicesService.list`
+ * où une simple lecture d'écran écrivait en base. `dueDate` est une DATE sans
+ * heure : le statut ne peut basculer qu'au passage de minuit, un passage
+ * quotidien juste après suffit donc à ne laisser aucun décalage visible.
+ */
+export async function runInvoiceOverdue(prisma: PrismaClient, now: Date = new Date()) {
+  const aujourdhui = new Date(now);
+  aujourdhui.setHours(0, 0, 0, 0);
+
+  const { count } = await prisma.invoice.updateMany({
+    where: { status: "SENT", deletedAt: null, dueDate: { lt: aujourdhui } },
+    data: { status: "OVERDUE" },
+  });
+
+  console.warn(`[invoice] ${count} facture(s) passée(s) en impayé`);
+  return count;
+}
+
+/**
  * Worker de facturation des abonnements.
  *
  * Alimenté par le cron quotidien déclaré dans `plugins/jobs.ts` — sans lui, ce
@@ -335,6 +359,12 @@ export function createInvoiceWorker(
   const worker = new Worker<InvoiceJobData>(
     QUEUE_NAMES.INVOICES,
     async (job: Job<InvoiceJobData>) => {
+      // Deux crons sur la même file, distingués par le nom du job : émettre les
+      // factures dues, et basculer les impayés. Les regrouper évite une file de
+      // plus pour deux écritures qui touchent la même table.
+      if (job.name === JOB_OVERDUE) {
+        return { overdue: await runInvoiceOverdue(prisma) };
+      }
       const invoiceNumbers = await runInvoiceCycle(prisma, job.data);
       return { invoiceNumbers };
     },
