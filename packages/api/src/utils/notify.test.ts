@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 
 import { notify } from "./notify.ts";
 import type { PushMessage } from "./push.ts";
+import { JOB_PUSH, setPushQueue } from "../jobs/push-queue.ts";
 
 // ---------------------------------------------------------------------------
 // Double de `fetch`
@@ -297,5 +298,47 @@ describe("l'échec du push ne remonte jamais", () => {
     const result = await notify(asPrisma(fake), RAPPEL);
 
     assert.ok(result.notificationId);
+  });
+});
+
+describe("le push ne bloque plus la requête", () => {
+  it("délègue à la file quand elle est enregistrée, sans joindre Expo", async () => {
+    // Le cœur du correctif : joindre Expo peut prendre jusqu'à 10 s (son
+    // timeout). Fait dans le fil de la requête, un `POST /orders` restait pendu
+    // d'autant, alors que la commande était écrite depuis longtemps.
+    const jobs: { nom: string; data: unknown }[] = [];
+    setPushQueue({
+      add: (nom: string, data: unknown) => {
+        jobs.push({ nom, data });
+        return Promise.resolve({ id: "job-1" });
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    simulerPanneExpo(); // si le push partait ici, l'appel lèverait
+
+    const fake = createFakePrisma([{ token: JETON_A, userId: "user-1" }]);
+    const resultat = await notify(asPrisma(fake), RAPPEL);
+
+    setPushQueue(null);
+
+    // La notification est écrite tout de suite : le badge bouge sans attendre.
+    assert.ok(resultat.notificationId);
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0]?.nom, JOB_PUSH);
+    assert.deepEqual(jobs[0]?.data, { notificationId: resultat.notificationId });
+    // Aucun appel réseau : c'est le worker qui s'en chargera.
+    assert.equal(lotsEnvoyes.length, 0);
+  });
+
+  it("retombe sur l'envoi direct quand aucune file n'est enregistrée", async () => {
+    // Tests, scripts, seed : pas de Redis, donc comportement d'avant.
+    setPushQueue(null);
+    simulerExpo();
+
+    const fake = createFakePrisma([{ token: JETON_A, userId: "user-1" }]);
+    await notify(asPrisma(fake), RAPPEL);
+
+    assert.equal(lotsEnvoyes.length, 1);
   });
 });

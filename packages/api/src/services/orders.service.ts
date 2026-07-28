@@ -224,9 +224,24 @@ export class OrdersService {
             create: items,
           },
         },
+        // Même forme que `GET /orders/:id` : le mobile amorce son cache de
+        // détail avec cette réponse (`setQueryData(["order", id], order)`), et
+        // l'écran y lit le client et sa zone. Sans eux, la fiche s'ouvrait
+        // amputée jusqu'au premier rafraîchissement.
         include: {
           items: {
-            include: { product: { select: { name: true, range: true, category: true } } },
+            include: {
+              product: { select: { id: true, name: true, range: true, category: true } },
+            },
+          },
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true,
+              zone: { select: { id: true, name: true } },
+            },
           },
         },
       });

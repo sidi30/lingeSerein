@@ -705,11 +705,22 @@ export class QuotesService {
 
   // ---- Expirer les devis ENVOYE dont la validité est dépassée ----
 
-  async expireOverdue(operatorId: string) {
-    // Sélectionner les devis ENVOYE expirés pour les mettre à jour
-    const expiredQuotes = await this.prisma.quote.findMany({
+  /**
+   * Bascule ENVOYE → EXPIRE des devis dont la validité est dépassée.
+   *
+   * **Seule** implémentation de cette règle. Le cron `quote-expiry` en portait
+   * une copie, divergente sur un point qui compte : elle écrivait le journal
+   * d'audit, celle-ci non. Deux copies d'une règle métier finissent toujours par
+   * ne plus dire la même chose, et c'est la trace comptable qui en faisait déjà
+   * les frais.
+   *
+   * @param operatorId Limite à un opérateur. Omis ⇒ TOUS — c'est le cas du cron.
+   * @param now Injectable pour les tests.
+   */
+  async expireOverdue(operatorId?: string, now: Date = new Date()) {
+    const candidats = await this.prisma.quote.findMany({
       where: {
-        operatorId,
+        ...(operatorId ? { operatorId } : {}),
         status: "ENVOYE",
         deletedAt: null,
         dateEnvoi: { not: null },
@@ -717,20 +728,43 @@ export class QuotesService {
       select: { id: true, dateEnvoi: true, validiteJours: true },
     });
 
-    const now = new Date();
-    const toExpire = expiredQuotes.filter((q) => {
+    // La validité se compte en JOURS à partir de l'envoi, heure comprise : un
+    // devis envoyé à 14 h 30 avec 30 jours expire à 14 h 30 le trentième jour.
+    const aExpirer = candidats.filter((q) => {
       if (!q.dateEnvoi) return false;
       const expiresAt = new Date(q.dateEnvoi);
       expiresAt.setDate(expiresAt.getDate() + q.validiteJours);
       return expiresAt < now;
     });
 
-    if (toExpire.length === 0) return;
+    if (aExpirer.length === 0) return { expired: [] as string[] };
 
-    await this.prisma.quote.updateMany({
-      where: { id: { in: toExpire.map((q) => q.id) } },
-      data: { status: "EXPIRE" },
+    const ids = aExpirer.map((q) => q.id);
+
+    // Une seule transaction : la bascule et sa trace tombent ou passent ensemble.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.quote.updateMany({
+        where: { id: { in: ids } },
+        data: { status: "EXPIRE" },
+      });
+
+      for (const id of ids) {
+        await createAuditLog({
+          prisma: tx,
+          // Pas d'utilisateur : c'est le temps qui a agi, pas quelqu'un.
+          action: "UPDATE",
+          entity: "Quote",
+          entityId: id,
+          changes: {
+            previousStatus: "ENVOYE",
+            newStatus: "EXPIRE",
+            reason: "Expiration automatique de validité",
+          },
+        });
+      }
     });
+
+    return { expired: ids };
   }
 
   // ---- Générateur de numéro séquentiel (dans une transaction) ----

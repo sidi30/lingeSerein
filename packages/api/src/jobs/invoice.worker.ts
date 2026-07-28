@@ -5,6 +5,7 @@ import { QUEUE_NAMES } from "./queue.js";
 import {
   buildReglementMention,
   generateInvoiceNumber,
+  InvoicesService,
   VAT_EXEMPTION_MENTION,
 } from "../services/invoices.service.js";
 import { notify } from "../utils/notify.js";
@@ -333,14 +334,8 @@ export async function runInvoiceCycle(
  * quotidien juste après suffit donc à ne laisser aucun décalage visible.
  */
 export async function runInvoiceOverdue(prisma: PrismaClient, now: Date = new Date()) {
-  const aujourdhui = new Date(now);
-  aujourdhui.setHours(0, 0, 0, 0);
-
-  const { count } = await prisma.invoice.updateMany({
-    where: { status: "SENT", deletedAt: null, dueDate: { lt: aujourdhui } },
-    data: { status: "OVERDUE" },
-  });
-
+  // Sans opérateur ⇒ tous. La règle elle-même vit dans le service, pas ici.
+  const count = await new InvoicesService(prisma).markOverdue(undefined, now);
   console.warn(`[invoice] ${count} facture(s) passée(s) en impayé`);
   return count;
 }

@@ -98,7 +98,7 @@ function prismaLectureSeule() {
       user: modele("user"),
       auditLog: modele("auditLog"),
       notification: modele("notification"),
-      $transaction: (arg: unknown) => {
+      $transaction: (arg: unknown): Promise<unknown> => {
         if (typeof arg === "function") {
           throw new Error("Transaction ouverte pendant une lecture");
         }
@@ -159,9 +159,16 @@ describe("GET — aucune écriture en base", () => {
 
 describe("les bascules restent possibles — hors lecture", () => {
   it("`expireOverdue` écrit toujours, appelé explicitement", async () => {
-    // La méthode n'est pas supprimée : elle reste le geste délibéré du cron et
-    // d'un éventuel rattrapage manuel. Ce qui change, c'est QUI l'appelle.
+    // La méthode n'est pas supprimée : elle est devenue l'implémentation UNIQUE
+    // de la règle, que le cron appelle sans opérateur. Ce qui change, c'est QUI
+    // l'appelle — plus jamais une lecture.
     const fake = prismaLectureSeule();
+    // Elle ouvre désormais une transaction (bascule + audit ensemble) : on la
+    // laisse s'ouvrir ici, puisque c'est précisément l'écriture qu'on veut voir.
+    fake.client.$transaction = (arg: unknown) =>
+      typeof arg === "function"
+        ? (arg as (tx: unknown) => Promise<unknown>)(fake.client)
+        : Promise.all(arg as Promise<unknown>[]);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const service = new QuotesService(fake.client as any);

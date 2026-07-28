@@ -1,7 +1,13 @@
 import { Worker, type ConnectionOptions, type Job } from "bullmq";
 import type { PrismaClient, NotificationType, NotificationChannel, Prisma } from "@prisma/client";
 import { QUEUE_NAMES } from "./queue.js";
-import { notify } from "../utils/notify.js";
+import { deliverPush, notify } from "../utils/notify.js";
+import { JOB_PUSH } from "./push-queue.js";
+
+/** Données du job `deliver-push` — la notification est déjà en base. */
+export interface PushJobData {
+  notificationId: string;
+}
 
 export interface NotificationJobData {
   userId: string;
@@ -23,15 +29,31 @@ export interface NotificationJobData {
 export function createNotificationWorker(
   connection: ConnectionOptions,
   prisma: PrismaClient,
-): Worker<NotificationJobData> {
-  const worker = new Worker<NotificationJobData>(
+): Worker<NotificationJobData | PushJobData> {
+  const worker = new Worker<NotificationJobData | PushJobData>(
     QUEUE_NAMES.NOTIFICATIONS,
-    async (job: Job<NotificationJobData>) => {
-      const result = await notify(prisma, job.data);
+    async (job: Job<NotificationJobData | PushJobData>) => {
+      // Distribution push d'une notification DÉJÀ écrite : c'est le chemin que
+      // prend `notify()` depuis une requête HTTP, pour ne pas y laisser traîner
+      // l'appel à Expo et son timeout de 10 s.
+      if (job.name === JOB_PUSH) {
+        const { notificationId } = job.data as PushJobData;
+        const notification = await prisma.notification.findUnique({
+          where: { id: notificationId },
+        });
+        // Disparue entre-temps (purge, suppression de compte) : rien à envoyer,
+        // et surtout pas de quoi faire échouer le job.
+        if (!notification) return { delivered: false };
+        await deliverPush(prisma, notification);
+        return { delivered: true };
+      }
+
+      const data = job.data as NotificationJobData;
+      const result = await notify(prisma, data);
 
       if (result.skipped) {
         console.log(
-          `[notification] Ignorée — l'utilisateur ${job.data.userId} a désactivé ${job.data.type}`,
+          `[notification] Ignorée — l'utilisateur ${data.userId} a désactivé ${data.type}`,
         );
       }
 

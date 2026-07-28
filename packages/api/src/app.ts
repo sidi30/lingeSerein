@@ -172,6 +172,21 @@ export async function buildApp() {
     });
   });
 
+  // ---- Pas de mise en cache des réponses authentifiées ----
+  //
+  // Sans `no-store`, le navigateur garde sur DISQUE les réponses des écrans
+  // admin : la liste des clients, leurs adresses, leurs factures. Elles y
+  // restent après la déconnexion, et sur un poste partagé le suivant peut les
+  // relire via l'historique. Le critère est la présence d'un `Authorization` :
+  // une réponse obtenue avec un jeton est par construction personnelle.
+  app.addHook("onSend", async (request, reply, payload) => {
+    if (request.headers.authorization) {
+      reply.header("Cache-Control", "no-store");
+      reply.header("Pragma", "no-cache");
+    }
+    return payload;
+  });
+
   // ---- Health check ----
   app.get("/api/health", async () => {
     return { status: "ok", timestamp: new Date().toISOString() };

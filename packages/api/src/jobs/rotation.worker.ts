@@ -10,6 +10,7 @@ import { RETARD_ESCALADE_JOURS, joursDeRetard, startOfDay } from "@lingengo/shar
 import { QUEUE_NAMES } from "./queue.js";
 import { notify, emailAutorise } from "../utils/notify.js";
 import { sendTransactionalMail, toMailDate } from "../utils/mailer.js";
+import { RotationsService } from "../services/rotations.service.js";
 
 /** Les trois rendez-vous quotidiens du calendrier de rotations. */
 export type RotationJobKind = "reminder" | "morning" | "overdue";
@@ -351,6 +352,14 @@ async function runMorning(prisma: PrismaClient, now: Date) {
 async function runOverdue(prisma: PrismaClient, now: Date) {
   const aujourdhui = startOfDay(now);
 
+  // L'ÉTAT est basculé par le service — implémentation unique, partagée avec la
+  // route de rattrapage. Ce cron ne garde que ce qui lui est propre : relancer
+  // le client et récapituler aux gestionnaires. Il en portait auparavant sa
+  // propre copie, avec le risque permanent qu'elles divergent.
+  const bascule = await new RotationsService(prisma).markOverdue(undefined, now);
+
+  // Relu APRÈS la bascule : les rotations sont désormais EN_RETARD, qui fait
+  // partie du filtre, donc le jeu est le même — mais leur état est à jour.
   const enRetard = await prisma.rotation.findMany({
     where: {
       deletedAt: null,
@@ -365,30 +374,6 @@ async function runOverdue(prisma: PrismaClient, now: Date) {
   if (enRetard.length === 0) {
     console.log("[rotation-overdue] Aucune rotation en retard");
     return { basculees: 0, escaladees: 0, gestionnaires: 0, emails: 0, enRetard: 0 };
-  }
-
-  const aBasculer = enRetard.filter((r) => r.status !== "EN_RETARD").map((r) => r.id);
-  if (aBasculer.length > 0) {
-    await prisma.rotation.updateMany({
-      where: { id: { in: aBasculer } },
-      data: { status: "EN_RETARD" },
-    });
-  }
-
-  const aEscalader = enRetard
-    .filter(
-      (r) =>
-        !r.facturableRemplacement &&
-        joursDeRetard({ status: "EN_RETARD", dateReprisePrevue: r.dateReprisePrevue }, now) >
-          RETARD_ESCALADE_JOURS,
-    )
-    .map((r) => r.id);
-
-  if (aEscalader.length > 0) {
-    await prisma.rotation.updateMany({
-      where: { id: { in: aEscalader } },
-      data: { facturableRemplacement: true },
-    });
   }
 
   // Relance du client en retard — une seule fois, d'où `overdueNotifiedAt`.
@@ -462,7 +447,7 @@ async function runOverdue(prisma: PrismaClient, now: Date) {
           rotationId: cleRecap,
           date: toMailDate(aujourdhui),
           enRetard: enRetard.length,
-          facturables: aEscalader.length,
+          facturables: bascule.escaladees,
         } as Prisma.InputJsonValue,
       });
       gestionnairesNotifies++;
@@ -470,14 +455,14 @@ async function runOverdue(prisma: PrismaClient, now: Date) {
   }
 
   console.log(
-    `[rotation-overdue] ${enRetard.length} en retard — ${aBasculer.length} basculée(s), ` +
-      `${aEscalader.length} escaladée(s), ${emailsEnvoyes} email(s), ` +
+    `[rotation-overdue] ${enRetard.length} en retard — ${bascule.basculees} basculée(s), ` +
+      `${bascule.escaladees} escaladée(s), ${emailsEnvoyes} email(s), ` +
       `${gestionnairesNotifies} gestionnaire(s)`,
   );
 
   return {
-    basculees: aBasculer.length,
-    escaladees: aEscalader.length,
+    basculees: bascule.basculees,
+    escaladees: bascule.escaladees,
     gestionnaires: gestionnairesNotifies,
     emails: emailsEnvoyes,
     enRetard: enRetard.length,

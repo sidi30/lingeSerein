@@ -173,73 +173,83 @@ export class DeletionService {
       throw new ForbiddenError("Vous ne pouvez pas supprimer un Super Admin");
     }
 
-    // ─── Garde-fou légal ───────────────────────────────────────────────────
-    // Vérifié JUSTE AVANT d'écrire, pas au moment de l'aperçu : entre l'ouverture
-    // de la modale et la validation, une facture a pu être émise.
-    const issued = await this.prisma.invoice.count({
-      where: { userId, deletedAt: null, status: { not: "DRAFT" } },
-    });
-
-    if (issued > 0) {
-      throw new UnprocessableEntityError(
-        `Ce client porte ${issued} facture(s) émise(s), conservées 10 ans (art. L123-22 C. com.). ` +
-          `Anonymisez-le pour le retirer de vos listes sans toucher à la comptabilité.`,
-        "CLIENT_HAS_ISSUED_INVOICES",
-      );
-    }
-
     const now = new Date();
 
     // Transaction : une cascade à moitié appliquée laisserait un client actif
     // dont les devis ont disparu — plus incohérent que de ne rien supprimer.
-    const deleted = await this.prisma.$transaction(async (tx) => {
-      const quotes = await tx.quote.updateMany({
-        where: { userId, deletedAt: null },
-        data: { deletedAt: now },
-      });
+    const deleted = await this.prisma.$transaction(
+      async (tx) => {
+        // ─── Garde-fou légal ─────────────────────────────────────────────────
+        // DANS la transaction, et pas juste avant : lu à l'extérieur, une facture
+        // émise dans l'intervalle — le temps que les updateMany qui suivent
+        // s'exécutent — passait à travers, et le client disparaissait en emportant
+        // le rattachement d'une pièce comptable que la loi impose de conserver
+        // dix ans. `Serializable` garantit que ce décompte reste vrai jusqu'au
+        // commit.
+        const issued = await tx.invoice.count({
+          where: { userId, deletedAt: null, status: { not: "DRAFT" } },
+        });
 
-      // DRAFT uniquement — la garde ci-dessus assure qu'il n'y a rien d'autre,
-      // le filtre reste explicite pour que la requête soit sûre isolément.
-      const invoices = await tx.invoice.updateMany({
-        where: { userId, deletedAt: null, status: "DRAFT" },
-        data: { deletedAt: now },
-      });
+        if (issued > 0) {
+          throw new UnprocessableEntityError(
+            `Ce client porte ${issued} facture(s) émise(s), conservées 10 ans (art. L123-22 C. com.). ` +
+              `Anonymisez-le pour le retirer de vos listes sans toucher à la comptabilité.`,
+            "CLIENT_HAS_ISSUED_INVOICES",
+          );
+        }
 
-      const orders = await tx.order.updateMany({
-        where: { userId, deletedAt: null },
-        data: { deletedAt: now },
-      });
+        const quotes = await tx.quote.updateMany({
+          where: { userId, deletedAt: null },
+          data: { deletedAt: now },
+        });
 
-      const rotations = await tx.rotation.updateMany({
-        where: { userId, deletedAt: null },
-        data: { deletedAt: now },
-      });
+        // DRAFT uniquement — la garde ci-dessus assure qu'il n'y a rien d'autre,
+        // le filtre reste explicite pour que la requête soit sûre isolément.
+        const invoices = await tx.invoice.updateMany({
+          where: { userId, deletedAt: null, status: "DRAFT" },
+          data: { deletedAt: now },
+        });
 
-      // Hard delete : `SubscriptionProduct` suit en cascade (onDelete: Cascade).
-      const subscription = await tx.subscription.deleteMany({ where: { userId } });
+        const orders = await tx.order.updateMany({
+          where: { userId, deletedAt: null },
+          data: { deletedAt: now },
+        });
 
-      await tx.refreshToken.updateMany({
-        where: { userId, revokedAt: null },
-        data: { revokedAt: now },
-      });
+        const rotations = await tx.rotation.updateMany({
+          where: { userId, deletedAt: null },
+          data: { deletedAt: now },
+        });
 
-      // Les jetons push partent aussi : sans cela, un appareil continuerait de
-      // recevoir les notifications d'un compte supprimé.
-      await tx.deviceToken.deleteMany({ where: { userId } });
+        // Hard delete : `SubscriptionProduct` suit en cascade (onDelete: Cascade).
+        const subscription = await tx.subscription.deleteMany({ where: { userId } });
 
-      await tx.user.update({
-        where: { id: userId },
-        data: { deletedAt: now, isActive: false },
-      });
+        await tx.refreshToken.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt: now },
+        });
 
-      return {
-        quotes: quotes.count,
-        invoices: invoices.count,
-        orders: orders.count,
-        rotations: rotations.count,
-        subscription: subscription.count > 0,
-      };
-    });
+        // Les jetons push partent aussi : sans cela, un appareil continuerait de
+        // recevoir les notifications d'un compte supprimé.
+        await tx.deviceToken.deleteMany({ where: { userId } });
+
+        await tx.user.update({
+          where: { id: userId },
+          data: { deletedAt: now, isActive: false },
+        });
+
+        return {
+          quotes: quotes.count,
+          invoices: invoices.count,
+          orders: orders.count,
+          rotations: rotations.count,
+          subscription: subscription.count > 0,
+        };
+      },
+      // `Serializable` : le garde-fou légal ci-dessus lit puis décide. Sans ce
+      // niveau d'isolement, une facture émise en parallèle resterait invisible
+      // du décompte et le client partirait quand même.
+      { isolationLevel: "Serializable" },
+    );
 
     // Une cascade DOIT laisser une trace : c'est la seule façon de répondre à
     // « où sont passés les devis de ce client ? » trois mois plus tard.

@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma, NotificationChannel, NotificationType } from "@prisma/client";
 import { sendExpoPush, type PushMessage } from "./push.js";
+import { getPushQueue, JOB_PUSH } from "../jobs/push-queue.js";
 
 /**
  * Point d'émission UNIQUE d'une notification IN-APP.
@@ -66,7 +67,10 @@ interface NotificationEnvoyee {
  *   - la pastille iOS porte le nombre réel de notifications non lues. L'index
  *     `(userId, readAt)` existe précisément pour ce comptage.
  */
-async function deliverPush(prisma: PrismaClient, notification: NotificationEnvoyee): Promise<void> {
+export async function deliverPush(
+  prisma: PrismaClient,
+  notification: NotificationEnvoyee,
+): Promise<void> {
   try {
     const appareils = await prisma.deviceToken.findMany({
       where: { userId: notification.userId },
@@ -154,7 +158,19 @@ export async function notify(prisma: PrismaClient, input: NotifyInput): Promise<
   // Le filtrage par canal est fait ICI, une seule fois : `deliverPush` ne
   // relit pas les préférences, il ne les connaît même pas.
   if (effectiveChannel === "PUSH" || effectiveChannel === "BOTH") {
-    await deliverPush(prisma, notification);
+    const queue = getPushQueue();
+    if (queue) {
+      // Sortie du fil de la requête : joindre Expo peut prendre jusqu'à 10 s
+      // (son timeout), et rien ne justifie de faire attendre l'utilisateur qui
+      // vient de valider une commande. La notification, elle, est DÉJÀ écrite —
+      // le badge bouge tout de suite. En prime, BullMQ réessaie trois fois là où
+      // l'appel direct perdait le push au premier hoquet réseau.
+      await queue.add(JOB_PUSH, { notificationId: notification.id });
+    } else {
+      // Ni file ni Redis (tests, scripts, seed) : envoi direct, comportement
+      // identique à celui d'avant.
+      await deliverPush(prisma, notification);
+    }
   }
 
   return { notificationId: notification.id, skipped: false };

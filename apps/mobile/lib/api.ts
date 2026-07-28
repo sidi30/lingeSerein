@@ -893,9 +893,7 @@ export function useCompleteStop() {
 
 /**
  * Une rotation = le cycle « linge propre livré → linge sale repris ».
- * Contrat visé : GET /rotations?mine=1. La route n'existe pas encore côté API
- * (livraison backend en cours) : `useMyRotations` renvoie donc `null` sur 404,
- * et l'écran d'accueil masque simplement la carte.
+ * Contrat : `GET /rotations?mine=1`, déployé côté API.
  */
 /** Miroir de l'enum Prisma RotationStatus (packages/database/prisma/schema.prisma). */
 export type RotationStatus = "PLANIFIEE" | "LIVREE" | "REPRISE" | "EN_RETARD" | "ANNULEE";
@@ -932,14 +930,15 @@ export function useMyRotations() {
         const res = await apiFetch<ApiListRes<Rotation>>("/rotations?mine=1");
         return res.data;
       } catch (e) {
-        // 404 : route pas encore déployée. 403 : rôle sans rotations.
-        if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return null;
+        // 403 seulement : un rôle sans rotations n'en a légitimement aucune, et
+        // la carte se masque. Le 404 n'est PLUS avalé — la route existe, et
+        // continuer à le traiter comme « normal » masquerait une vraie panne
+        // derrière une carte silencieusement absente.
+        if (e instanceof ApiError && e.status === 403) return null;
         throw e;
       }
     },
     enabled: !!token && isClient,
-    // Inutile de réessayer en boucle tant que la route n'existe pas.
-    retry: false,
   });
 }
 

@@ -688,13 +688,20 @@ export class RotationsService {
    *
    * Utilisé par le cron quotidien ET appelé en tête de `list()` côté admin —
    * même filet que `markOverdue` sur les factures.
+   *
+   * **Seule** implémentation de la bascule EN_RETARD et de l'escalade en
+   * remplacement facturable. Le cron `rotation-overdue` l'appelle sans opérateur
+   * — donc sur tous — puis se charge des seules relances, qui elles ne relèvent
+   * pas de l'état.
+   *
+   * @param operatorId Limite à un opérateur. Omis ⇒ TOUS.
    */
-  async markOverdue(operatorId: string, now: Date = new Date()) {
+  async markOverdue(operatorId?: string, now: Date = new Date()) {
     const aujourdhui = startOfDay(now);
 
     const echues = await this.prisma.rotation.findMany({
       where: {
-        operatorId,
+        ...(operatorId ? { operatorId } : {}),
         deletedAt: null,
         dateRepriseReelle: null,
         status: { in: ["PLANIFIEE", "LIVREE", "EN_RETARD"] },

@@ -131,7 +131,7 @@ export class InvoicesService {
         orderBy: { createdAt: "desc" },
         include: {
           user: { select: { id: true, name: true, email: true } },
-          quote: { select: { id: true, numero: true } },
+          quote: { select: { id: true, numero: true, status: true } },
         },
       }),
       this.prisma.invoice.count({ where }),
@@ -296,7 +296,7 @@ export class InvoicesService {
               },
               include: {
                 user: { select: { id: true, name: true, email: true } },
-                quote: { select: { id: true, numero: true } },
+                quote: { select: { id: true, numero: true, status: true } },
               },
             });
           },
@@ -379,7 +379,7 @@ export class InvoicesService {
       data: { status: to, ...sideEffects },
       include: {
         user: { select: { id: true, name: true, email: true } },
-        quote: { select: { id: true, numero: true } },
+        quote: { select: { id: true, numero: true, status: true } },
       },
     });
 
@@ -443,18 +443,31 @@ export class InvoicesService {
   // ---- Passage automatique en OVERDUE ----
 
   /** Filet idempotent : une facture SENT dont l'échéance est passée devient OVERDUE. */
-  async markOverdue(operatorId: string) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  /**
+   * Bascule SENT → OVERDUE des factures dont l'échéance est passée.
+   *
+   * **Seule** implémentation de cette règle — le cron `invoice-overdue` l'appelle
+   * sans opérateur plutôt que d'en garder une copie.
+   *
+   * @param operatorId Limite à un opérateur. Omis ⇒ TOUS.
+   * @param now Injectable pour les tests.
+   */
+  async markOverdue(operatorId?: string, now: Date = new Date()) {
+    // `dueDate` est une DATE sans heure : une facture n'est en retard qu'à
+    // partir du lendemain de son échéance, d'où la comparaison à minuit.
+    const aujourdhui = new Date(now);
+    aujourdhui.setHours(0, 0, 0, 0);
 
-    await this.prisma.invoice.updateMany({
+    const { count } = await this.prisma.invoice.updateMany({
       where: {
-        operatorId,
+        ...(operatorId ? { operatorId } : {}),
         status: "SENT",
         deletedAt: null,
-        dueDate: { lt: today },
+        dueDate: { lt: aujourdhui },
       },
       data: { status: "OVERDUE" },
     });
+
+    return count;
   }
 }

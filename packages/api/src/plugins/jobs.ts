@@ -2,6 +2,7 @@ import fp from "fastify-plugin";
 import type { FastifyInstance } from "fastify";
 import type { Worker } from "bullmq";
 import { createQueue, QUEUE_NAMES } from "../jobs/queue.js";
+import { setPushQueue } from "../jobs/push-queue.js";
 import { createStockAlertWorker } from "../jobs/stock-alert.worker.js";
 import { createNotificationWorker } from "../jobs/notification.worker.js";
 import { createInvoiceWorker, JOB_OVERDUE } from "../jobs/invoice.worker.js";
@@ -30,6 +31,11 @@ export default fp(async (app: FastifyInstance) => {
   const quoteExpiryQueue = createQueue(QUEUE_NAMES.QUOTE_EXPIRY, connection);
   const rotationsQueue = createQueue(QUEUE_NAMES.ROTATIONS, connection);
   const deviceTokensQueue = createQueue(QUEUE_NAMES.DEVICE_TOKENS, connection);
+
+  // `notify()` est appelé depuis les services, qui n'ont pas accès à `app` :
+  // on leur expose la file par ce registre, sans quoi le push resterait dans le
+  // fil de la requête HTTP.
+  setPushQueue(notificationsQueue);
 
   // ---- Workers ----
   const workers: Worker[] = [];
@@ -197,6 +203,10 @@ export default fp(async (app: FastifyInstance) => {
       rotationsQueue.close(),
       deviceTokensQueue.close(),
     ]);
+
+    // Le registre pointe vers une file fermée : le remettre à zéro fait
+    // retomber `notify()` sur l'envoi direct au lieu d'échouer.
+    setPushQueue(null);
 
     app.log.info("BullMQ workers shut down");
   });
