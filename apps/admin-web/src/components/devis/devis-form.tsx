@@ -12,29 +12,27 @@ import { Card } from "@/components/ui/card";
 import { useToast } from "@/lib/toast";
 import { formatPrice, eurosToCents, centsToEuros } from "@/lib/format";
 import {
+  CATALOG_PRODUCTS,
   computeDeliveryFee,
   computeDevisTotals,
   countKits,
-  DELIVERY_DEFAULTS,
   DELIVERY_ZONE_LABELS,
+  URGENCY_TIERS,
+  urgencyTier,
 } from "@lingengo/shared";
-import type { DeliveryZone } from "@lingengo/shared";
+import type { DeliveryZone, UrgencyLevel } from "@lingengo/shared";
 import type { QuoteDTO, UserDTO } from "@/lib/types";
 import { Plus, Trash2, ChevronUp, ChevronDown, Search } from "lucide-react";
 
-/* ─── Catalogue quick-add ─── */
+/* ─── Catalogue quick-add ───
+ * Dérivé du catalogue canonique (@lingengo/shared) : aucun prix n'est retapé ici,
+ * une évolution tarifaire se propage automatiquement au formulaire. */
 
-const CATALOG = [
-  { name: "Kit Bain (drap de bain + serviette + tapis)", cents: 750 },
-  { name: "Kit Lit (housse de couette + drap housse + taies)", cents: 1650 },
-  { name: "Kit Complet (Bain + Lit groupés)", cents: 2200 },
-  { name: "Serviette 50×90", cents: 450 },
-  { name: "Drap de bain 70×150", cents: 650 },
-  { name: "Tapis de bain 50×70", cents: 400 },
-  { name: "Petite serviette 30×50", cents: 250 },
-  { name: "Drap housse", cents: 750 },
-  { name: "Housse de couette", cents: 900 },
-];
+const CATALOG = CATALOG_PRODUCTS.map((p) => ({
+  label: p.name,
+  designation: `${p.name} — ${p.description}`,
+  cents: p.priceCents,
+}));
 
 /* ─── Schéma de validation ─── */
 
@@ -78,10 +76,10 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
   const [clientSearch, setClientSearch] = useState("");
   const [showClientSearch, setShowClientSearch] = useState(false);
 
-  // Barème de livraison : délai + zone → montant. En édition, on part du montant
-  // déjà enregistré (le délai n'est pas persisté) et on ne l'écrase pas tant que
-  // l'utilisateur ne touche pas au barème.
-  const [delaiJours, setDelaiJours] = useState<number>(3);
+  // Barème de livraison : urgence + zone → montant. En édition, on part du montant
+  // déjà enregistré (ni l'urgence ni la zone ne sont persistées) et on ne l'écrase
+  // pas tant que l'utilisateur ne touche pas au barème.
+  const [urgency, setUrgency] = useState<UrgencyLevel>("STANDARD");
   const [zoneLivraison, setZoneLivraison] = useState<DeliveryZone>("PROCHE");
 
   const defaultValues: Partial<FormValues> = initialData
@@ -150,7 +148,8 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
   const livraisonEuros = watch("livraisonEuros");
   const tvaApplicable = watch("tvaApplicable");
 
-  // Tarif de livraison calculé par le barème (urgence J+1/J+2 = 25 €, sinon zone).
+  // Tarif de livraison calculé par le barème : forfait d'urgence (Express 24 h /
+  // Jour même), sinon barème de zone. Flash < 3 h et hors zone → sur devis.
   const deliveryFee = useMemo(() => {
     const lines = lignes.map((l) => ({
       designation: l.designation,
@@ -160,12 +159,14 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
     const sousTotal = lines.reduce((s, l) => s + Math.round(l.qty * l.unitCents), 0);
     const remise = Math.round((sousTotal * ((Number(remisePct) || 0) * 100)) / 10000);
     return computeDeliveryFee({
-      delaiJours: Number(delaiJours) || 0,
+      urgency,
       zone: zoneLivraison,
       montantApresRemiseCents: sousTotal - remise,
       nbKits: countKits(lines),
     });
-  }, [lignes, remisePct, delaiJours, zoneLivraison]);
+  }, [lignes, remisePct, urgency, zoneLivraison]);
+
+  const selectedTier = urgencyTier(urgency);
 
   /** Applique le tarif du barème au champ « frais de livraison ». */
   const applyDeliveryFee = useCallback(
@@ -408,13 +409,13 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
           <div className="flex flex-wrap gap-2">
             {CATALOG.map((c) => (
               <button
-                key={c.name}
+                key={c.designation}
                 type="button"
-                onClick={() => addCatalogItem(c.name, c.cents)}
+                onClick={() => addCatalogItem(c.designation, c.cents)}
                 className="inline-flex items-center gap-1 rounded-full border border-primary-200 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 transition-colors hover:bg-primary-100"
               >
                 <Plus className="h-3 w-3" aria-hidden="true" />
-                {c.name.split(" (")[0]} · {formatPrice(c.cents)}
+                {c.label} · {formatPrice(c.cents)}
               </button>
             ))}
           </div>
@@ -610,74 +611,106 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
                 </div>
               </div>
 
-              {/* ── Barème de livraison ── */}
+              {/* ── Barème de livraison : jauge d'urgence + zone ── */}
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className={labelCls} htmlFor="delaiJours">
-                      Délai de livraison
-                    </label>
-                    <select
-                      id="delaiJours"
-                      className={inputCls}
-                      value={delaiJours}
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        setDelaiJours(v);
-                      }}
-                    >
-                      <option value={1}>J+1 — urgence</option>
-                      <option value={2}>J+2 — urgence</option>
-                      <option value={3}>J+3 et plus — tarif ordinaire</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls} htmlFor="zoneLivraison">
-                      Zone
-                    </label>
-                    <select
-                      id="zoneLivraison"
-                      className={inputCls}
-                      value={zoneLivraison}
-                      onChange={(e) => setZoneLivraison(e.target.value as DeliveryZone)}
-                    >
-                      {(Object.keys(DELIVERY_ZONE_LABELS) as DeliveryZone[]).map((z) => (
-                        <option key={z} value={z}>
-                          {DELIVERY_ZONE_LABELS[z]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <p id="urgence-legend" className={labelCls}>
+                  Urgence de la livraison
+                </p>
+                <div
+                  role="group"
+                  aria-labelledby="urgence-legend"
+                  className="grid grid-cols-2 gap-1.5 sm:grid-cols-4"
+                >
+                  {URGENCY_TIERS.map((tier) => {
+                    const active = urgency === tier.level;
+                    return (
+                      <button
+                        key={tier.level}
+                        type="button"
+                        aria-pressed={active}
+                        title={tier.description}
+                        onClick={() => setUrgency(tier.level)}
+                        className={`rounded-lg border px-2 py-1.5 text-left transition-colors ${
+                          active
+                            ? "border-primary-500 bg-primary-50 text-primary-800"
+                            : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                        }`}
+                      >
+                        <span className="block text-xs font-medium">{tier.label}</span>
+                        <span className="block text-[10px] tabular-nums opacity-80">
+                          {tier.feeCents === null
+                            ? "sur devis"
+                            : tier.feeCents === 0
+                              ? "barème de zone"
+                              : `forfait ${tier.feeCents / 100} €`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] text-gray-500">
+                  {selectedTier.delaiText} — {selectedTier.description}
+                </p>
+
+                <div className="mt-3">
+                  <label className={labelCls} htmlFor="zoneLivraison">
+                    Zone
+                  </label>
+                  <select
+                    id="zoneLivraison"
+                    className={inputCls}
+                    value={zoneLivraison}
+                    onChange={(e) => setZoneLivraison(e.target.value as DeliveryZone)}
+                  >
+                    {(Object.keys(DELIVERY_ZONE_LABELS) as DeliveryZone[]).map((z) => (
+                      <option key={z} value={z}>
+                        {DELIVERY_ZONE_LABELS[z]}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-gray-600">
-                    Tarif du barème :{" "}
-                    <strong className="text-gray-900">
-                      {deliveryFee.cents === 0 ? "offerte" : formatPrice(deliveryFee.cents)}
-                    </strong>{" "}
-                    — {deliveryFee.label}
-                  </span>
-                  {deliveryFee.urgent && (
-                    <span className="rounded-full bg-warning-50 px-2 py-0.5 font-medium text-warning-600">
-                      Urgence {DELIVERY_DEFAULTS.URGENT_FEE_CENTS / 100} €
+                {deliveryFee.surDevis ? (
+                  <div className="mt-3 rounded-lg border border-warning-500 bg-warning-50 p-2.5 text-xs text-warning-600">
+                    <p className="font-medium">Sur devis — aucun tarif public</p>
+                    <p className="mt-1">
+                      {deliveryFee.label}. Chiffrez la course vous-même et saisissez le montant
+                      convenu dans « Frais de livraison » ci-dessous.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-gray-600">
+                      Tarif du barème :{" "}
+                      <strong className="text-gray-900">
+                        {deliveryFee.cents === 0 ? "offerte" : formatPrice(deliveryFee.cents)}
+                      </strong>{" "}
+                      — {deliveryFee.label}
                     </span>
-                  )}
-                  {!feeApplied && (
-                    <button
-                      type="button"
-                      onClick={() => applyDeliveryFee(deliveryFee)}
-                      className="rounded-full border border-primary-300 px-2.5 py-0.5 font-medium text-primary-700 hover:bg-primary-50"
-                    >
-                      Appliquer
-                    </button>
-                  )}
-                </div>
+                    {deliveryFee.urgent && (
+                      <span className="rounded-full bg-warning-50 px-2 py-0.5 font-medium text-warning-600">
+                        Forfait d&apos;urgence — ni dégressif ni offert
+                      </span>
+                    )}
+                    {!feeApplied && (
+                      <button
+                        type="button"
+                        onClick={() => applyDeliveryFee(deliveryFee)}
+                        className="rounded-full border border-primary-300 px-2.5 py-0.5 font-medium text-primary-700 hover:bg-primary-50"
+                      >
+                        Appliquer
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
                 <label className={labelCls} htmlFor="livraisonEuros">
-                  Frais de livraison (€)
+                  Frais de livraison (€){" "}
+                  {deliveryFee.surDevis && (
+                    <span className="font-normal text-warning-600">— à chiffrer</span>
+                  )}
                 </label>
                 <input
                   id="livraisonEuros"
@@ -689,7 +722,9 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
                 />
                 <p className="mt-1 text-xs text-gray-500">
                   Montant facturé, repris tel quel sur le devis puis sur le contrat.
-                  {!feeApplied && " Diffère du tarif du barème ci-dessus."}
+                  {deliveryFee.surDevis
+                    ? " Livraison sur devis : précisez les conditions dans les notes, elles ne sont pas déduites du barème."
+                    : !feeApplied && " Diffère du tarif du barème ci-dessus."}
                 </p>
               </div>
 

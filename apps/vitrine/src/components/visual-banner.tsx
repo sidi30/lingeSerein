@@ -70,8 +70,8 @@ export function VisualBanner() {
                 transition={{ delay: 0.45, duration: 0.6 }}
                 className="text-white/80 text-lg leading-relaxed mb-8"
               >
-                Depuis Orange, nos véhicules sillonnent le Vaucluse chaque jour pour vous livrer un
-                linge d&apos;une fraîcheur et d&apos;une propreté irréprochables.
+                Depuis Orange, nos véhicules sillonnent la ville et ses communes limitrophes pour
+                vous livrer un linge d&apos;une fraîcheur et d&apos;une propreté irréprochables.
               </motion.p>
               <motion.div
                 initial={{ opacity: 0, y: 12 }}

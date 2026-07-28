@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/lib/toast";
 import { centsToEuros, eurosToCents } from "@/lib/format";
+import { SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
 import type { DeliveryZoneDTO, OperatorDTO, StockThresholdDTO } from "@/lib/types";
 import { Plus, Edit, Trash2, MapPin, Building2, Package, RefreshCw } from "lucide-react";
 import type { SubscriptionConfigDTO } from "@/lib/types";
@@ -281,6 +282,25 @@ const operatorSchema = z.object({
     .optional()
     .or(z.literal("")),
   legalMentions: z.string().optional().or(z.literal("")),
+  // Mêmes contrôles de forme que l'API, sur la valeur normalisée : l'IBAN se
+  // saisit par groupes de 4, refuser les espaces ferait échouer un copier-coller
+  // valide. Contrôle de forme seulement, pas de clé mod-97.
+  iban: z
+    .string()
+    .optional()
+    .or(z.literal(""))
+    .refine(
+      (v) => !v || /^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/.test(v.replace(/\s+/g, "").toUpperCase()),
+      "Format d'IBAN invalide (ex. FR76 3000 6000 0112 3456 7890 189)",
+    ),
+  bic: z
+    .string()
+    .optional()
+    .or(z.literal(""))
+    .refine(
+      (v) => !v || /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/.test(v.replace(/\s+/g, "").toUpperCase()),
+      "Format de BIC invalide (8 ou 11 caractères, ex. AGRIFRPP)",
+    ),
 });
 type OperatorValues = z.infer<typeof operatorSchema>;
 
@@ -307,6 +327,8 @@ function OperateurTab() {
           address: operator.address ?? "",
           siret: operator.siret ?? "",
           legalMentions: operator.legalMentions ?? "",
+          iban: operator.iban ?? "",
+          bic: operator.bic ?? "",
         }
       : undefined,
   });
@@ -323,6 +345,8 @@ function OperateurTab() {
         address: values.address || null,
         siret: values.siret || null,
         legalMentions: values.legalMentions || null,
+        iban: values.iban || null,
+        bic: values.bic || null,
       }),
     onSuccess: () => {
       toast("Informations enregistrées");
@@ -389,6 +413,46 @@ function OperateurTab() {
         />
         {errors.siret && <p className={errorCls}>{errors.siret.message}</p>}
       </div>
+
+      {/* Coordonnées bancaires — reprises sur chaque facture émise */}
+      <fieldset className="space-y-4">
+        <legend className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+          Coordonnées bancaires
+        </legend>
+        <p className="text-xs text-gray-500">
+          Imprimées sur les factures, en modalités de règlement. Elles sont figées sur chaque
+          facture au moment de son émission : en changer plus tard ne modifie pas les factures déjà
+          envoyées.
+        </p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls} htmlFor="op-iban">
+              IBAN
+            </label>
+            <input
+              id="op-iban"
+              className={inputCls}
+              placeholder="FR76 3000 6000 0112 3456 7890 189"
+              {...register("iban")}
+            />
+            {errors.iban && <p className={errorCls}>{errors.iban.message}</p>}
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="op-bic">
+              BIC
+            </label>
+            <input
+              id="op-bic"
+              className={inputCls}
+              placeholder="AGRIFRPP"
+              maxLength={11}
+              {...register("bic")}
+            />
+            {errors.bic && <p className={errorCls}>{errors.bic.message}</p>}
+          </div>
+        </div>
+      </fieldset>
+
       <div>
         <label className={labelCls} htmlFor="op-legal">
           Mentions légales
@@ -647,6 +711,14 @@ function AbonnementTab() {
           <legend className="text-xs font-semibold uppercase tracking-wider text-gray-500">
             Composition mensuelle incluse
           </legend>
+          <p className="text-xs text-gray-500">
+            Quantités <strong>mensuelles</strong>, livrées en{" "}
+            {SUBSCRIPTION_DEFAULTS.DELIVERIES_PER_MONTH} passages (un par quinzaine) :{" "}
+            {SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY_PER_PASSAGE} kits bain +{" "}
+            {SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY_PER_PASSAGE} kits lit par passage pour la dotation
+            standard. Le linge livré est repris au passage suivant, sous{" "}
+            {SUBSCRIPTION_DEFAULTS.MAX_LINEN_KEEP_DAYS} jours maximum.
+          </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className={labelCls} htmlFor="sub-kit-bain">

@@ -22,7 +22,7 @@ export default function CGV() {
         Téléphone : <a href="tel:+33753569548">07 53 56 95 48</a> | Email :{" "}
         <a href="mailto:lingeserein@gmail.com">lingeserein@gmail.com</a>
         <br />
-        Zone de livraison : Vaucluse
+        Zone de livraison : Orange et communes limitrophes — au-delà, sur devis
       </p>
 
       <h2>Article 1 — Objet</h2>
@@ -97,23 +97,44 @@ export default function CGV() {
             <td>16,50 €</td>
           </tr>
           <tr>
+            <td>Kit Complet (bain + lit + 2 serviettes 50×90)</td>
+            <td>29,00 €</td>
+          </tr>
+          <tr>
             <td>Livraison à Orange (dès 4 kits)</td>
             <td>Offerte</td>
           </tr>
           <tr>
-            <td>Livraison dès 120 € de commande (alentours)</td>
+            <td>Livraison dès 120 € de commande</td>
             <td>Offerte</td>
           </tr>
           <tr>
-            <td>Livraison zone proche</td>
+            <td>Livraison standard (J+2 à J+3) — Orange et communes limitrophes</td>
             <td>12,00 €</td>
           </tr>
           <tr>
-            <td>Livraison zone élargie</td>
-            <td>15,00 €</td>
+            <td>Livraison au-delà des communes limitrophes</td>
+            <td>Sur devis</td>
+          </tr>
+          <tr>
+            <td>Forfait Express 24 h (livraison le lendemain)</td>
+            <td>25,00 €</td>
+          </tr>
+          <tr>
+            <td>Forfait Jour même (sous 8 h, commande avant 12 h, selon disponibilité)</td>
+            <td>39,00 €</td>
+          </tr>
+          <tr>
+            <td>Livraison Flash (moins de 3 h, selon disponibilité)</td>
+            <td>Sur devis</td>
           </tr>
         </tbody>
       </table>
+
+      <p>
+        Les forfaits d&apos;urgence sont fixes : ils remplacent le tarif de zone et ne sont soumis
+        ni aux remises, ni aux seuils de gratuité de la livraison.
+      </p>
 
       <h2>Article 6 — Modalités de paiement</h2>
       <p>

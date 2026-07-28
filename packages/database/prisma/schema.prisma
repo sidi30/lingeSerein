@@ -177,6 +177,11 @@ model Operator {
   address       String?   @db.Text // chiffré AES-256 en application
   siret         String?   @map("siret") @db.VarChar(14) // SIRET 14 chiffres
   legalMentions String?   @map("legal_mentions") @db.Text // mentions légales PDF devis
+  // Coordonnées bancaires imprimées sur les factures. Stockées normalisées
+  // (sans espaces, en majuscules) : 34 = longueur IBAN maximale (norme ISO 13616),
+  // 11 = BIC long (8 caractères + branche facultative sur 3).
+  iban          String?   @db.VarChar(34)
+  bic           String?   @db.VarChar(11)
   isActive      Boolean   @default(true) @map("is_active")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
@@ -534,6 +539,7 @@ model Quote {
   creator  User        @relation("QuoteCreator", fields: [createdBy], references: [id])
   order    Order?      @relation("QuoteOrder", fields: [convertedToOrderId], references: [id])
   lignes   QuoteLine[]
+  invoices Invoice[]
 
   @@index([operatorId])
   @@index([status])
@@ -681,18 +687,32 @@ model OperatorStock {
 // ============================================================================
 
 /// Facture (Factur-X : PDF/A-3 + XML CII)
+/// Facture.
+///
+/// Deux origines cohabitent sur la même table et la même séquence de numérotation :
+///  - facturation d'ABONNEMENT (worker mensuel) : `userId` + `periodStart`/`periodEnd` ;
+///  - facturation d'un DEVIS B2B (admin) : `quoteId` + snapshot client dénormalisé,
+///    le client n'ayant souvent aucun compte dans `users`.
+/// D'où la nullabilité de `userId` et de la période : ce sont des champs propres à
+/// l'un ou l'autre cas, jamais aux deux. Le snapshot client (clientNom/Email/Adresse)
+/// suit la même logique que Quote — une facture émise ne doit pas changer si la
+/// fiche client est modifiée plus tard.
 model Invoice {
   id                    String        @id @default(uuid()) @db.Uuid
   operatorId            String        @map("operator_id") @db.Uuid
-  userId                String        @map("user_id") @db.Uuid
-  invoiceNumber         String        @unique @map("invoice_number") @db.VarChar(30) // ex: FACT-2026-000001
+  userId                String?       @map("user_id") @db.Uuid // null : client sans compte (facture issue d'un devis)
+  quoteId               String?       @map("quote_id") @db.Uuid // devis source, si la facture en découle
+  invoiceNumber         String        @unique @map("invoice_number") @db.VarChar(30) // ex: FACT-2026-0001
   status                InvoiceStatus @default(DRAFT)
+  clientNom             String?       @map("client_nom") @db.VarChar(200) // snapshot figé à l'émission
+  clientEmail           String?       @map("client_email") @db.VarChar(320)
+  clientAdresse         String?       @map("client_adresse") @db.Text
   totalHtCents          Int           @map("total_ht_cents") // HT en centimes
-  vatRate               Int           @default(2000) @map("vat_rate") // 20.00% → 2000
+  vatRate               Int           @default(2000) @map("vat_rate") // 20.00% → 2000 ; 0 si art. 293 B CGI
   vatAmountCents        Int           @map("vat_amount_cents")
   totalTtcCents         Int           @map("total_ttc_cents") // TTC en centimes
-  periodStart           DateTime      @map("period_start") @db.Date
-  periodEnd             DateTime      @map("period_end") @db.Date
+  periodStart           DateTime?     @map("period_start") @db.Date // abonnement uniquement
+  periodEnd             DateTime?     @map("period_end") @db.Date // abonnement uniquement
   dueDate               DateTime      @map("due_date") @db.Date
   paidAt                DateTime?     @map("paid_at")
   stripeInvoiceId       String?       @unique @map("stripe_invoice_id") @db.VarChar(255)
@@ -702,11 +722,17 @@ model Invoice {
   metadata              Json          @default("{}") @db.JsonB // lignes de détail, mentions légales
   createdAt             DateTime      @default(now()) @map("created_at")
   updatedAt             DateTime      @updatedAt @map("updated_at")
+  deletedAt             DateTime?     @map("deleted_at") // soft-delete BROUILLON only (obligation de conservation)
 
   operator Operator @relation(fields: [operatorId], references: [id])
-  user     User     @relation(fields: [userId], references: [id])
+  // onDelete: Restrict explicite — le défaut Prisma d'une relation optionnelle est
+  // SET NULL, qui viderait le client ou le devis source d'une facture déjà émise.
+  // Une facture est une pièce comptable : elle ne doit jamais perdre son rattachement.
+  user  User?  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  quote Quote? @relation(fields: [quoteId], references: [id], onDelete: Restrict)
 
   @@index([userId])
+  @@index([quoteId])
   @@index([status])
   @@index([periodStart, periodEnd])
   @@index([invoiceNumber])

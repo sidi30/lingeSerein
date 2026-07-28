@@ -76,3 +76,36 @@ export async function createUser(
 
   return { user: { id: users[0].id }, temporaryPassword };
 }
+
+/** Fait transiter un devis vers un statut (BROUILLON → ENVOYE → ACCEPTE). */
+export async function setQuoteStatus(quoteId: string, status: string): Promise<void> {
+  const { status: httpStatus, json } = await apiRequest("PATCH", `/quotes/${quoteId}/status`, {
+    status,
+  });
+  if (httpStatus !== 200) {
+    throw new Error(`setQuoteStatus(${status}) failed: ${httpStatus} ${JSON.stringify(json)}`);
+  }
+}
+
+/**
+ * Crée un devis puis l'amène au statut voulu. Les transitions sont séquentielles
+ * (la machine à états n'autorise pas BROUILLON → ACCEPTE directement).
+ */
+export async function createQuoteWithStatus(
+  status: "BROUILLON" | "ENVOYE" | "ACCEPTE",
+  overrides: Record<string, unknown> = {},
+): Promise<{ id: string; numero: string }> {
+  const quote = await createQuote(overrides);
+  if (status === "BROUILLON") return quote;
+  await setQuoteStatus(quote.id, "ENVOYE");
+  if (status === "ACCEPTE") await setQuoteStatus(quote.id, "ACCEPTE");
+  return quote;
+}
+
+/** Émet une facture depuis un devis. Retourne le statut HTTP et le corps brut. */
+export async function invoiceFromQuote(
+  quoteId: string,
+  body: Record<string, unknown> = {},
+): Promise<{ status: number; json: unknown }> {
+  return apiRequest("POST", `/invoices/from-quote/${quoteId}`, body);
+}

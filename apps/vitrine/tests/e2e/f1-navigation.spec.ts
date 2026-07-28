@@ -29,7 +29,7 @@ test.describe("F1 — Navigation navbar", () => {
     await expect(devisLink).toBeVisible();
     await devisLink.click();
     await expect(page).toHaveURL("/devis");
-    await expect(page.locator("h1")).toContainText(/simulateur/i);
+    await expect(page.locator("h1")).toContainText(/votre devis en 2 minutes/i);
   });
 
   test("F1-04 — Logo navbar renvoie vers la page d'accueil", async ({ page }) => {

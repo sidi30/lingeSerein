@@ -7,7 +7,7 @@
  * NON utilisable côté serveur (Node/Fastify) — contient du JSX React.
  *
  * Deux variantes rendues selon `data.type` :
- *  - ABONNEMENT : contrat Pack Sérénité (4 pages, articles 1..15 + annexe barème) ;
+ *  - ABONNEMENT : contrat Pack Sérénité (4 pages, articles 1..16 + annexe barème) ;
  *  - PONCTUEL   : contrat de prestation ponctuelle (sans engagement), qui conserve
  *                 les clauses protectrices (propriété, responsabilité, barème…).
  */
@@ -16,56 +16,22 @@ import { Document, Page, Text, View, Image, StyleSheet, pdf } from "@react-pdf/r
 import type { ContractData } from "@lingengo/shared";
 import {
   BLANK_PLACEHOLDER,
+  CATALOG_DEFAULTS,
   DELIVERY_RULE_TEXT,
+  SERVICE_DELAY_TEXT,
+  SUBSCRIPTION_DEFAULTS,
   checkContractTotals,
   printableField,
   resolveLivraisonLabel,
+  urgencyTier,
 } from "@lingengo/shared";
 import { LOGO_DATA_URI } from "./logo";
+import { resolvePrestataire } from "./operator";
+import type { OperatorInfo } from "./operator";
 
-/* ─── Opérateur / identité légale (override optionnel, mirroir de devis-pdf) ─── */
+/* ─── Opérateur / identité légale — source unique dans ./operator ─── */
 
-export interface OperatorInfo {
-  nom?: string;
-  adresse?: string;
-  tel?: string;
-  email?: string;
-  siret?: string | null;
-  legalMentions?: string | null;
-}
-
-/* ─── Prestataire (identité légale — source de vérité, défaut Serein Act) ─── */
-
-const PRESTATAIRE = {
-  nomCommercial: "Linge Serein",
-  raisonSociale: "Serein Act",
-  representant: "Rayana Mahaman Moustapha",
-  forme: "Entreprise individuelle",
-  siren: "105 368 047",
-  siret: "105 368 047 00012",
-  ape: "9609Z (autres services personnels)",
-  aprm: "96.01B-Q (laveries, blanchisserie et teintureries de détail)",
-  rne: "02/06/2026",
-  adresse: "343 rue Simone Weil, 84100 Orange, France",
-  email: "lingeserein@gmail.com",
-  tel: "07 53 56 95 48",
-};
-
-/**
- * Résout l'identité du prestataire en fusionnant un éventuel override
- * `operator`. Les champs légaux (SIREN, forme, représentant…) restent ceux
- * de Serein Act tant qu'ils ne sont pas fournis — OperatorInfo ne les porte pas.
- */
-function resolvePrestataire(operator?: OperatorInfo) {
-  return {
-    ...PRESTATAIRE,
-    nomCommercial: operator?.nom ?? PRESTATAIRE.nomCommercial,
-    adresse: operator?.adresse ?? PRESTATAIRE.adresse,
-    email: operator?.email ?? PRESTATAIRE.email,
-    tel: operator?.tel ?? PRESTATAIRE.tel,
-    siret: operator?.siret ?? PRESTATAIRE.siret,
-  };
-}
+export type { OperatorInfo } from "./operator";
 
 /* ─── Barème de remplacement du linge (valeur à neuf, indicatif) ─── */
 
@@ -98,6 +64,38 @@ function euros(cents: number): string {
       maximumFractionDigits: 2,
     }) + " €"
   );
+}
+
+/**
+ * Rythme de la dotation d'abonnement. Le contrat fait foi sur SES propres
+ * quantités (`data`) : les constantes {@link SUBSCRIPTION_DEFAULTS} ne servent
+ * que de repli quand la dotation n'est pas renseignée. `cadence` n'est « par
+ * quinzaine » que lorsqu'il y a effectivement deux passages dans le mois.
+ */
+function rythmeAbonnement(data: ContractData) {
+  const passages =
+    data.livraisonsIncluses > 0
+      ? data.livraisonsIncluses
+      : SUBSCRIPTION_DEFAULTS.DELIVERIES_PER_MONTH;
+  return {
+    passages,
+    kitsBainParPassage:
+      Math.round(data.kitsBain / passages) || SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY_PER_PASSAGE,
+    kitsLitParPassage:
+      Math.round(data.kitsLit / passages) || SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY_PER_PASSAGE,
+    cadence: passages === 2 ? "par quinzaine" : "par passage",
+  };
+}
+
+/**
+ * Niveau de service livraison retenu sur le devis, s'il est connu :
+ * `label` = « Express 24 h », `note` = « Niveau de service : Express 24 h —
+ * livraison le lendemain (J+1) ».
+ */
+function serviceLevel(data: ContractData): { label: string; note: string } | null {
+  if (!data.urgency) return null;
+  const tier = urgencyTier(data.urgency);
+  return { label: tier.label, note: `Niveau de service : ${tier.label} — ${tier.delaiText}` };
 }
 
 /* ─── Styles ─── */
@@ -258,6 +256,7 @@ const styles = StyleSheet.create({
   detailRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 },
   detailLabel: { fontSize: 8, color: GRAY },
   detailValue: { fontSize: 8, color: INK, textAlign: "right" },
+  detailNote: { fontSize: 7.5, color: LAVENDER, fontFamily: "Helvetica-Oblique", marginTop: 1 },
   detailDivider: { height: 0.75, backgroundColor: LINE, marginVertical: 4 },
   /* Signatures */
   signWrap: { flexDirection: "row", justifyContent: "space-between", marginTop: 16, gap: 24 },
@@ -608,6 +607,9 @@ function AbonnementBody({
   const depot = data.depotGarantieCents > 0 ? euros(data.depotGarantieCents) : null;
   const showSource = !!data.devisNumero && !!data.nbMensualitesDevis;
   const livraisonLabel = resolveLivraisonLabel(data);
+  const niveauService = serviceLevel(data);
+  const { passages, kitsBainParPassage, kitsLitParPassage, cadence } = rythmeAbonnement(data);
+  const detentionJours = SUBSCRIPTION_DEFAULTS.MAX_LINEN_KEEP_DAYS;
 
   return (
     <Page size="A4" style={styles.page}>
@@ -651,14 +653,30 @@ function AbonnementBody({
         <View style={styles.synthRow}>
           <Text style={styles.synthLabel}>Dotation mensuelle incluse</Text>
           <Text style={styles.synthValue}>
-            {data.kitsBain} kits bain + {data.kitsLit} kits lit + {data.livraisonsIncluses}{" "}
-            livraison &amp; reprise
+            {data.kitsBain} kits bain + {data.kitsLit} kits lit
           </Text>
+        </View>
+        <View style={styles.synthRow}>
+          <Text style={styles.synthLabel}>Rythme des passages</Text>
+          <Text style={styles.synthValue}>
+            {passages} livraisons &amp; reprises / mois ({kitsBainParPassage} kits bain +{" "}
+            {kitsLitParPassage} kits lit {cadence})
+          </Text>
+        </View>
+        <View style={styles.synthRow}>
+          <Text style={styles.synthLabel}>Détention du linge</Text>
+          <Text style={styles.synthValue}>{detentionJours} jours maximum</Text>
         </View>
         {data.livraisonCents > 0 && (
           <View style={styles.synthRow}>
             <Text style={styles.synthLabel}>{livraisonLabel}</Text>
             <Text style={styles.synthValue}>{euros(data.livraisonCents)}</Text>
+          </View>
+        )}
+        {!!niveauService && (
+          <View style={styles.synthRow}>
+            <Text style={styles.synthLabel}>Niveau de service</Text>
+            <Text style={styles.synthValue}>{niveauService.label}</Text>
           </View>
         )}
         <View style={styles.synthRow}>
@@ -705,7 +723,7 @@ function AbonnementBody({
         )}
       </Article>
 
-      <Article titre="Article 2 — Contenu et dotation mensuelle">
+      <Article titre="Article 2 — Contenu, dotation mensuelle et rythme des passages">
         <P>
           Chaque mensualité d&apos;abonnement donne droit à une dotation forfaitaire comprenant :
         </P>
@@ -714,16 +732,27 @@ function AbonnementBody({
           {data.kitsLit} kits lit (housse de couette, drap housse et taie(s)) par mois ;
         </Bullet>
         <Bullet>
-          {data.livraisonsIncluses} livraison et reprise incluse(s) par mois, sur la zone desservie
-          ;
+          la livraison de cette dotation en {passages} passages, soit {kitsBainParPassage} kits bain
+          et {kitsLitParPassage} kits lit {cadence} ;
+        </Bullet>
+        <Bullet>
+          {passages} livraisons et reprises incluses par mois sur la zone desservie : chaque passage
+          comprend la livraison du linge propre et la reprise du linge utilisé remis au passage
+          précédent ;
         </Bullet>
         <Bullet>l&apos;entretien complet du linge en blanchisserie professionnelle.</Bullet>
+        <P>
+          Le linge remis au Client lors d&apos;un passage est restitué au Prestataire au passage
+          suivant : il ne peut être conservé plus de {detentionJours} jours (article 7).
+        </P>
         <P>
           La dotation mensuelle est forfaitaire, nominative et non cessible. Les kits ou services
           non consommés au cours d&apos;un mois ne sont ni reportés sur le mois suivant, ni
           remboursés. Tout kit, article ou livraison supplémentaire au-delà de la dotation mensuelle
-          incluse est commandé séparément et facturé au tarif normal en vigueur (à titre indicatif :
-          kit bain 7,50 €, kit lit 16,50 € par rotation), en sus de l&apos;abonnement.
+          incluse est commandé séparément et facturé au tarif à l&apos;unité en vigueur (à titre
+          indicatif : kit bain {euros(CATALOG_DEFAULTS.KIT_BAIN_CENTS)}, kit lit{" "}
+          {euros(CATALOG_DEFAULTS.KIT_LIT_CENTS)}, kit complet bain + lit{" "}
+          {euros(CATALOG_DEFAULTS.KIT_COMPLET_CENTS)} par rotation), en sus de l&apos;abonnement.
         </P>
       </Article>
 
@@ -801,15 +830,38 @@ function AbonnementBody({
         </P>
       </Article>
 
-      <Article titre="Article 7 — Obligations et responsabilité du Client">
+      <Article titre="Article 7 — Durée de détention du linge et restitution">
+        <P>
+          Le linge remis au Client lors d&apos;un passage est destiné à être restitué au Prestataire
+          lors du passage suivant. Il ne peut en aucun cas être conservé plus de {detentionJours}{" "}
+          jours consécutifs à compter de sa livraison.
+        </P>
+        <P>
+          Lorsque, du fait du Client (absence, logement inaccessible, créneau refusé, linge non
+          rassemblé ou non restitué), la reprise n&apos;a pu être effectuée dans ce délai de{" "}
+          {detentionJours} jours, les kits concernés cessent d&apos;être couverts par la dotation
+          mensuelle : ils sont facturés au tarif à l&apos;unité en vigueur (à titre indicatif : kit
+          bain {euros(CATALOG_DEFAULTS.KIT_BAIN_CENTS)}, kit lit{" "}
+          {euros(CATALOG_DEFAULTS.KIT_LIT_CENTS)} par rotation), en sus de l&apos;abonnement, pour
+          chaque rotation entamée jusqu&apos;à leur restitution effective. Cette facturation ne
+          prive pas le Prestataire de la faculté d&apos;appliquer le barème de remplacement figurant
+          en annexe si le linge n&apos;est pas restitué.
+        </P>
+        <P>
+          La dotation du passage suivant demeure due et est livrée normalement : le retard de
+          restitution imputable au Client n&apos;ouvre droit à aucun report, avoir ni remboursement.
+        </P>
+      </Article>
+
+      <Article titre="Article 8 — Obligations et responsabilité du Client">
         <P>Le Client s&apos;engage à :</P>
         <Bullet>
           utiliser le linge conformément à sa destination et en bon père de famille, exclusivement
           dans le logement desservi ;
         </Bullet>
         <Bullet>
-          restituer au Prestataire, lors de chaque reprise, l&apos;intégralité du linge mis à
-          disposition ;
+          restituer au Prestataire, lors de chaque reprise et dans le délai prévu à l&apos;article
+          7, l&apos;intégralité du linge mis à disposition ;
         </Bullet>
         <Bullet>
           permettre l&apos;accès au logement aux créneaux convenus pour la livraison et la reprise ;
@@ -827,16 +879,18 @@ function AbonnementBody({
         </P>
       </Article>
 
-      <Article titre="Article 8 — Livraison, reprise et annulation">
+      <Article titre="Article 9 — Livraison, reprise et annulation">
         <P>
           Les livraisons et reprises sont effectuées sur la zone desservie, aux créneaux convenus
           d&apos;un commun accord en fonction des arrivées et départs des voyageurs du Client. Le
-          linge est livré propre, plié et emballé ; la reprise du linge sale s&apos;effectue lors de
-          la livraison suivante.
+          linge est livré propre, plié et emballé ; la reprise du linge utilisé s&apos;effectue lors
+          du passage suivant, dans les conditions de l&apos;article 7.
         </P>
+        <P>Délais de service — {SERVICE_DELAY_TEXT.ABONNEMENT}</P>
         <P>
-          Au-delà des {data.livraisonsIncluses} livraison(s) et reprise(s) incluses dans la dotation
-          mensuelle, toute livraison supplémentaire est facturée en sus. {DELIVERY_RULE_TEXT}
+          Au-delà des {passages} livraisons et reprises incluses dans la dotation mensuelle, toute
+          livraison supplémentaire est commandée séparément et facturée en sus. {DELIVERY_RULE_TEXT}
+          {niveauService ? ` ${niveauService.note}.` : ""}
         </P>
         <P>
           Toute annulation ou modification d&apos;un créneau par le Client moins de vingt-quatre
@@ -846,15 +900,15 @@ function AbonnementBody({
         </P>
       </Article>
 
-      <Article titre="Article 9 — Dépôt de garantie">
+      <Article titre="Article 10 — Dépôt de garantie">
         <P>
           {depot
-            ? `À la signature du contrat, le Client verse un dépôt de garantie de ${depot}, destiné à couvrir les sommes dues au titre du linge perdu, non restitué ou détérioré (article 7) ainsi que tout impayé. Ce dépôt ne porte pas intérêt et est restitué au Client dans les trente (30) jours suivant la fin du contrat, déduction faite des sommes éventuellement dues. Le versement du dépôt ne limite pas le montant réclamable au Client.`
+            ? `À la signature du contrat, le Client verse un dépôt de garantie de ${depot}, destiné à couvrir les sommes dues au titre du linge perdu, non restitué ou détérioré (articles 7 et 8) ainsi que tout impayé. Ce dépôt ne porte pas intérêt et est restitué au Client dans les trente (30) jours suivant la fin du contrat, déduction faite des sommes éventuellement dues. Le versement du dépôt ne limite pas le montant réclamable au Client.`
             : "Le présent contrat ne prévoit pas de dépôt de garantie. Le Prestataire se réserve la faculté d'en demander la constitution en cas de sinistres répétés sur le linge ou d'incidents de paiement."}
         </P>
       </Article>
 
-      <Article titre="Article 10 — Assurance">
+      <Article titre="Article 11 — Assurance">
         <P>
           Le Client fait son affaire de l&apos;assurance du linge mis à sa disposition pendant la
           durée de sa détention, contre les risques de vol, incendie, dégât des eaux et
@@ -866,7 +920,7 @@ function AbonnementBody({
       {/* ─────────── TITRE IV — RESPONSABILITÉ & FIN DU CONTRAT ─────────── */}
       <SectionTitle>Titre IV — Responsabilité &amp; fin du contrat</SectionTitle>
 
-      <Article titre="Article 11 — Obligations et responsabilité du Prestataire">
+      <Article titre="Article 12 — Obligations et responsabilité du Prestataire">
         <P>
           Le Prestataire est tenu d&apos;une obligation de moyens. Il s&apos;engage à fournir un
           linge propre et entretenu selon les standards de la blanchisserie professionnelle et à
@@ -885,7 +939,7 @@ function AbonnementBody({
         </P>
       </Article>
 
-      <Article titre="Article 12 — Résiliation pour manquement">
+      <Article titre="Article 13 — Résiliation pour manquement">
         <P>
           En cas de manquement grave de l&apos;une des Parties à ses obligations (notamment
           non-paiement, non-restitution du linge, dégradations répétées), non réparé dans un délai
@@ -900,7 +954,7 @@ function AbonnementBody({
       {/* ─────────────── TITRE V — DISPOSITIONS GÉNÉRALES ─────────────── */}
       <SectionTitle>Titre V — Dispositions générales</SectionTitle>
 
-      <Article titre="Article 13 — Données personnelles">
+      <Article titre="Article 14 — Données personnelles">
         <P>
           Les données personnelles du Client sont collectées et traitées par le Prestataire pour les
           seuls besoins de l&apos;exécution du contrat, de la facturation et de la relation client,
@@ -911,7 +965,7 @@ function AbonnementBody({
         </P>
       </Article>
 
-      <Article titre="Article 14 — Dispositions diverses">
+      <Article titre="Article 15 — Dispositions diverses">
         <P>
           Le présent contrat, avec son annexe, exprime l&apos;intégralité de l&apos;accord des
           Parties et prévaut sur tout échange antérieur. Toute modification fait l&apos;objet
@@ -924,7 +978,7 @@ function AbonnementBody({
         )}
       </Article>
 
-      <Article titre="Article 15 — Droit applicable et litiges">
+      <Article titre="Article 16 — Droit applicable et litiges">
         <P>
           Le présent contrat est régi par le droit français. En cas de différend, les Parties
           s&apos;efforceront de trouver une solution amiable avant toute action contentieuse. À
@@ -968,6 +1022,7 @@ function PonctuelBody({
   const total = euros(data.totalCents);
   const totalHT = data.sousTotalCents - data.remiseCents + data.livraisonCents;
   const livraisonLabel = resolveLivraisonLabel(data);
+  const niveauService = serviceLevel(data);
   // Mode « à compléter » : quelques lignes vierges pour ajouter des prestations au stylo.
   const blankRows = data.blankFields ? Array.from({ length: 4 }) : [];
 
@@ -1064,6 +1119,7 @@ function PonctuelBody({
                 {data.livraisonCents === 0 ? "Offerte" : euros(data.livraisonCents)}
               </Text>
             </View>
+            {!!niveauService && <Text style={styles.detailNote}>{niveauService.note}</Text>}
             <View style={styles.detailDivider} />
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Total HT</Text>
@@ -1149,12 +1205,14 @@ function PonctuelBody({
         <P>
           La livraison et la reprise sont effectuées sur la zone desservie, aux créneaux convenus
           d&apos;un commun accord. Le linge est livré propre, plié et emballé ; la reprise du linge
-          sale s&apos;effectue au créneau convenu.
+          utilisé s&apos;effectue au créneau convenu.
         </P>
+        <P>Délais de service — {SERVICE_DELAY_TEXT.PONCTUEL}</P>
         <P>
           {DELIVERY_RULE_TEXT} Le montant retenu pour la présente commande figure au détail
           financier de l&apos;article 2 ({livraisonLabel} :{" "}
-          {data.livraisonCents === 0 ? "offerte" : euros(data.livraisonCents)}).
+          {data.livraisonCents === 0 ? "offerte" : euros(data.livraisonCents)})
+          {niveauService ? `. ${niveauService.note}` : ""}.
         </P>
         <P>
           Toute annulation ou modification d&apos;un créneau par le Client moins de vingt-quatre

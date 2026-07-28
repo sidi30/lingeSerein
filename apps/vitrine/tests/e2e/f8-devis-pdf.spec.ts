@@ -29,6 +29,13 @@ test.describe("Devis PDF — générateur admin", () => {
     await page.getByLabel("Établissement", { exact: true }).fill("Hôtel Le Mas Provençal");
     await page.getByLabel("Nom du contact").fill("Marie-Claire D.");
 
+    // Remise : le formulaire saisit des pourcents, DevisData les stocke en centièmes.
+    // Une conversion ratée diviserait la remise par 100 — on vérifie le montant affiché.
+    await page.getByRole("button", { name: "-10%" }).click();
+    const recap = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+    expect(recap).toContain("Remise 10%");
+    expect(recap).toContain("-2,40 €"); // 10 % de 24,00 € (Kit Bain + Kit Lit)
+
     const downloadBtn = page.getByRole("button", { name: /Télécharger le PDF/i });
     await expect(downloadBtn).toBeEnabled();
 
@@ -38,7 +45,8 @@ test.describe("Devis PDF — générateur admin", () => {
       downloadBtn.click(),
     ]);
 
-    expect(download.suggestedFilename()).toMatch(/^devis-.*\.pdf$/);
+    // Nom produit par @lingengo/ui/devis-pdf (module unifié avec l'admin).
+    expect(download.suggestedFilename()).toMatch(/^LS-Devis-.*\.pdf$/);
 
     const filePath = await download.path();
     expect(filePath).toBeTruthy();

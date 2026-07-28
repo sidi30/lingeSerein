@@ -16,7 +16,12 @@
 
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
-import { CATALOG_PRODUCTS, SUBSCRIPTION_DEFAULTS, addMonths } from "@lingengo/shared";
+import {
+  CATALOG_DEFAULTS,
+  CATALOG_PRODUCTS,
+  SUBSCRIPTION_DEFAULTS,
+  addMonths,
+} from "@lingengo/shared";
 
 const prisma = new PrismaClient();
 const BCRYPT_ROUNDS = 12;
@@ -523,14 +528,14 @@ async function main() {
           {
             productId: kitBainId,
             quantity: SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY, // 8
-            unitCents: 750,
-            totalCents: 750 * SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY,
+            unitCents: CATALOG_DEFAULTS.KIT_BAIN_CENTS,
+            totalCents: CATALOG_DEFAULTS.KIT_BAIN_CENTS * SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY,
           },
           {
             productId: kitLitId,
             quantity: SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY, // 4
-            unitCents: 1650,
-            totalCents: 1650 * SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY,
+            unitCents: CATALOG_DEFAULTS.KIT_LIT_CENTS,
+            totalCents: CATALOG_DEFAULTS.KIT_LIT_CENTS * SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY,
           },
         ],
       },
@@ -548,7 +553,7 @@ async function main() {
       orderNumber: "LNG-2026-000002",
       status: "PENDING",
       isRecurring: false,
-      totalCents: 2200 * 2, // 2 Kit Complet
+      totalCents: CATALOG_DEFAULTS.KIT_COMPLET_CENTS * 2, // 2 Kit Complet
       deliveryDate: deliveryDate2,
       timeSlot: "10:00-12:00",
       items: {
@@ -556,8 +561,8 @@ async function main() {
           {
             productId: kitCompletId,
             quantity: 2,
-            unitCents: 2200,
-            totalCents: 2200 * 2,
+            unitCents: CATALOG_DEFAULTS.KIT_COMPLET_CENTS,
+            totalCents: CATALOG_DEFAULTS.KIT_COMPLET_CENTS * 2,
           },
         ],
       },
@@ -572,7 +577,7 @@ async function main() {
       orderNumber: "LNG-2026-000003",
       status: "DELIVERED",
       isRecurring: false,
-      totalCents: 750 * 3, // 3 Kit Bain
+      totalCents: CATALOG_DEFAULTS.KIT_BAIN_CENTS * 3, // 3 Kit Bain
       deliveryDate: new Date(),
       timeSlot: "08:00-10:00",
       items: {
@@ -580,8 +585,8 @@ async function main() {
           {
             productId: kitBainId,
             quantity: 3,
-            unitCents: 750,
-            totalCents: 750 * 3,
+            unitCents: CATALOG_DEFAULTS.KIT_BAIN_CENTS,
+            totalCents: CATALOG_DEFAULTS.KIT_BAIN_CENTS * 3,
           },
         ],
       },

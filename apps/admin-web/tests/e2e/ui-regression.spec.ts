@@ -11,8 +11,13 @@
  * - /planning
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { loginAsAdmin } from "./helpers/auth";
+
+/** Lien de menu vers l'ancien simulateur — doit rester introuvable. */
+function sidebarLink(page: Page) {
+  return page.locator('nav a[href*="/simulateur"], aside a[href*="/simulateur"]');
+}
 
 const EXISTING_ROUTES = [
   { path: "/", label: "Dashboard" },
@@ -22,6 +27,7 @@ const EXISTING_ROUTES = [
   { path: "/produits", label: "Produits" },
   { path: "/abonnements", label: "Abonnements" },
   { path: "/planning", label: "Planning" },
+  { path: "/factures", label: "Factures" },
 ];
 
 test.describe("Régression — pages existantes", () => {
@@ -72,6 +78,15 @@ test.describe("Régression — pages existantes", () => {
       timeout: 5_000,
     });
     await expect(sidebar.locator('a[href*="/reglages"]').first()).toBeVisible({ timeout: 5_000 });
+    await expect(sidebar.locator('a[href*="/factures"]').first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("La page /simulateur a bien été retirée", async ({ page }) => {
+    // Elle tournait sur le barème périmé (sets Confort/Hôtel/Prestige, livraison
+    // 5 €) et était confondable avec le vrai formulaire de devis.
+    const response = await page.goto("/simulateur");
+    expect(response?.status()).toBe(404);
+    await expect(sidebarLink(page)).toHaveCount(0);
   });
 
   test("Page /reglages accessible", async ({ page }) => {

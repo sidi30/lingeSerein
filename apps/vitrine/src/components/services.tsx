@@ -2,7 +2,16 @@
 
 import { ArrowRight, Check } from "lucide-react";
 import { motion } from "motion/react";
+import { CATALOG_DEFAULTS, DELIVERY_DEFAULTS } from "@lingengo/shared";
 import { Reveal } from "./reveal";
+
+// Prix affichés dérivés du catalogue partagé (@lingengo/shared) — jamais recopiés en dur.
+function prixKit(cents: number): string {
+  return (cents / 100).toLocaleString("fr-FR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
 
 const kits = [
   {
@@ -16,7 +25,7 @@ const kits = [
       "Livré plié, emballé, prêt à poser",
       "Entretien blanchisserie inclus",
     ],
-    price: "7,50",
+    price: prixKit(CATALOG_DEFAULTS.KIT_BAIN_CENTS),
     priceLabel: "par set · par rotation",
     badge: null,
     featured: false,
@@ -32,7 +41,7 @@ const kits = [
       "Repassé, plié, emballé sous film",
       "Entretien blanchisserie inclus",
     ],
-    price: "16,50",
+    price: prixKit(CATALOG_DEFAULTS.KIT_LIT_CENTS),
     priceLabel: "par kit · par rotation",
     badge: "Le plus demandé",
     featured: true,
@@ -44,12 +53,12 @@ const kits = [
     items: [
       "Tout le contenu du Kit Bain",
       "Tout le contenu du Kit Lit",
+      `${CATALOG_DEFAULTS.KIT_COMPLET_SERVIETTES_INCLUSES} serviettes 50×90 incluses en plus`,
       "1 livraison + 1 reprise groupées",
-      "Économie sur les frais de livraison",
-      "Tarif dégressif dès 4 kits",
+      "Livraison offerte dès 4 kits à Orange",
     ],
-    price: "22",
-    priceLabel: "bain + lit groupés · économie 2 €",
+    price: String(CATALOG_DEFAULTS.KIT_COMPLET_CENTS / 100),
+    priceLabel: `bain + lit + ${CATALOG_DEFAULTS.KIT_COMPLET_SERVIETTES_INCLUSES} serviettes · économie ${CATALOG_DEFAULTS.KIT_COMPLET_DISCOUNT_CENTS / 100} €`,
     badge: null,
     featured: false,
   },
@@ -171,10 +180,11 @@ export function Services() {
         {/* Delivery note */}
         <Reveal>
           <p className="text-center text-sm text-gray-600 mb-16">
-            <span className="text-forest font-medium">✓ Livraison offerte</span> à Orange dès 4 kits
-            &nbsp;·&nbsp;
-            <span className="text-forest font-medium">Vaucluse</span> à partir de 120 € de commande
-            &nbsp;·&nbsp; Sans engagement, sans abonnement
+            <span className="text-forest font-medium">✓ Livraison offerte</span> à Orange dès{" "}
+            {DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits &nbsp;·&nbsp;
+            <span className="text-forest font-medium">Orange &amp; villes limitrophes</span> à
+            partir de {DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande &nbsp;·&nbsp;
+            Location ponctuelle sans abonnement
           </p>
         </Reveal>
 

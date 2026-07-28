@@ -6,6 +6,7 @@ import {
   CATALOG_DEFAULTS,
   SUBSCRIPTION_DEFAULTS,
   DELIVERY_DEFAULTS,
+  URGENCY_TIERS,
   computePackSereniteComparison,
 } from "@lingengo/shared";
 
@@ -27,14 +28,15 @@ const engagementLabel = `Engagement ${SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTH
 const abonnementFeatures = [
   `${SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} kits bain inclus par mois`,
   `${SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY} kits lit inclus par mois`,
-  "1 livraison & reprise incluse",
+  `${SUBSCRIPTION_DEFAULTS.DELIVERIES_PER_MONTH} livraisons & reprises incluses (une par quinzaine)`,
+  `Linge repris sous ${SUBSCRIPTION_DEFAULTS.MAX_LINEN_KEEP_DAYS} jours maximum`,
   "Entretien blanchisserie compris",
   "Kits supplémentaires au tarif normal",
   engagementLabel,
 ];
 
-// Économie mensuelle : valeur à-la-carte de l'allotissement FIXE du pack (8 bain + 4 lit + 1
-// livraison) comparée au prix fixe du pack. Source unique partagée avec le simulateur de devis.
+// Économie mensuelle : valeur à-la-carte de l'allotissement FIXE du pack (8 bain + 4 lit + 2
+// livraisons) comparée au prix fixe du pack. Source unique partagée avec le simulateur de devis.
 const kitBainMensuels = SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY * CATALOG_DEFAULTS.KIT_BAIN_CENTS;
 const kitLitMensuels = SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY * CATALOG_DEFAULTS.KIT_LIT_CENTS;
 const { alaCarteCents, packCents, economieCents } = computePackSereniteComparison();
@@ -54,8 +56,10 @@ const abonnementSavings = [
     highlight: false,
   },
   {
-    label: "1 livraison & reprise (estim.)",
-    amount: centsToEuroStr(DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS),
+    label: `${SUBSCRIPTION_DEFAULTS.DELIVERIES_PER_MONTH} livraisons & reprises (estim.)`,
+    amount: centsToEuroStr(
+      SUBSCRIPTION_DEFAULTS.DELIVERIES_PER_MONTH * DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS,
+    ),
     bold: false,
     highlight: false,
   },
@@ -112,14 +116,29 @@ const zones = [
     city: "Orange",
     sub: `dès ${DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits commandés`,
   },
-  { price: "12 €", city: "Zone proche", sub: "Carpentras, Vaison, Bollène…" },
-  { price: "15 €", city: "Zone élargie", sub: "Avignon, Apt, Pertuis…" },
+  {
+    price: centsToEuroStr(DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS).replace(",00", ""),
+    city: "Orange & villes limitrophes",
+    sub: "Jonquières, Courthézon, Camaret, Piolenc, Caderousse, Châteauneuf-du-Pape…",
+  },
   {
     price: "Offerte",
-    city: "Tout le Vaucluse",
-    sub: `dès ${centsToEuroStr(DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS)} de commande`,
+    city: "Sur les deux zones",
+    sub: `dès ${centsToEuroStr(DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS).replace(",00", "")} de commande`,
+  },
+  {
+    price: "Sur devis",
+    city: "Au-delà",
+    sub: "on étudie chaque demande en bordure de zone",
   },
 ];
+
+// Jauge d'urgence : les forfaits remplacent le barème de zone (jamais cumulés, jamais offerts).
+const urgences = URGENCY_TIERS.map((t) => ({
+  label: t.label,
+  delai: t.delaiText,
+  fee: t.feeCents === null ? "Sur devis" : t.feeCents === 0 ? "Inclus" : `+ ${t.feeCents / 100} €`,
+}));
 
 export function Tarifs() {
   return (
@@ -154,7 +173,9 @@ export function Tarifs() {
                 <span className="font-serif text-5xl font-bold tabular-nums">
                   {centsToEuroStr(SUBSCRIPTION_DEFAULTS.PRICE_CENTS).replace(",00", "")}
                 </span>
-                <span className="text-sm text-white/70 ml-2">/ mois · livraison incluse</span>
+                <span className="text-sm text-white/70 ml-2">
+                  / mois · {SUBSCRIPTION_DEFAULTS.DELIVERIES_PER_MONTH} livraisons incluses
+                </span>
               </div>
 
               <ul className="flex flex-col gap-3 mb-8">
@@ -255,6 +276,33 @@ export function Tarifs() {
                 <p className="text-xs text-gray-500 mt-0.5 leading-snug">{z.sub}</p>
               </div>
             ))}
+          </div>
+        </Reveal>
+
+        {/* ─── Urgence ─── */}
+        <Reveal className="mb-16">
+          <div className="max-w-3xl mx-auto rounded-2xl bg-white border border-lavender-100/60 p-6 shadow-sm">
+            <h4 className="font-serif text-lg font-bold text-forest mb-1">Besoin plus rapide ?</h4>
+            <p className="text-xs text-gray-500 mb-5">
+              Forfait fixe qui remplace le tarif de zone — ni dégressif, ni soumis aux seuils de
+              gratuité.
+            </p>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {urgences.map((u) => (
+                <li
+                  key={u.label}
+                  className="flex items-start justify-between gap-3 rounded-xl bg-lavender-50/60 border border-lavender-100 px-4 py-3"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-forest">{u.label}</p>
+                    <p className="text-xs text-gray-600 leading-snug">{u.delai}</p>
+                  </div>
+                  <span className="shrink-0 text-sm font-bold text-lavender-700 tabular-nums">
+                    {u.fee}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         </Reveal>
 

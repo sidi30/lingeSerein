@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Plus, Trash2, Download, FileText, Loader2, History, X } from "lucide-react";
-import type { DevisData, DevisLine } from "@/lib/devis-pdf";
+import type { DevisData, DevisLine } from "@lingengo/shared";
 import { SignaturePad } from "./signature-pad";
 import {
   loadHistory,
@@ -14,10 +14,13 @@ import {
   CATALOG_PRODUCTS,
   computeDeliveryFee,
   countKits,
-  DELIVERY_DEFAULTS,
+  DELIVERY_RULE_TEXT,
   DELIVERY_ZONE_LABELS,
+  SERVICE_DELAY_TEXT,
+  URGENCY_TIERS,
+  urgencyTier,
 } from "@lingengo/shared";
-import type { DeliveryZone } from "@lingengo/shared";
+import type { DeliveryZone, UrgencyLevel } from "@lingengo/shared";
 
 const DEFAULT_REGLEMENT =
   "Règlement à 30 jours par virement bancaire. Facturation mensuelle à la rotation.";
@@ -79,8 +82,8 @@ export function DevisGenerator() {
   const [lines, setLines] = useState<DevisLine[]>([{ designation: "", qty: 1, unitCents: 0 }]);
   const [remisePct, setRemisePct] = useState(0);
   const [livraisonEuros, setLivraisonEuros] = useState(0);
-  const [delaiJours, setDelaiJours] = useState(3);
-  const [zoneLivraison, setZoneLivraison] = useState<DeliveryZone>("PROCHE");
+  const [urgency, setUrgency] = useState<UrgencyLevel>("STANDARD");
+  const [zoneLivraison, setZoneLivraison] = useState<DeliveryZone>("ORANGE");
   const [blankFields, setBlankFields] = useState(false);
   const [blankLines, setBlankLines] = useState(5);
   const [tva, setTva] = useState(false);
@@ -128,19 +131,41 @@ export function DevisGenerator() {
     return { sousTotal, remise, livraisonCents, totalHT, tvaCents, totalTTC };
   }, [lines, remisePct, livraisonEuros, tva]);
 
-  // Barème livraison : J+1 / J+2 = forfait urgence, J+3 et plus = tarif de zone.
+  // Barème livraison : la jauge d'urgence (forfait fixe) prime sur le barème de zone ;
+  // hors zone et Flash < 3 h n'ont aucun tarif public → montant saisi à la main.
   const deliveryFee = useMemo(() => {
     const sousTotal = lines.reduce((s, l) => s + Math.round((l.qty || 0) * (l.unitCents || 0)), 0);
     const remise = Math.round((sousTotal * remisePct) / 100);
     return computeDeliveryFee({
-      delaiJours,
+      urgency,
       zone: zoneLivraison,
       montantApresRemiseCents: sousTotal - remise,
       nbKits: countKits(lines),
     });
-  }, [lines, remisePct, delaiJours, zoneLivraison]);
+  }, [lines, remisePct, urgency, zoneLivraison]);
 
-  const feeApplied = Math.round(livraisonEuros * 100) === deliveryFee.cents;
+  // Le montant du barème est reporté automatiquement dans le champ « Livraison » : oublier
+  // de l'appliquer produirait un devis qui contredit ses propres conditions. Sur devis, le
+  // champ repart à zéro — c'est à l'admin de chiffrer.
+  const { surDevis: feeSurDevis, cents: feeCents } = deliveryFee;
+  useEffect(() => {
+    setLivraisonEuros(feeSurDevis ? 0 : feeCents / 100);
+  }, [feeSurDevis, feeCents]);
+
+  const livraisonCents = Math.round(livraisonEuros * 100);
+
+  // Libellé imprimé sur le devis (et repris tel quel sur le contrat). Un montant chiffré à la
+  // main ne doit pas s'imprimer sous une mention « sur devis » qui le contredirait.
+  const livraisonLabel = useMemo(() => {
+    if (!deliveryFee.surDevis) {
+      return livraisonCents === deliveryFee.cents ? deliveryFee.label : undefined;
+    }
+    if (livraisonCents <= 0) return deliveryFee.label;
+    const tier = urgencyTier(urgency);
+    return zoneLivraison === "HORS_ZONE"
+      ? "Livraison hors zone — montant convenu"
+      : `Livraison ${tier.label} (${tier.delaiText})`;
+  }, [deliveryFee, livraisonCents, urgency, zoneLivraison]);
 
   const buildData = useCallback(
     (): DevisData => ({
@@ -149,10 +174,12 @@ export function DevisGenerator() {
       validiteJours: validite,
       client,
       lines: lines.filter((l) => l.designation.trim() || l.unitCents > 0),
-      remisePct,
-      livraisonCents: Math.round(livraisonEuros * 100),
-      livraisonLabel: feeApplied ? deliveryFee.label : undefined,
-      delaiJours,
+      // Le formulaire saisit des pourcents ; DevisData les attend en centièmes
+      // de pourcent (1000 = 10 %), comme l'API et l'admin.
+      remisePct: Math.round(remisePct * 100),
+      livraisonCents,
+      livraisonLabel,
+      urgency,
       zoneLivraison,
       notes,
       tvaApplicable: tva,
@@ -168,10 +195,9 @@ export function DevisGenerator() {
       client,
       lines,
       remisePct,
-      livraisonEuros,
-      feeApplied,
-      deliveryFee.label,
-      delaiJours,
+      livraisonCents,
+      livraisonLabel,
+      urgency,
       zoneLivraison,
       notes,
       tva,
@@ -186,7 +212,8 @@ export function DevisGenerator() {
     setGenerating(true);
     try {
       const data = buildData();
-      const { downloadDevisPdf } = await import("@/lib/devis-pdf");
+      const { downloadDevisPdf } = await import("@lingengo/ui/devis-pdf");
+      // Le logo est embarqué en data-URI dans @lingengo/ui : aucun fetch réseau.
       await downloadDevisPdf(data);
       // Historique (local, même navigateur admin)
       setHistory(
@@ -208,7 +235,7 @@ export function DevisGenerator() {
   };
 
   const regenerate = async (entry: DevisHistoryEntry) => {
-    const { downloadDevisPdf } = await import("@/lib/devis-pdf");
+    const { downloadDevisPdf } = await import("@lingengo/ui/devis-pdf");
     await downloadDevisPdf(entry.data);
   };
 
@@ -217,12 +244,21 @@ export function DevisGenerator() {
     setNumero(d.numero);
     setDate(d.date);
     setValidite(d.validiteJours);
-    setClient(d.client);
+    setClient({
+      nom: d.client.nom ?? "",
+      etablissement: d.client.etablissement ?? "",
+      adresse: d.client.adresse ?? "",
+      email: d.client.email ?? "",
+      tel: d.client.tel ?? "",
+    });
     setLines(d.lines.length ? d.lines : [{ designation: "", qty: 1, unitCents: 0 }]);
-    setRemisePct(d.remisePct);
+    // Retour au pourcent affiché dans le formulaire (DevisData est en centièmes).
+    setRemisePct(d.remisePct / 100);
+    setUrgency(d.urgency ?? "STANDARD");
+    if (d.zoneLivraison) setZoneLivraison(d.zoneLivraison);
     setLivraisonEuros(d.livraisonCents / 100);
     setTva(d.tvaApplicable);
-    setNotes(d.notes);
+    setNotes(d.notes ?? "");
     setReglement(d.reglement ?? DEFAULT_REGLEMENT);
     setShowHistory(false);
   };
@@ -546,17 +582,10 @@ export function DevisGenerator() {
               onChange={(e) => setLivraisonEuros(Number(e.target.value) || 0)}
             />
             <p className="mt-1 text-[11px] text-gray-500">
-              Barème : {deliveryFee.cents === 0 ? "offerte" : fmt(deliveryFee.cents)} —{" "}
+              {deliveryFee.surDevis
+                ? "Sur devis — montant à saisir à la main."
+                : `Barème appliqué : ${deliveryFee.cents === 0 ? "offerte" : fmt(deliveryFee.cents)}.`}{" "}
               {deliveryFee.label}
-              {!feeApplied && (
-                <button
-                  type="button"
-                  onClick={() => setLivraisonEuros(deliveryFee.cents / 100)}
-                  className="ml-2 rounded-full border border-forest/30 px-2 py-0.5 font-medium text-forest hover:bg-forest/5"
-                >
-                  Appliquer
-                </button>
-              )}
             </p>
           </div>
           <div className="flex items-end">
@@ -572,49 +601,100 @@ export function DevisGenerator() {
           </div>
         </div>
 
-        {/* Livraison : délai + zone */}
+        {/* Livraison : jauge d'urgence + zone */}
         <div className="rounded-xl border border-lavender-100 bg-lavender-50/30 p-4">
-          <h3 className="text-sm font-bold text-forest mb-3">Livraison</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls} htmlFor="dv-delai">
-                Délai demandé
-              </label>
-              <select
-                id="dv-delai"
-                className={inputCls}
-                value={delaiJours}
-                onChange={(e) => setDelaiJours(Number(e.target.value))}
-              >
-                <option value={1}>J+1 — urgence</option>
-                <option value={2}>J+2 — urgence</option>
-                <option value={3}>J+3 et plus — tarif ordinaire</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls} htmlFor="dv-zone">
-                Zone
-              </label>
-              <select
-                id="dv-zone"
-                className={inputCls}
-                value={zoneLivraison}
-                onChange={(e) => setZoneLivraison(e.target.value as DeliveryZone)}
-              >
-                {(Object.keys(DELIVERY_ZONE_LABELS) as DeliveryZone[]).map((z) => (
-                  <option key={z} value={z}>
-                    {DELIVERY_ZONE_LABELS[z]}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <h3 className="text-sm font-bold text-forest mb-1">Livraison</h3>
+          <p className="text-[11px] text-gray-500 mb-3">
+            Le niveau d&apos;urgence détermine les frais : les forfaits remplacent le barème de zone
+            et ne sont pas soumis aux gratuités.
+          </p>
+
+          <span className={labelCls} id="dv-urgence-label">
+            Niveau d&apos;urgence
+          </span>
+          <div
+            role="radiogroup"
+            aria-labelledby="dv-urgence-label"
+            className="grid grid-cols-2 lg:grid-cols-4 gap-2"
+          >
+            {URGENCY_TIERS.map((tier) => {
+              const active = urgency === tier.level;
+              const fee =
+                tier.feeCents === null
+                  ? "Sur devis"
+                  : tier.feeCents === 0
+                    ? "Barème de zone"
+                    : `+ ${fmt(tier.feeCents)}`;
+              return (
+                <button
+                  key={tier.level}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setUrgency(tier.level)}
+                  className={`min-h-[64px] rounded-xl border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 ${
+                    active
+                      ? "border-forest bg-forest text-white shadow-md"
+                      : "border-lavender-200 bg-white text-forest hover:bg-lavender-50"
+                  }`}
+                >
+                  <span className="block text-xs font-semibold">{tier.label}</span>
+                  <span
+                    className={`mt-0.5 block text-[10px] leading-snug ${active ? "text-white/75" : "text-gray-500"}`}
+                  >
+                    {tier.delaiText}
+                  </span>
+                  <span
+                    className={`mt-1 block text-[11px] font-medium ${active ? "text-lavender-200" : "text-lavender-700"}`}
+                  >
+                    {fee}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          <p className="mt-2 text-[11px] text-gray-500">
-            Urgence J+1 / J+2 : forfait {DELIVERY_DEFAULTS.URGENT_FEE_CENTS / 100} € fixe. À partir
-            de J+3 : {DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS / 100} € zone proche,{" "}
-            {DELIVERY_DEFAULTS.ZONE_ELARGIE_CENTS / 100} € zone élargie, offerte dès{" "}
-            {DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € ou dès{" "}
-            {DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits à Orange.
+
+          <div className="mt-3">
+            <label className={labelCls} htmlFor="dv-zone">
+              Zone
+            </label>
+            <select
+              id="dv-zone"
+              className={inputCls}
+              value={zoneLivraison}
+              onChange={(e) => setZoneLivraison(e.target.value as DeliveryZone)}
+            >
+              {(Object.keys(DELIVERY_ZONE_LABELS) as DeliveryZone[]).map((z) => (
+                <option key={z} value={z}>
+                  {DELIVERY_ZONE_LABELS[z]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div
+            className={`mt-3 rounded-lg px-3 py-2 text-[11px] font-medium ${
+              deliveryFee.surDevis
+                ? "bg-lavender-100 text-lavender-800"
+                : "bg-white text-forest border border-lavender-100"
+            }`}
+          >
+            {deliveryFee.surDevis ? (
+              <>
+                Sur devis — {deliveryFee.label}. Saisissez le montant convenu dans le champ «
+                Livraison (€) » ci-dessus (laissé à 0, le devis imprimera « sur devis »).
+              </>
+            ) : (
+              <>
+                {deliveryFee.label} · {deliveryFee.cents === 0 ? "offerte" : fmt(deliveryFee.cents)}
+              </>
+            )}
+          </div>
+
+          <p className="mt-2 text-[11px] text-gray-500 leading-relaxed">{DELIVERY_RULE_TEXT}</p>
+          <p className="mt-1.5 text-[11px] text-gray-500 leading-relaxed">
+            {SERVICE_DELAY_TEXT.PONCTUEL} {SERVICE_DELAY_TEXT.ABONNEMENT}{" "}
+            {SERVICE_DELAY_TEXT.MISE_EN_PLACE}
           </p>
         </div>
 

@@ -1,0 +1,12 @@
+{
+  // Le tsconfig principal n'inclut que `src` : les specs Playwright n'étaient
+  // donc jamais typées, et une erreur de type n'apparaissait qu'à l'exécution.
+  // Vérification : npx tsc --noEmit --project tsconfig.tests.json
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["tests", "src/lib/types.ts"],
+  "exclude": ["node_modules", ".next"]
+}

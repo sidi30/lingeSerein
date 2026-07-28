@@ -48,7 +48,9 @@ export function ContractGenerator() {
   const [prixEuros, setPrixEuros] = useState<number>(SUBSCRIPTION_DEFAULTS.PRICE_CENTS / 100);
   const [kitsBain, setKitsBain] = useState<number>(SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY);
   const [kitsLit, setKitsLit] = useState<number>(SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY);
-  const [livraisonsIncluses, setLivraisonsIncluses] = useState<number>(1);
+  const [livraisonsIncluses, setLivraisonsIncluses] = useState<number>(
+    SUBSCRIPTION_DEFAULTS.DELIVERIES_PER_MONTH,
+  );
   const [engagementMois, setEngagementMois] = useState<number>(
     SUBSCRIPTION_DEFAULTS.MIN_ENGAGEMENT_MONTHS,
   );

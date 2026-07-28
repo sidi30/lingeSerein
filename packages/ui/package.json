@@ -17,6 +17,14 @@
       "types": "./dist/contract-pdf.d.ts",
       "default": "./dist/contract-pdf.js"
     },
+    "./bon-livraison-pdf": {
+      "types": "./dist/bon-livraison-pdf.d.ts",
+      "default": "./dist/bon-livraison-pdf.js"
+    },
+    "./invoice-pdf": {
+      "types": "./dist/invoice-pdf.d.ts",
+      "default": "./dist/invoice-pdf.js"
+    },
     "./logo": {
       "types": "./dist/logo.d.ts",
       "default": "./dist/logo.js"

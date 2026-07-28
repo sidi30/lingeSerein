@@ -119,7 +119,7 @@ export function DevisRequest({ recap, lignes, livraisonCents, zone }: Props) {
     >
       <p className="text-sm font-bold text-forest">Recevoir ce devis par email</p>
       <p className="text-[11px] text-gray-500 -mt-1">
-        Votre estimation ci-contre est jointe automatiquement à la demande.
+        Votre estimation est jointe automatiquement à la demande.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -34,7 +34,7 @@ export function Engagements() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 max-w-3xl mx-auto">
                   {[
                     { value: "100%", label: "Traçabilité du linge" },
-                    { value: "48h", label: "Délai de livraison max" },
+                    { value: "J+2", label: "Délai de livraison standard" },
                     { value: "Éco", label: "Produits certifiés" },
                   ].map((stat) => (
                     <div key={stat.label} className="text-center">

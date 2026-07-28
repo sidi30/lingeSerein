@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/lib/toast";
 import { formatPrice, eurosToCents } from "@/lib/format";
 import {
+  CATALOG_DEFAULTS,
   computeQuoteFinancials,
   deliveryLabelFromCents,
   detectContractType,
@@ -56,6 +57,15 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
   const noticePeriodDays = config?.noticePeriodDays ?? SUBSCRIPTION_DEFAULTS.NOTICE_PERIOD_DAYS;
 
   const packPriceCents = priceCents;
+
+  // La dotation mensuelle est livrée en deux passages (un par quinzaine) : le contrat
+  // doit annoncer le rythme réel, pas seulement le total du mois.
+  const passagesParMois = SUBSCRIPTION_DEFAULTS.DELIVERIES_PER_MONTH;
+  const kitBainParPassage = Math.round(kitBainQty / passagesParMois);
+  const kitLitParPassage = Math.round(kitLitQty / passagesParMois);
+  const dotationRythme =
+    `livrés en ${passagesParMois} passages (${kitBainParPassage} bain + ${kitLitParPassage} lit ` +
+    `par quinzaine), reprise du linge sous ${SUBSCRIPTION_DEFAULTS.MAX_LINEN_KEEP_DAYS} jours`;
 
   // QuoteForContract dérivé du devis.
   const quoteForContract: QuoteForContract = useMemo(
@@ -126,7 +136,7 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
         prixMensuelCents: packPriceCents,
         kitsBain: kitBainQty,
         kitsLit: kitLitQty,
-        livraisonsIncluses: 1,
+        livraisonsIncluses: passagesParMois,
         engagementMois,
         preavisJours,
         jourFacturation,
@@ -192,10 +202,13 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
                   {formatPrice(displayPrixMensuelCents)} / mois
                 </dd>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-4">
                 <dt className="text-gray-500">Dotation mensuelle</dt>
-                <dd className="font-medium text-gray-900">
+                <dd className="text-right font-medium text-gray-900">
                   {kitBainQty} kits bain + {kitLitQty} kits lit / mois
+                  <span className="mt-0.5 block text-xs font-normal text-gray-500">
+                    {dotationRythme}
+                  </span>
                 </dd>
               </div>
               {nbMensualites > 1 && (
@@ -204,8 +217,9 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
                 </p>
               )}
               <p className="border-t border-gray-200 pt-2 text-xs text-gray-500">
-                1 Pack Sérénité / mois · kits au-delà au tarif normal (kit bain 7,50 € · kit lit
-                16,50 €).
+                1 Pack Sérénité / mois · kits au-delà au tarif normal (kit bain{" "}
+                {formatPrice(CATALOG_DEFAULTS.KIT_BAIN_CENTS)} · kit lit{" "}
+                {formatPrice(CATALOG_DEFAULTS.KIT_LIT_CENTS)}).
               </p>
             </dl>
           ) : (
@@ -291,9 +305,9 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
             <div className="text-sm text-primary-800">
               <p className="font-semibold">Dotation &amp; contrainte de stock</p>
               <p className="mt-1 text-primary-700">
-                Dotation mensuelle engagée : {kitBainQty} bain + {kitLitQty} lit. Règle : 1 Pack
-                Sérénité / mois — les kits au-delà de la dotation sont facturés au tarif normal.
-                Contrainte pilotée par la dotation (pas d&apos;inventaire physique).
+                Dotation mensuelle engagée : {kitBainQty} bain + {kitLitQty} lit, {dotationRythme}.
+                Règle : 1 Pack Sérénité / mois — les kits au-delà de la dotation sont facturés au
+                tarif normal. Contrainte pilotée par la dotation (pas d&apos;inventaire physique).
               </p>
             </div>
           </div>

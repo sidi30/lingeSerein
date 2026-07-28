@@ -3,7 +3,7 @@
  * Aucune dépendance React — consommable par l'API Fastify, l'admin-web et la vitrine.
  */
 
-import { deliveryLabelFromCents, type DeliveryZone } from "./constants";
+import { deliveryLabelFromCents, type DeliveryZone, type UrgencyLevel } from "./constants";
 
 // ============================================================================
 // Types
@@ -35,8 +35,10 @@ export interface DevisData {
    * quel sur le contrat dérivé — c'est ce qui garantit la concordance devis ↔ contrat.
    */
   livraisonLabel?: string;
-  /** Délai de livraison demandé, en jours (1-2 = urgence, ≥ 3 = tarif ordinaire). */
+  /** Délai de livraison demandé, en jours (0 = jour même, 1 = lendemain). */
   delaiJours?: number;
+  /** Niveau d'urgence choisi sur la jauge (prioritaire sur delaiJours). */
+  urgency?: UrgencyLevel;
   /** Zone de livraison retenue pour le calcul des frais. */
   zoneLivraison?: DeliveryZone;
   notes?: string;

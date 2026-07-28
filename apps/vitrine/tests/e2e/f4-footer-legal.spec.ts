@@ -94,7 +94,8 @@ test.describe("F4 — Footer et liens légaux", () => {
   test("F4-11 — Logo dans footer est visible", async ({ page }) => {
     await page.goto("/");
     await page.locator("footer").scrollIntoViewIfNeeded();
-    const footerLogo = page.locator('footer img[alt="Linge Serein"]');
+    // Alternative enrichie pour le SEO : on ancre sur le début du texte.
+    const footerLogo = page.locator('footer img[alt^="Linge Serein"]');
     await expect(footerLogo).toBeVisible();
   });
 });

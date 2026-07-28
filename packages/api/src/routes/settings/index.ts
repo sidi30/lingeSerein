@@ -187,6 +187,8 @@ export default async function settingsRoutes(app: FastifyInstance): Promise<void
             address: { type: "string", nullable: true },
             siret: { type: "string", nullable: true },
             legalMentions: { type: "string", nullable: true },
+            iban: { type: "string", nullable: true },
+            bic: { type: "string", nullable: true },
           },
         },
       },

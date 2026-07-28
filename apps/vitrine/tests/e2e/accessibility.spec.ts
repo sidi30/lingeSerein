@@ -72,7 +72,9 @@ test("A11Y — Navigation clavier — Skip link fonctionnel", async ({ page }) =
   await page.goto("/");
   // Tab to skip link
   await page.keyboard.press("Tab");
-  const skipLink = page.locator('a[href="#main"]');
+  // La navigation par pastilles pointe elle aussi vers #main : on cible le lien
+  // d'évitement, qui est le premier élément focusable du document.
+  const skipLink = page.locator('a[href="#main"]').first();
   await expect(skipLink).toBeFocused();
 
   // Press Enter to use skip link
@@ -122,9 +124,10 @@ test("A11Y — Formulaire contact — labels associés aux inputs", async ({ pag
 test("A11Y — Boutons avec aria-labels sur icônes seules", async ({ page }) => {
   await page.goto("/");
 
-  // Mobile menu button should have aria-label="Menu"
-  const menuBtn = page.locator('button[aria-label="Menu"]');
-  await expect(menuBtn).toBeVisible();
+  // Le bouton du menu mobile annonce son action (« Ouvrir / Fermer le menu »).
+  const menuBtn = page.locator('button[aria-label*="menu" i]').first();
+  await expect(menuBtn).toBeAttached();
+  expect(await menuBtn.getAttribute("aria-label")).toMatch(/menu/i);
 
   // WhatsApp button has aria-label
   const waBtn = page.locator('a[aria-label="Nous écrire sur WhatsApp"]');

@@ -20,9 +20,9 @@ const stats: Stat[] = [
   },
   {
     icon: <Truck size={28} className="text-lavender-600" aria-hidden />,
-    value: 48,
+    value: 24,
     suffix: " h",
-    label: "Délai de livraison maximum",
+    label: "Livraison express sur demande",
   },
   {
     icon: <Users size={28} className="text-lavender-600" aria-hidden />,

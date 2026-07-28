@@ -134,12 +134,20 @@ export default function CGPS() {
       <h2>6. Niveaux de service (SLA)</h2>
       <ul>
         <li>
-          <strong>Délai de traitement standard :</strong> 48 heures ouvrées entre collecte du linge
-          sale et livraison du linge propre.
+          <strong>Délai de livraison standard :</strong> J+2 à J+3 ouvrés selon la zone, sur les
+          tournées planifiées.
         </li>
         <li>
-          <strong>Délai express (sur demande) :</strong> 24 heures ouvrées, sous réserve de
-          disponibilité et majoré de 30 % sur le tarif standard.
+          <strong>Express 24 h (sur demande) :</strong> livraison le lendemain, forfait fixe de{" "}
+          <strong>25,00 €</strong> qui remplace le tarif de zone.
+        </li>
+        <li>
+          <strong>Jour même (sur demande) :</strong> sous 8 heures pour toute commande passée avant
+          12 h et selon disponibilité, forfait fixe de <strong>39,00 €</strong>.
+        </li>
+        <li>
+          <strong>Moins de 3 heures :</strong> aucun délai garanti ; la faisabilité et le tarif sont
+          confirmés au cas par cas, sur devis et après accord téléphonique.
         </li>
         <li>
           <strong>Disponibilité du service :</strong> du lundi au vendredi (hors jours fériés), avec

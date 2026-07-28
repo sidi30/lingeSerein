@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { ArrowRight, Phone, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
+import { CATALOG_DEFAULTS } from "@lingengo/shared";
 import { Magnetic } from "./magnetic";
 
 function KineticHeadline() {
@@ -165,7 +166,7 @@ export function Hero() {
           <div className="text-center lg:text-left">
             <span className="inline-flex items-center gap-2 rounded-full border border-lavender-200 bg-white/70 px-4 py-1.5 text-sm font-medium text-lavender-700 backdrop-blur animate-fade-in-up">
               <span className="h-2 w-2 rounded-full bg-forest animate-gentle-pulse" />
-              Basé à Orange · livraison dans tout le Vaucluse
+              Basé à Orange · livraison à Orange et communes limitrophes
             </span>
 
             <div className="mt-6">
@@ -183,10 +184,16 @@ export function Hero() {
 
             <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4 gap-3 max-w-2xl mx-auto lg:mx-0 animate-fade-in-up delay-300">
               {[
-                { value: "7,50 €", label: "set bain / rotation" },
-                { value: "16,50 €", label: "set lit / rotation" },
-                { value: "J+0", label: "livraison à Orange" },
-                { value: "0", label: "engagement contractuel" },
+                {
+                  value: `${CATALOG_DEFAULTS.KIT_BAIN_CENTS / 100} €`.replace(".", ","),
+                  label: "kit bain / rotation",
+                },
+                {
+                  value: `${CATALOG_DEFAULTS.KIT_LIT_CENTS / 100} €`.replace(".", ","),
+                  label: "kit lit / rotation",
+                },
+                { value: "J+2", label: "livraison standard" },
+                { value: "24 h", label: "express sur demande" },
               ].map((stat) => (
                 <div
                   key={stat.label}

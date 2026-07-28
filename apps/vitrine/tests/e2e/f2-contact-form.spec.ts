@@ -33,8 +33,11 @@ test.describe("F2 — Formulaire de contact", () => {
 
     // Submit without checking consent
     await page.getByRole("button", { name: /envoyer/i }).click();
-    await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page.getByRole("alert")).toContainText(/confidentialité/i);
+    // Next monte un annonceur de route avec role="alert" : on cible le message
+    // du formulaire lui-même, à l'intérieur de la section contact.
+    const alert = page.locator('#contact [role="alert"]');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText(/confidentialité/i);
   });
 
   test("F2-03 — Champs requis marqués required", async ({ page }) => {
@@ -70,7 +73,7 @@ test.describe("F2 — Formulaire de contact", () => {
     await page.getByRole("button", { name: /envoyer/i }).click();
 
     // Error alert should appear
-    const alert = page.getByRole("alert");
+    const alert = page.locator('#contact [role="alert"]');
     await expect(alert).toBeVisible({ timeout: 8000 });
 
     // No stack trace in error message
@@ -81,8 +84,10 @@ test.describe("F2 — Formulaire de contact", () => {
   });
 
   test("F2-05 — Soumission avec réseau timeout affiche message d'erreur", async ({ page }) => {
+    // `page.waitForTimeout` dans un handler de route bloque Playwright lui-même :
+    // on temporise avec un simple setTimeout avant d'abandonner la requête.
     await page.route("**/api/contact", async (route) => {
-      await page.waitForTimeout(6000);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       await route.abort("timedout");
     });
 
@@ -103,18 +108,15 @@ test.describe("F2 — Formulaire de contact", () => {
   }, 20000);
 
   test("F2-06 — Bouton submit désactivé pendant envoi (évite double-submit)", async ({ page }) => {
-    // Intercept and hold the request
-    let resolveRoute: any;
-    await page.route("**/api/contact", (route) => {
-      return new Promise((resolve) => {
-        resolveRoute = () =>
-          resolve(
-            route.fulfill({
-              status: 200,
-              contentType: "application/json",
-              body: JSON.stringify({ ok: true }),
-            }),
-          );
+    // Réponse volontairement lente : la temporisation vit dans le handler, sans
+    // jamais bloquer la boucle d'événements de la page (un `page.waitForTimeout`
+    // ici mettrait Playwright en attente de lui-même).
+    await page.route("**/api/contact", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
       });
     });
 
@@ -126,14 +128,14 @@ test.describe("F2 — Formulaire de contact", () => {
     await page.getByLabel(/Votre besoin/).fill("Message suffisamment long pour le QA test");
     await page.locator('input[name="consent"]').check();
 
-    const submitBtn = page.getByRole("button", { name: /envoyer/i });
+    // Pendant l'envoi, le libellé devient « Envoi en cours… » : on ancre sur le
+    // type du bouton, seul identifiant stable des deux états.
+    const submitBtn = page.locator('#contact form button[type="submit"]');
     await submitBtn.click();
 
     // Button should be disabled while sending
     await expect(submitBtn).toBeDisabled({ timeout: 2000 });
-
-    // Release the route
-    resolveRoute();
+    await expect(submitBtn).toContainText(/envoi en cours/i);
   });
 
   test("F2-07 — Lien politique de confidentialité dans formulaire fonctionne", async ({ page }) => {

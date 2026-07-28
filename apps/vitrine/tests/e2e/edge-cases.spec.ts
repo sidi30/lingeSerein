@@ -3,6 +3,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { choisirHebergement, continuer, ouvrirWizard } from "./helpers/wizard";
 
 test.describe("Edge cases — Formulaire contact", () => {
   async function scrollToContact(page: any) {
@@ -63,51 +64,43 @@ test.describe("Edge cases — Formulaire contact", () => {
   });
 });
 
-test.describe("Edge cases — Simulateur devis", () => {
-  test("EC-05 — Slider à valeur max (50) ne cause pas d'erreur", async ({ page }) => {
-    await page.goto("/devis");
-    const sliders = page.locator('input[type="range"]');
-    const count = await sliders.count();
-
-    for (let i = 0; i < Math.min(count, 4); i++) {
-      const max = await sliders.nth(i).getAttribute("max");
-      if (max) {
-        await sliders.nth(i).fill(max);
-        await sliders.nth(i).dispatchEvent("input");
-      }
-    }
-
-    await page.waitForTimeout(500);
-    // No crash, total should display
+test.describe("Edge cases — Parcours devis", () => {
+  test("EC-05 — Quantité démesurée saisie à la main : bornée, sans erreur", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (err: Error) => errors.push(err.message));
-    await page.waitForTimeout(300);
+
+    await ouvrirWizard(page);
+    await choisirHebergement(page, /Studio/);
+    await continuer(page);
+
+    const champ = page.getByRole("spinbutton", { name: /Quantité de Kit Complet/i });
+    await champ.fill("99999");
+    await champ.blur();
+
+    // Le stepper borne à son maximum au lieu de laisser filer un total absurde.
+    const max = Number(await champ.getAttribute("max"));
+    expect(Number(await champ.inputValue())).toBeLessThanOrEqual(max);
     expect(errors).toHaveLength(0);
   });
 
-  test("EC-06 — Slider à valeur min (0) produit état vide cohérent", async ({ page }) => {
-    await page.goto("/devis");
-    const productSliders = page.locator('.space-y-6 input[type="range"]');
-    const count = await productSliders.count();
+  test("EC-06 — Toutes les quantités à zéro bloque la suite du parcours", async ({ page }) => {
+    await ouvrirWizard(page);
+    await choisirHebergement(page, /Studio/);
+    await continuer(page);
 
-    for (let i = 0; i < count; i++) {
-      await productSliders.nth(i).fill("0");
-      await productSliders.nth(i).dispatchEvent("input");
-    }
+    await page.getByRole("spinbutton", { name: /Quantité de Kit Complet/i }).fill("0");
+    await page.getByRole("spinbutton", { name: /Quantité de Kit Bain/i }).fill("0");
+    await page.getByRole("spinbutton", { name: /Quantité de Kit Lit/i }).fill("0");
 
-    await page.waitForTimeout(500);
-    await expect(page.getByText(/ajoutez des produits/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Continuer/ })).toBeDisabled();
   });
 
-  test("EC-07 — ?gamme= vide utilise défaut hotel", async ({ page }) => {
-    await page.goto("/devis?gamme=");
-    const radioGroup = page.locator('[role="radiogroup"]');
-    const checked = radioGroup.locator('[role="radio"][aria-checked="true"]');
-    await expect(checked).toContainText("Hôtel");
+  test("EC-07 — Un paramètre d'URL inconnu ne casse pas le parcours", async ({ page }) => {
+    await page.goto("/devis?gamme=&source=newsletter");
+    await expect(page.getByRole("heading", { name: "Votre hébergement" })).toBeVisible();
   });
 
-  test("EC-08 — Injection script dans URL gamme ignorée", async ({ page }) => {
-    // Test that script injection via query param doesn't execute
+  test("EC-08 — Injection script dans l'URL ignorée", async ({ page }) => {
     await page.goto("/devis?gamme=<script>window.__xss_gamme=1</script>");
     await page.waitForTimeout(500);
     const xss = await page.evaluate(() => (window as any).__xss_gamme);

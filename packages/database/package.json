@@ -19,6 +19,7 @@
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "npx tsx prisma/seed.ts",
+    "sync-catalog": "npx tsx prisma/sync-catalog-prices.ts",
     "studio": "prisma studio",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"

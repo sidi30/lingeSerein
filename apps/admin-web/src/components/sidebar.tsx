@@ -20,6 +20,7 @@ import {
   UserCog,
   Settings,
   ShoppingCart,
+  Receipt,
 } from "lucide-react";
 
 interface NavItem {
@@ -79,6 +80,7 @@ export function Sidebar() {
           icon: <ShoppingCart className="h-5 w-5" />,
           badgeCount: unread.commandes,
         },
+        { label: "Factures", href: "/factures", icon: <Receipt className="h-5 w-5" /> },
         { label: "Clients", href: "/clients", icon: <Users className="h-5 w-5" /> },
         { label: "Abonnements", href: "/abonnements", icon: <RefreshCw className="h-5 w-5" /> },
       ],

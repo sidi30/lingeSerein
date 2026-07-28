@@ -3,10 +3,17 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
+import { DELIVERY_DEFAULTS, SUBSCRIPTION_DEFAULTS, URGENCY_TIERS } from "@lingengo/shared";
 import { Reveal } from "./reveal";
 
 const ABO = SUBSCRIPTION_DEFAULTS;
+const LIV = DELIVERY_DEFAULTS;
+const urgenceText = URGENCY_TIERS.filter((t) => t.level !== "STANDARD")
+  .map(
+    (t) =>
+      `${t.label} (${t.delaiText}) : ${t.feeCents === null ? "sur devis" : `${t.feeCents / 100} €`}`,
+  )
+  .join(" · ");
 
 const faqs = [
   {
@@ -15,11 +22,15 @@ const faqs = [
   },
   {
     q: "Y a-t-il un volume minimum de commande ?",
-    a: "Non, vous pouvez commencer par un set unique. La livraison est offerte à partir de 4 sets ou en formule d'abonnement. Pour les commandes plus petites, des frais de 5 € s'appliquent.",
+    a: `Non, vous pouvez commencer par un kit unique. La livraison est offerte dès ${LIV.FREE_MIN_KITS_ORANGE} kits à Orange, dès ${LIV.FREE_THRESHOLD_CENTS / 100} € de commande, ou en formule d'abonnement. En dessous de ces seuils, la livraison est facturée ${LIV.ZONE_PROCHE_CENTS / 100} € à Orange comme dans les villes limitrophes.`,
   },
   {
     q: "Quels sont vos délais de livraison ?",
-    a: "Notre engagement est de 48 heures ouvrées maximum après confirmation de commande. En pratique, la plupart des livraisons sont effectuées le lendemain dans le bassin Orange-Avignon-Carpentras.",
+    a: `En standard, nous livrons sous J+2 à J+3 selon la zone, sur nos tournées planifiées. Si vous êtes pressé, trois niveaux d'urgence existent — ${urgenceText}. Les forfaits d'urgence sont fixes : ils remplacent le tarif de zone et ne sont pas soumis aux seuils de gratuité.`,
+  },
+  {
+    q: "Jusqu'où livrez-vous ?",
+    a: "Nous livrons Orange et ses villes limitrophes (Jonquières, Courthézon, Camaret-sur-Aigues, Piolenc, Caderousse, Châteauneuf-du-Pape…) au même tarif de 12 €. Au-delà, nous ne publions pas de tarif : contactez-nous, chaque demande en bordure de zone est étudiée et chiffrée sur devis.",
   },
   {
     q: "Le linge est-il traité de manière écologique ?",
@@ -27,15 +38,15 @@ const faqs = [
   },
   {
     q: "Comment fonctionne l'abonnement de location de linge ?",
-    a: `L'abonnement Pack Sérénité est une formule mensuelle à ${ABO.PRICE_CENTS / 100} € incluant ${ABO.KIT_BAIN_QTY} kits bain, ${ABO.KIT_LIT_QTY} kits lit et les livraisons. Il comporte un engagement minimum de ${ABO.MIN_ENGAGEMENT_MONTHS} mois, puis il est résiliable avec un préavis de ${ABO.NOTICE_PERIOD_DAYS} jours. La composition peut être ajustée avec nous selon votre saison touristique en Vaucluse.`,
+    a: `L'abonnement Pack Sérénité est une formule mensuelle à ${ABO.PRICE_CENTS / 100} € incluant ${ABO.KIT_BAIN_QTY} kits bain, ${ABO.KIT_LIT_QTY} kits lit et ${ABO.DELIVERIES_PER_MONTH} livraisons & reprises. La dotation est livrée en ${ABO.DELIVERIES_PER_MONTH} passages, un par quinzaine (${ABO.KIT_BAIN_QTY_PER_PASSAGE} kits bain + ${ABO.KIT_LIT_QTY_PER_PASSAGE} kits lit à chaque fois) : le linge livré est repris au passage suivant et ne reste jamais plus de ${ABO.MAX_LINEN_KEEP_DAYS} jours chez vous. Engagement minimum de ${ABO.MIN_ENGAGEMENT_MONTHS} mois, puis résiliable avec un préavis de ${ABO.NOTICE_PERIOD_DAYS} jours. La composition peut être ajustée avec nous selon votre saison touristique.`,
   },
   {
     q: "Que se passe-t-il en cas de dégradation du linge ?",
     a: "L'usure normale est incluse. Pour les dégradations anormales (taches indélébiles, brûlures, déchirures), un barème transparent vous est communiqué à la signature du contrat.",
   },
   {
-    q: "Linge Serein livre-t-il toute l'année dans le Vaucluse ?",
-    a: "Oui, Linge Serein livre toute l'année dans le Vaucluse, y compris pendant les pics de la saison estivale. Durant l'été, nous renforçons nos équipes et nos tournées pour absorber les volumes supplémentaires des hôtels, gîtes et locations saisonnières, sans allonger les délais de livraison.",
+    q: "Linge Serein livre-t-il toute l'année autour d'Orange ?",
+    a: "Oui, Linge Serein livre toute l'année à Orange et dans les villes limitrophes, y compris pendant les pics de la saison estivale. Durant l'été, nous renforçons nos tournées pour absorber les volumes supplémentaires des hôtels, gîtes et locations saisonnières, sans allonger les délais de livraison.",
   },
 ];
 

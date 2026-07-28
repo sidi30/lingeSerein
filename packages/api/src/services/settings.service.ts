@@ -199,6 +199,8 @@ export class SettingsService {
         address: true,
         siret: true,
         legalMentions: true,
+        iban: true,
+        bic: true,
         isActive: true,
       },
     });
@@ -234,6 +236,8 @@ export class SettingsService {
         ...(data.address !== undefined ? { address: data.address } : {}),
         ...(data.siret !== undefined ? { siret: data.siret } : {}),
         ...(data.legalMentions !== undefined ? { legalMentions: data.legalMentions } : {}),
+        ...(data.iban !== undefined ? { iban: data.iban } : {}),
+        ...(data.bic !== undefined ? { bic: data.bic } : {}),
       },
       select: {
         id: true,
@@ -243,6 +247,8 @@ export class SettingsService {
         address: true,
         siret: true,
         legalMentions: true,
+        iban: true,
+        bic: true,
         isActive: true,
       },
     });

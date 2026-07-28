@@ -267,6 +267,9 @@ export interface OperatorDTO {
   address: string | null;
   siret: string | null;
   legalMentions: string | null;
+  /** Coordonnées bancaires imprimées sur les factures (normalisées, sans espaces). */
+  iban: string | null;
+  bic: string | null;
   isActive: boolean;
 }
 
@@ -323,6 +326,64 @@ export interface SubscriptionConfigDTO extends SubscriptionConfigPublicDTO {
   id: string;
   operatorId: string;
   isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/* ─── Factures ─── */
+
+/**
+ * Types du snapshot de facture : ceux de @lingengo/shared, pas une copie locale.
+ * `InvoiceMetadataLine` y admet les DEUX formes écrites en base — `designation`/
+ * `qty` (facturation d'un devis) et `product`/`quantity` (worker d'abonnement) —
+ * et `normalizeInvoiceLines` les ramène à une forme unique. L'écran et le PDF
+ * lisent ainsi exactement les mêmes lignes, sans divergence possible.
+ */
+export type {
+  InvoiceStatus,
+  InvoiceMetadata,
+  InvoiceMetadataLine,
+  InvoiceLine,
+} from "@lingengo/shared";
+
+import type { InvoiceStatus, InvoiceMetadata } from "@lingengo/shared";
+
+/**
+ * Machine à états des factures — MIROIR de INVOICE_TRANSITIONS
+ * (packages/api/src/services/invoices.service.ts), qui reste l'autorité :
+ * l'API rejette toute transition invalide même si l'UI la proposait.
+ * Sert uniquement à n'afficher que les boutons réellement possibles.
+ */
+export const INVOICE_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
+  DRAFT: ["SENT", "CANCELLED"],
+  SENT: ["PAID", "OVERDUE", "CANCELLED"],
+  OVERDUE: ["PAID", "CANCELLED"],
+  PAID: ["REFUNDED"],
+  CANCELLED: [],
+  REFUNDED: [],
+};
+
+export interface InvoiceDTO {
+  id: string;
+  invoiceNumber: string;
+  status: InvoiceStatus;
+  userId: string | null;
+  user: { id: string; name: string; email: string | null } | null;
+  quoteId: string | null;
+  quote: { id: string; numero: string; status?: QuoteStatus } | null;
+  clientNom: string | null;
+  clientEmail: string | null;
+  clientAdresse: string | null;
+  totalHtCents: number;
+  vatRate: number;
+  vatAmountCents: number;
+  totalTtcCents: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  dueDate: string;
+  paidAt: string | null;
+  pdfUrl: string | null;
+  metadata: InvoiceMetadata;
   createdAt: string;
   updatedAt: string;
 }

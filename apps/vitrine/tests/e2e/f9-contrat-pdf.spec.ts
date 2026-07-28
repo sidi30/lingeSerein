@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import fs from "node:fs";
+import { allerAuRecap, texteRecap } from "./helpers/wizard";
 
 /**
  * Smoke test : génération + téléchargement du contrat Pack Sérénité PDF (mode admin),
@@ -67,28 +68,29 @@ test.describe("Atelier devis — accès au générateur de contrat", () => {
   });
 });
 
-test.describe("Simulateur /devis — comparaison Pack Sérénité honnête", () => {
-  test("l'économie affichée reste réaliste (~49 €), pas ~383 €", async ({ page }) => {
-    await page.goto("/devis");
+test.describe("Devis — comparaison Pack Sérénité honnête", () => {
+  // L'économie annoncée doit rester celle du modèle : 150 € d'équivalent à l'unité
+  // (8 kits bain + 4 kits lit + 2 livraisons) − 89 € de forfait = 61 €/mois.
+  // Le bug historique multipliait par le nombre de rotations et affichait ~383 €.
+  function verifierEconomie(texte: string) {
+    expect(texte).not.toContain("383");
+    const match = texte.match(/économisez[^0-9]*([\d\s]+)[,.]?\d*\s?€/i);
+    expect(match).not.toBeNull();
+    const eco = Number(match![1].replace(/\s/g, ""));
+    expect(eco).toBe(61);
+  }
+
+  test("le récap du parcours public annonce 61 €/mois", async ({ page }) => {
+    await allerAuRecap(page);
+    verifierEconomie(await texteRecap(page));
+  });
+
+  test("le simulateur commercial annonce le même montant", async ({ page }) => {
+    await page.goto("/devis?admin=1");
     await page.waitForLoadState("networkidle");
 
-    const card = page
-      .getByText(/Pack Sérénité — .* \/ mois/i)
-      .locator("..")
-      .locator("..");
-    await expect(card).toBeVisible();
-
-    const cardText = (await card.innerText()).replace(/\s+/g, " ");
-
-    // Ne doit jamais afficher l'ancien montant erroné.
-    expect(cardText).not.toContain("383");
-
-    // Si un montant d'économie mensuelle est affiché, il doit rester modeste (≤ 100 €).
-    const match = cardText.match(/économisez[^0-9]*([\d\s]+)\s?€/i);
-    if (match) {
-      const eco = Number(match[1].replace(/\s/g, ""));
-      expect(eco).toBeGreaterThan(0);
-      expect(eco).toBeLessThanOrEqual(100);
-    }
+    const texte = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+    expect(texte).toContain("Pack Sérénité");
+    verifierEconomie(texte);
   });
 });

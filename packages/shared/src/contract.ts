@@ -8,6 +8,8 @@
  *  - PONCTUEL    : prestation ponctuelle (location & entretien à la commande).
  */
 
+import type { UrgencyLevel } from "./constants";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -82,10 +84,18 @@ export interface ContractData {
   remisePct: number;
   /** Montant de la remise. */
   remiseCents: number;
-  /** Frais de livraison (0 = offerte). */
+  /**
+   * Frais de livraison (0 = offerte, ou livraison sur devis dont le montant a
+   * été saisi manuellement — dans ce cas le libellé le précise).
+   */
   livraisonCents: number;
   /** Libellé exact des frais de livraison, identique à celui du devis. */
   livraisonLabel?: string;
+  /**
+   * Niveau de service livraison retenu sur le devis (jauge d'urgence).
+   * Optionnel : les contrats antérieurs à la jauge n'en portent pas.
+   */
+  urgency?: UrgencyLevel;
   /** Montant de TVA (0 si non applicable). */
   tvaCents: number;
 
@@ -133,10 +143,18 @@ export interface QuoteForContract {
   tvaApplicable: boolean;
   /** Remise en centièmes de pourcentage — 1000 = 10 %. */
   remisePct: number;
-  /** Frais de livraison du devis (urgence J+1/J+2 = 25 €, sinon tarif de zone). */
+  /**
+   * Frais de livraison du devis, en centimes, tels que retenus par
+   * `computeDeliveryFee` : forfait d'urgence (Express 24 h / Jour même), tarif
+   * de zone, 0 si offerte, ou montant saisi manuellement quand la livraison est
+   * « sur devis » (hors zone, Flash < 3 h). Quel que soit le cas, ce montant est
+   * repris tel quel par le contrat — aucun barème n'est recalculé ici.
+   */
   livraisonCents: number;
   /** Libellé exact des frais de livraison tel qu'imprimé sur le devis. */
   livraisonLabel?: string;
+  /** Niveau de service livraison retenu sur le devis (jauge d'urgence). */
+  urgency?: UrgencyLevel;
   /**
    * Total final du devis (TTC si TVA applicable, net sinon). Sert de garde-fou :
    * le contrat recalcule le total à partir des lignes + remise + livraison + TVA
@@ -318,6 +336,7 @@ export function quoteToContractData(
     remiseCents: fin.remiseCents,
     livraisonCents: fin.livraisonCents,
     livraisonLabel: quote.livraisonLabel,
+    urgency: quote.urgency,
     tvaCents: fin.tvaCents,
 
     // Commun

@@ -22,6 +22,7 @@ import type {
   QuoteDTO,
   QuoteStatus,
   ProductDTO,
+  InvoiceDTO,
 } from "@/lib/types";
 import {
   Download,
@@ -34,9 +35,12 @@ import {
   FileSignature,
   Search,
   UserPlus,
+  Receipt,
+  Truck,
 } from "lucide-react";
 import { DevisForm } from "@/components/devis/devis-form";
 import { ContractModal } from "@/components/devis/contract-modal";
+import { BonLivraisonModal } from "@/components/devis/bon-livraison-modal";
 import { ClientCreateModal } from "@/components/clients/client-create-modal";
 import { EmailText } from "@/components/ui/email-text";
 
@@ -70,6 +74,7 @@ export default function DevisDetailPage() {
   const [createClientModal, setCreateClientModal] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
   const [contractModal, setContractModal] = useState(false);
+  const [bonLivraisonModal, setBonLivraisonModal] = useState(false);
 
   // Mapping ligne → produit pour la conversion
   const [lineProductMapping, setLineProductMapping] = useState<Record<string, string>>({});
@@ -181,6 +186,19 @@ export default function DevisDetailPage() {
     },
   });
 
+  // Émission de la facture. Le back refuse un devis en brouillon, refusé ou
+  // expiré, et refuse d'en émettre une seconde si la première n'est pas annulée :
+  // dans ce cas son message nomme la facture existante, on le remonte tel quel.
+  const invoiceMutation = useMutation({
+    mutationFn: () => api.post<InvoiceDTO>(`/invoices/from-quote/${id}`, {}),
+    onSuccess: (invoice) => {
+      toast(`Facture ${invoice.invoiceNumber} créée`);
+      router.push(`/factures/${invoice.id}`);
+    },
+    onError: (err: unknown) =>
+      toast(err instanceof Error ? err.message : "Erreur lors de la facturation", "error"),
+  });
+
   // Téléchargement PDF.
   // try/catch obligatoire : sans lui, un échec de génération rejetait la promesse
   // dans le vide — le bouton semblait simplement mort, sans le moindre message.
@@ -241,6 +259,14 @@ export default function DevisDetailPage() {
   const isEditable = QUOTE_EDITABLE.includes(quote.status);
   const canDelete = quote.status === "BROUILLON";
   const canConvert = quote.status === "ACCEPTE" && !quote.convertedToOrderId;
+  // Un brouillon n'a pas encore été soumis au client : le facturer produirait une
+  // pièce comptable pour un montant que personne n'a validé.
+  const canInvoice = quote.status === "ACCEPTE" || quote.status === "ENVOYE";
+  const invoiceHint = canInvoice
+    ? "Émettre la facture à partir de ce devis"
+    : quote.status === "BROUILLON"
+      ? "Envoyez d'abord le devis au client : un brouillon ne peut pas être facturé."
+      : `Un devis ${statusConfig[quote.status].label.toLowerCase()} ne peut pas être facturé.`;
 
   return (
     <>
@@ -256,6 +282,24 @@ export default function DevisDetailPage() {
               <FileSignature className="h-4 w-4" aria-hidden="true" />
               Générer le contrat
             </Button>
+            <Button variant="secondary" size="sm" onClick={() => setBonLivraisonModal(true)}>
+              <Truck className="h-4 w-4" aria-hidden="true" />
+              Bon de livraison
+            </Button>
+            {/* Le title vit sur le span : un bouton désactivé a pointer-events:none
+                et n'afficherait donc jamais son propre tooltip. */}
+            <span title={invoiceHint}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!canInvoice}
+                loading={invoiceMutation.isPending}
+                onClick={() => invoiceMutation.mutate()}
+              >
+                <Receipt className="h-4 w-4" aria-hidden="true" />
+                Générer la facture
+              </Button>
+            </span>
             <Button
               variant="secondary"
               size="sm"
@@ -468,6 +512,13 @@ export default function DevisDetailPage() {
 
       {/* Modal génération de contrat */}
       <ContractModal quote={quote} open={contractModal} onClose={() => setContractModal(false)} />
+
+      {/* Modal bon de livraison & décharge */}
+      <BonLivraisonModal
+        quote={quote}
+        open={bonLivraisonModal}
+        onClose={() => setBonLivraisonModal(false)}
+      />
 
       {/* Modal conversion */}
       <Modal

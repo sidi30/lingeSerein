@@ -54,8 +54,10 @@ test.describe("F5 — Sticky CTA mobile", () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/");
 
-    await page.evaluate(() => window.scrollTo(0, 800));
-    await page.waitForTimeout(500);
+    // Le sticky CTA n'apparaît qu'au-delà de 600 px de défilement, et le site
+    // utilise un défilement doux : on force un saut immédiat.
+    await page.evaluate(() => window.scrollTo({ top: 900, behavior: "instant" as ScrollBehavior }));
+    await page.waitForTimeout(800);
 
     // Sticky CTA should be visible on mobile
     const stickyDevisBtn = page.locator(
@@ -69,10 +71,14 @@ test.describe("F5 — Sticky CTA mobile", () => {
   test("F5-06 — Sticky CTA contient bouton Appeler avec bon href tel:", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/");
-    await page.evaluate(() => window.scrollTo(0, 800));
-    await page.waitForTimeout(500);
+    // Le sticky CTA n'apparaît qu'au-delà de 600 px de défilement, et le site
+    // utilise un défilement doux : on force un saut immédiat.
+    await page.evaluate(() => window.scrollTo({ top: 900, behavior: "instant" as ScrollBehavior }));
+    await page.waitForTimeout(800);
 
-    const callBtn = page.getByRole("link", { name: /appeler/i });
+    // Le hero propose aussi un lien « Nous appeler » : on reste dans la barre collante.
+    const stickyBar = page.locator('[class*="lg:hidden"][class*="fixed"][class*="bottom"]');
+    const callBtn = stickyBar.getByRole("link", { name: /appeler/i });
     await expect(callBtn).toBeVisible({ timeout: 3000 });
     const href = await callBtn.getAttribute("href");
     expect(href).toBe("tel:+33753569548");

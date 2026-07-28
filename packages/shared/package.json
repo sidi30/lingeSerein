@@ -19,8 +19,8 @@
     "dev": "tsc --project tsconfig.build.json --watch",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
-    "test": "jest",
-    "test:coverage": "jest --coverage",
+    "test": "node --import tsx --test \"src/*.test.ts\"",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage \"src/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -30,6 +30,7 @@
   "devDependencies": {
     "@lingengo/eslint-config": "*",
     "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.8.0"
   }
 }

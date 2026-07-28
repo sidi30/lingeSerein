@@ -1,30 +1,32 @@
 # Linge Serein
 
-> Linge Serein est un service B2B de location, livraison et entretien de linge hôtelier (draps, serviettes, linge de bain et de lit) basé à Orange, dans le Vaucluse (84). Il s'adresse aux hôtels, gîtes, chambres d'hôtes, résidences de tourisme et locations saisonnières (Airbnb, meublés) qui veulent un linge de qualité hôtelière sans gérer la blanchisserie. Démarche éco-responsable (lessives Ecolabel, méthode RABC), sans engagement de durée.
+> Linge Serein est un service B2B de location, livraison et entretien de linge hôtelier (draps, serviettes, linge de bain et de lit) basé à Orange, dans le Vaucluse (84). Il livre Orange et ses communes limitrophes ; au-delà, la livraison est chiffrée sur devis. Il s'adresse aux hôtels, gîtes, chambres d'hôtes, résidences de tourisme et locations saisonnières (Airbnb, meublés) qui veulent un linge de qualité hôtelière sans gérer la blanchisserie. Démarche éco-responsable (lessives Ecolabel, méthode RABC). Location ponctuelle sans abonnement, ou Pack Sérénité mensuel avec engagement de 3 mois.
 
 ## Pages principales
 - [Accueil](https://lingeserein.fr/): Présentation de l'offre, fonctionnement, tarifs, avis clients et FAQ.
 - [Devis gratuit](https://lingeserein.fr/devis): Simulateur de devis en 2 minutes pour estimer le coût du linge (sets bain et lit, articles à l'unité, livraison).
-- [Zone de livraison](https://lingeserein.fr/zone-de-livraison): Communes desservies dans le Vaucluse depuis Orange.
+- [Zone de livraison](https://lingeserein.fr/zone-de-livraison): Communes desservies au tarif public depuis Orange, délais et forfaits d'urgence.
 - [Conditions générales de vente](https://lingeserein.fr/cgv): CGV de location et d'entretien.
 - [Conditions générales de prestation de service](https://lingeserein.fr/cgps): Modalités techniques, hygiéniques et opérationnelles.
 - [Mentions légales](https://lingeserein.fr/mentions-legales)
 - [Politique de confidentialité](https://lingeserein.fr/politique-confidentialite)
 
 ## Offres et tarifs (à partir de)
-- Set de linge de bain : 7,50 € / rotation.
-- Set de linge de lit : 16,50 € / rotation.
-- Pack Sérénité (abonnement mensuel, sans engagement) : 89 € / mois (≈ −49 % vs prix à la rotation).
+- Kit Bain (drap de bain 70×150 + serviette 50×90 + tapis 50×70) : 7,50 € / rotation.
+- Kit Lit (housse de couette + drap housse + taies) : 16,50 € / rotation.
+- Kit Complet (Kit Bain + Kit Lit + 2 serviettes 50×90 incluses) : 29,00 € / rotation, soit 4 € de moins que le détail.
+- Pack Sérénité (abonnement mensuel, engagement 3 mois) : 89 € / mois — 8 kits bain + 4 kits lit + 2 livraisons & reprises incluses, livrés en 2 passages (un par quinzaine : 4 kits bain + 2 kits lit à chaque fois), le linge étant repris sous 14 jours maximum. Économie d'environ 61 € / mois face aux mêmes prestations à l'unité (150 €).
 - Articles à l'unité : serviette 50×90 cm 4,50 € · drap de bain 70×150 cm 6,50 € · tapis de bain 50×70 cm 4,00 € · petite serviette 30×50 cm 2,50 € · drap housse 7,50 € · housse de couette 9,00 €.
-- Livraison : offerte à Orange dès 4 kits ; offerte dans tout le Vaucluse dès 120 € de commande ; 12 € zone proche (Carpentras, Vaison, Bollène) ; 15 € zone élargie (Avignon, Apt, Pertuis).
+- Livraison standard (J+2 à J+3) : 12 € à Orange comme dans les communes limitrophes ; offerte dès 4 kits à Orange ou dès 120 € de commande ; au-delà des communes limitrophes, sur devis.
+- Urgence (forfait fixe qui remplace le tarif de zone, non soumis aux gratuités) : Express 24 h (livraison le lendemain) 25 € · Jour même (sous 8 h, commande avant 12 h, selon disponibilité) 39 € · moins de 3 h, sur devis.
 
 ## Infos clés
 - Activité : location et entretien (blanchisserie professionnelle) de linge hôtelier B2B.
-- Zone desservie : tout le Vaucluse (84) depuis Orange — Avignon, Carpentras, Cavaillon, Apt, Vaison-la-Romaine, L'Isle-sur-la-Sorgue, Pertuis, Sorgues, Bollène, Châteauneuf-du-Pape, Gordes, etc.
-- Délai de livraison : 48 h ouvrées maximum, souvent le lendemain (J+0 possible à Orange).
-- Volume minimum : aucun, possible dès un set unique.
+- Zone desservie au tarif public : Orange (84100) et ses communes limitrophes — Jonquières, Courthézon, Camaret-sur-Aigues, Piolenc, Caderousse, Châteauneuf-du-Pape, Sérignan-du-Comtat, Violès, Travaillan. Au-delà, livraison possible mais chiffrée sur devis.
+- Délai de livraison : J+2 à J+3 en standard ; Express 24 h, jour même (sous 8 h) ou moins de 3 h en option payante.
+- Volume minimum : aucun, possible dès un kit unique.
 - Éco-responsable : lessives certifiées Ecolabel européen sans phosphates ni allergènes, traçabilité bactériologique RABC, tournées optimisées.
-- Sans engagement de durée ; abonnement modifiable selon la saison.
+- Location ponctuelle sans engagement ; le Pack Sérénité comporte un engagement de 3 mois puis un préavis de 30 jours. Composition ajustable selon la saison.
 - Adresse : Rue Simone Weil, 84100 Orange, Vaucluse, France.
 - Téléphone : +33 7 53 56 95 48.
 - Email : lingeserein@gmail.com.

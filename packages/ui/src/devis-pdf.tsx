@@ -13,9 +13,13 @@ import {
   computeDevisTotals,
   printableField,
   resolveLivraisonLabel,
+  urgencyTier,
 } from "@lingengo/shared";
 import type { DevisData } from "@lingengo/shared";
 import { LOGO_DATA_URI } from "./logo";
+import { legalMentionsLine, resolvePrestataire } from "./operator";
+import type { OperatorInfo } from "./operator";
+export type { OperatorInfo } from "./operator";
 
 /* ─── Branding ─── */
 
@@ -25,23 +29,6 @@ const INK = "#1f2937";
 const GRAY = "#6b7280";
 const LINE = "#e5e0f0";
 const CREAM = "#faf8f3";
-
-const SOCIETE_DEFAULT = {
-  nom: "Linge Serein",
-  baseline: "Votre linge, notre sérénité",
-  adresse: "Rue Simone Weil, 84100 Orange, Vaucluse",
-  tel: "07 53 56 95 48",
-  email: "lingeserein@gmail.com",
-};
-
-export interface OperatorInfo {
-  nom?: string;
-  adresse?: string;
-  tel?: string;
-  email?: string;
-  siret?: string | null;
-  legalMentions?: string | null;
-}
 
 /* ─── Helpers ─── */
 
@@ -126,6 +113,13 @@ const styles = StyleSheet.create({
   totalRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 },
   totalLabel: { fontSize: 9, color: GRAY },
   totalValue: { fontSize: 9, color: INK, textAlign: "right" },
+  urgencyNote: {
+    fontSize: 7.5,
+    color: LAVENDER,
+    fontFamily: "Helvetica-Oblique",
+    marginTop: 1,
+    marginBottom: 1,
+  },
   totalDivider: { height: 1, backgroundColor: LINE, marginVertical: 5 },
   grandRow: {
     flexDirection: "row",
@@ -210,17 +204,24 @@ export function DevisDocument({
   operator?: OperatorInfo;
 }) {
   const t = computeDevisTotals(data);
+  const prestataire = resolvePrestataire(operator);
   const soc = {
-    nom: operator?.nom ?? SOCIETE_DEFAULT.nom,
-    baseline: SOCIETE_DEFAULT.baseline,
-    adresse: operator?.adresse ?? SOCIETE_DEFAULT.adresse,
-    tel: operator?.tel ?? SOCIETE_DEFAULT.tel,
-    email: operator?.email ?? SOCIETE_DEFAULT.email,
+    nom: prestataire.nomCommercial,
+    baseline: prestataire.baseline,
+    adresse: prestataire.adresse,
+    tel: prestataire.tel,
+    email: prestataire.email,
   };
+  // La mention « TVA non applicable, art. 293 B du CGI » reste portée par la
+  // ligne de conditions ci-dessous, qui la conditionne à `tvaApplicable` —
+  // `legalMentionsLine` ne la répète pas.
+  const legalMentions = legalMentionsLine(operator);
 
   const isBrouillon = data.numero?.includes("BROUILLON") || data.numero === "";
   const blank = !!data.blankFields;
   const livraisonLabel = resolveLivraisonLabel(data);
+  // Niveau de service livraison (jauge d'urgence), affiché sous la ligne livraison.
+  const urgency = data.urgency ? urgencyTier(data.urgency) : null;
   // Lignes vierges à compléter au stylo (mode « devis à remplir »).
   const blankRows = Array.from({ length: blank ? (data.blankLines ?? 5) : 0 });
 
@@ -362,6 +363,14 @@ export function DevisDocument({
                 {data.livraisonCents === 0 ? "Offerte" : euros(data.livraisonCents)}
               </Text>
             </View>
+            {!!urgency && (
+              <Text style={styles.urgencyNote}>
+                {"Niveau de service : "}
+                {urgency.label}
+                {" — "}
+                {urgency.delaiText}
+              </Text>
+            )}
             <View style={styles.totalDivider} />
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Total HT</Text>
@@ -404,6 +413,7 @@ export function DevisDocument({
             <Text style={{ marginTop: 3 }}>{data.reglement}</Text>
           )}
           <Text style={{ marginTop: 3 }}>{DELIVERY_RULE_TEXT}</Text>
+          <Text style={{ marginTop: 5 }}>{legalMentions}</Text>
         </View>
 
         {/* Signatures */}

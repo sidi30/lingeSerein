@@ -24,7 +24,7 @@ export function Footer() {
               height={100}
               className="h-16 w-auto mb-6 opacity-90"
             />
-            <p className="text-sm leading-relaxed text-white/50 max-w-xs">
+            <p className="text-sm leading-relaxed text-white/70 max-w-xs">
               Votre linge, notre sérénité.
               <br />
               Service B2B de linge hôtelier basé à Orange, Vaucluse.
@@ -40,7 +40,7 @@ export function Footer() {
                 <a
                   key={link.href}
                   href={link.href}
-                  className="text-sm text-white/50 hover:text-white transition-colors duration-300"
+                  className="text-sm text-white/70 hover:text-white transition-colors duration-300"
                 >
                   {link.label}
                 </a>
@@ -52,7 +52,7 @@ export function Footer() {
             <h4 className="text-sm font-medium text-white/90 uppercase tracking-wider mb-5">
               Contact
             </h4>
-            <div className="flex flex-col gap-3 text-sm text-white/50">
+            <div className="flex flex-col gap-3 text-sm text-white/70">
               <a href="tel:+33753569548" className="hover:text-white transition-colors">
                 07 53 56 95 48
               </a>

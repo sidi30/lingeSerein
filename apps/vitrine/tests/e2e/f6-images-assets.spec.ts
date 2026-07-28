@@ -45,15 +45,18 @@ test.describe("F6 — Images et assets", () => {
     expect(alt !== null || ariaHidden === "true").toBeTruthy();
   });
 
-  test('F6-03 — Logo image dans navbar a alt="Linge Serein"', async ({ page }) => {
+  // L'alternative textuelle des logos est enrichie pour le SEO
+  // (« Linge Serein — location et entretien… ») : on vérifie qu'elle nomme bien
+  // la marque, pas qu'elle soit strictement égale à « Linge Serein ».
+  test("F6-03 — Le logo de la navbar a une alternative nommant la marque", async ({ page }) => {
     await page.goto("/");
-    const navLogo = page.locator('nav img[alt="Linge Serein"]').first();
+    const navLogo = page.locator('nav img[alt^="Linge Serein"]').first();
     await expect(navLogo).toBeVisible();
   });
 
-  test('F6-04 — Logo image dans footer a alt="Linge Serein"', async ({ page }) => {
+  test("F6-04 — Le logo du footer a une alternative nommant la marque", async ({ page }) => {
     await page.goto("/");
-    const footerLogo = page.locator('footer img[alt="Linge Serein"]');
+    const footerLogo = page.locator('footer img[alt^="Linge Serein"]');
     await expect(footerLogo).toBeVisible();
   });
 
