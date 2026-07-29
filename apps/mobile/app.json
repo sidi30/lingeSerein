@@ -20,10 +20,8 @@
         "googleMapsApiKey": ""
       },
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSLocationWhenInUseUsageDescription": "Linge Serein utilise votre position pour afficher la carte de votre tournée de livraison."
-      },
-      "entitlements": {
-        "aps-environment": "production"
       }
     },
     "android": {
