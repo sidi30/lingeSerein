@@ -31,6 +31,14 @@ jobs:
       - name: Build shared
         run: npm run build --workspace=packages/shared
 
+      # ... et @lingengo/ui pour le générateur de devis PDF. Ses exports
+      # pointent tous sur ./dist/*.js : sans cette compilation, un checkout neuf
+      # n'a pas de dist et le build de la vitrine échoue en « Module not found:
+      # Can't resolve '@lingengo/ui/devis-pdf' ». Invisible en local, où dist
+      # traîne depuis un build précédent.
+      - name: Build ui
+        run: npm run build --workspace=packages/ui
+
       - name: Build vitrine
         run: npm run build --workspace=apps/vitrine
 
