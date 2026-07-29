@@ -8,12 +8,37 @@ name: iOS Build (CI Mac) → TestFlight
 #
 # Manual trigger only (Actions tab → Run workflow). One run = one TestFlight build.
 #
-# Required secret: EXPO_TOKEN
-#   https://expo.dev/accounts/sidi30/settings/access-tokens
+# Secrets utilisés
 #
-# iOS distribution credentials (cert + provisioning) and the App Store Connect
-# API key are managed by EAS and fetched non-interactively during the local
-# build / submit — nothing else to configure here.
+#   EXPO_TOKEN  (obligatoire)
+#     https://expo.dev/accounts/sidi30/settings/access-tokens
+#
+#   EXPO_APPLE_ID + EXPO_APPLE_APP_SPECIFIC_PASSWORD  (voir ci-dessous)
+#     Mot de passe d'application à créer sur https://appleid.apple.com
+#     (Connexion et sécurité → Mots de passe des apps). Ce n'est PAS le mot de
+#     passe du compte Apple, et il contourne la 2FA — c'est ce qui rend
+#     l'opération possible sans intervention humaine.
+#
+# POURQUOI ces deux secrets Apple, alors que les credentials vivent chez EAS.
+#
+# Sans authentification Apple, `eas build --non-interactive` écrit dans son log :
+#
+#   Skipping Provisioning Profile validation on Apple Servers
+#   because we aren't authenticated.
+#
+# Il réutilise alors tel quel le profil stocké, SANS vérifier qu'il correspond
+# encore aux entitlements de l'app. C'est ce qui a fait échouer les builds 13, 14
+# et 15 de la v0.3.0 : le profil date du 10/06/2026, donc d'avant l'ajout
+# d'`expo-notifications`, et ne porte ni la capability Push Notifications ni
+# `aps-environment`. Xcode refuse de signer.
+#
+# Authentifié, EAS valide le profil auprès d'Apple, active la capability
+# manquante sur l'App ID et régénère le profil — automatiquement, à chaque build.
+# Le problème se répare donc tout seul, ici, plutôt que dans un menu interactif.
+#
+# Si les deux secrets sont absents, le build tourne quand même : il retombe sur
+# le comportement non authentifié, et échouera tant que le profil n'aura pas été
+# régénéré à la main (`eas credentials -p ios`).
 
 on:
   workflow_dispatch:
@@ -29,6 +54,11 @@ concurrency:
 
 permissions:
   contents: read
+
+env:
+  # `secrets` n'est pas lisible depuis un `if:` d'étape — on le projette ici,
+  # au niveau du job, où le contexte est disponible.
+  HAS_APPLE_AUTH: ${{ secrets.EXPO_APPLE_ID != '' }}
 
 jobs:
   build:
@@ -83,6 +113,11 @@ jobs:
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          # Authentification Apple non interactive : permet à EAS de valider le
+          # profil de provisionnement, de synchroniser les capabilities de l'App
+          # ID et de régénérer le profil si besoin. Cf. l'en-tête du fichier.
+          EXPO_APPLE_ID: ${{ secrets.EXPO_APPLE_ID }}
+          EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.EXPO_APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
           eas build \
             --platform ios \
@@ -115,6 +150,11 @@ jobs:
             --profile production \
             --path "$GITHUB_WORKSPACE/app.ipa" \
             --non-interactive
+
+      - name: Avertir si l'authentification Apple est absente
+        if: env.HAS_APPLE_AUTH != 'true'
+        run: |
+          echo "::warning title=Pas d'authentification Apple::EXPO_APPLE_ID absent — EAS ne pourra ni valider ni régénérer le profil de provisionnement. Si la signature échoue sur la capability Push Notifications, c'est la cause."
 
       - name: Summary
         if: success()
