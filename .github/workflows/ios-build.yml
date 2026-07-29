@@ -13,13 +13,13 @@ name: iOS Build (CI Mac) → TestFlight
 #   EXPO_TOKEN  (obligatoire)
 #     https://expo.dev/accounts/sidi30/settings/access-tokens
 #
-#   EXPO_APPLE_ID + EXPO_APPLE_APP_SPECIFIC_PASSWORD  (voir ci-dessous)
-#     Mot de passe d'application à créer sur https://appleid.apple.com
-#     (Connexion et sécurité → Mots de passe des apps). Ce n'est PAS le mot de
-#     passe du compte Apple, et il contourne la 2FA — c'est ce qui rend
-#     l'opération possible sans intervention humaine.
+#   ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8_BASE64  (facultatifs, voir plus bas)
+#     Clé App Store Connect API — MÊME mécanique que le workflow iOS de
+#     majordom, qui s'en sert pour sa lane `bootstrap_signing`. Le .p8 est stocké
+#     encodé en base64 et n'est écrit sur le disque du runner qu'au moment du
+#     build, puis effacé.
 #
-# POURQUOI ces deux secrets Apple, alors que les credentials vivent chez EAS.
+# POURQUOI la clé ASC ici, alors que les credentials vivent chez EAS.
 #
 # Sans authentification Apple, `eas build --non-interactive` écrit dans son log :
 #
@@ -32,13 +32,13 @@ name: iOS Build (CI Mac) → TestFlight
 # d'`expo-notifications`, et ne porte ni la capability Push Notifications ni
 # `aps-environment`. Xcode refuse de signer.
 #
-# Authentifié, EAS valide le profil auprès d'Apple, active la capability
-# manquante sur l'App ID et régénère le profil — automatiquement, à chaque build.
-# Le problème se répare donc tout seul, ici, plutôt que dans un menu interactif.
+# Authentifié par la clé ASC, EAS valide le profil auprès d'Apple, active la
+# capability manquante sur l'App ID et régénère le profil — exactement ce que
+# fait la lane `bootstrap_signing` de majordom, mais sans fastlane ni dépôt match,
+# puisque c'est EAS qui détient les credentials.
 #
-# Si les deux secrets sont absents, le build tourne quand même : il retombe sur
-# le comportement non authentifié, et échouera tant que le profil n'aura pas été
-# régénéré à la main (`eas credentials -p ios`).
+# Secrets absents : le build tourne quand même, en mode non authentifié, et
+# échouera tant que le profil n'aura pas été régénéré autrement.
 
 on:
   workflow_dispatch:
@@ -58,7 +58,7 @@ permissions:
 env:
   # `secrets` n'est pas lisible depuis un `if:` d'étape — on le projette ici,
   # au niveau du job, où le contexte est disponible.
-  HAS_APPLE_AUTH: ${{ secrets.EXPO_APPLE_ID != '' }}
+  HAS_APPLE_AUTH: ${{ secrets.ASC_KEY_P8_BASE64 != '' }}
 
 jobs:
   build:
@@ -109,15 +109,24 @@ jobs:
       # before the local Xcode compile (`--local` only moves the *compile* step
       # here, not version resolution). If TestFlight ever rejects a duplicate
       # buildNumber, bump `version` in app.json and re-run.
+      - name: Déposer la clé ASC sur le runner
+        if: env.HAS_APPLE_AUTH == 'true'
+        env:
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+        run: |
+          echo "$ASC_KEY_P8_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/asc-api-key.p8"
+          chmod 600 "$GITHUB_WORKSPACE/asc-api-key.p8"
+
       - name: Build .ipa locally (no EAS cloud quota)
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          # Authentification Apple non interactive : permet à EAS de valider le
-          # profil de provisionnement, de synchroniser les capabilities de l'App
-          # ID et de régénérer le profil si besoin. Cf. l'en-tête du fichier.
-          EXPO_APPLE_ID: ${{ secrets.EXPO_APPLE_ID }}
-          EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.EXPO_APPLE_APP_SPECIFIC_PASSWORD }}
+          # Authentification Apple non interactive par clé ASC API : permet à
+          # EAS de valider le profil, de synchroniser les capabilities de l'App
+          # ID et de régénérer le profil. Cf. l'en-tête du fichier.
+          EXPO_ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          EXPO_ASC_API_KEY_PATH: ${{ github.workspace }}/asc-api-key.p8
         run: |
           eas build \
             --platform ios \
@@ -151,10 +160,16 @@ jobs:
             --path "$GITHUB_WORKSPACE/app.ipa" \
             --non-interactive
 
+      # Effacée quoi qu'il arrive : une clé privée ne doit pas survivre à l'étape
+      # qui en avait besoin, même si le build échoue.
+      - name: Effacer la clé ASC
+        if: always()
+        run: rm -f "$GITHUB_WORKSPACE/asc-api-key.p8"
+
       - name: Avertir si l'authentification Apple est absente
         if: env.HAS_APPLE_AUTH != 'true'
         run: |
-          echo "::warning title=Pas d'authentification Apple::EXPO_APPLE_ID absent — EAS ne pourra ni valider ni régénérer le profil de provisionnement. Si la signature échoue sur la capability Push Notifications, c'est la cause."
+          echo "::warning title=Pas d'authentification Apple::ASC_KEY_P8_BASE64 absent — EAS ne pourra ni valider ni régénérer le profil de provisionnement. Si la signature échoue sur la capability Push Notifications, c'est la cause."
 
       - name: Summary
         if: success()
