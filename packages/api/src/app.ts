@@ -26,6 +26,7 @@ import publicQuoteRoutes from "./routes/quotes/public.js";
 import userRoutes from "./routes/users/index.js";
 import settingsRoutes from "./routes/settings/index.js";
 import { AppError } from "./utils/errors.js";
+import { trustedOrigins } from "./utils/origins.js";
 
 /**
  * Construit et configure l'instance Fastify avec tous les plugins.
@@ -57,10 +58,7 @@ export async function buildApp() {
   });
 
   await app.register(cors, {
-    origin: [
-      process.env["ADMIN_WEB_URL"] ?? "http://localhost:3000",
-      process.env["MOBILE_WEB_URL"] ?? "http://localhost:8081",
-    ],
+    origin: trustedOrigins(),
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
