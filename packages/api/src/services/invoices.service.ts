@@ -428,6 +428,21 @@ export class InvoicesService {
       );
     }
 
+    // Une facture, même en brouillon, a pu faire SORTIR du linge :
+    // `POST /rotations/from-invoice` l'accepte tant qu'elle n'est pas annulée.
+    // L'effacer laisserait la rotation pointer une facture disparue, et surtout
+    // priverait l'exploitant de la pièce qui explique ce qui est parti.
+    const rotationsEnCours = await this.prisma.rotation.count({
+      where: { invoiceId: id, deletedAt: null, status: { notIn: ["REPRISE", "ANNULEE"] } },
+    });
+
+    if (rotationsEnCours > 0) {
+      throw new ConflictError(
+        `${rotationsEnCours} rotation(s) en cours suivent le linge sorti pour cette facture. ` +
+          `Clôturez la reprise ou annulez ces rotations avant de la supprimer.`,
+      );
+    }
+
     await this.prisma.invoice.update({
       where: { id },
       data: { deletedAt: new Date() },

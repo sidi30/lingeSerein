@@ -926,6 +926,18 @@ export class OrdersService {
       );
     }
 
+    // La rotation d'une commande n'a aucune vie propre : elle décrit le linge
+    // sorti POUR cette commande. La laisser derrière ferait subsister au
+    // planning une ligne rattachée à une commande qui n'existe plus, et que rien
+    // ne permettrait de rouvrir. Seuls PENDING et CANCELLED arrivent ici — la
+    // garde ci-dessus l'impose — donc la rotation est forcément prévisionnelle
+    // ou déjà annulée : son linge est déjà rendu, aucun mouvement de parc à
+    // rejouer.
+    const { count: rotations } = await this.prisma.rotation.updateMany({
+      where: { orderId: id, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+
     await this.prisma.order.update({
       where: { id },
       data: { deletedAt: new Date() },
@@ -937,7 +949,11 @@ export class OrdersService {
       action: "DELETE",
       entity: "Order",
       entityId: id,
-      changes: { orderNumber: order.orderNumber, previousStatus: order.status },
+      changes: {
+        orderNumber: order.orderNumber,
+        previousStatus: order.status,
+        ...(rotations > 0 ? { rotationsSupprimees: rotations } : {}),
+      },
       ipAddress,
       userAgent,
     });
