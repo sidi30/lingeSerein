@@ -116,6 +116,9 @@ export function RoundsTab() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedRoundId, setSelectedRoundId] = useState<string | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  /** Motif d'annulation — facultatif, mais c'est lui qui explique le trou au planning. */
+  const [motif, setMotif] = useState("");
   const [form, setForm] = useState({
     date: "",
     driverId: "",
@@ -206,6 +209,32 @@ export function RoundsTab() {
     },
     onError: (err: unknown) =>
       toast(err instanceof Error ? err.message : "Erreur lors de la création", "error"),
+  });
+
+  /**
+   * Annulation d'une tournée — distincte de la suppression juste en dessous.
+   *
+   * La suppression vaut pour une tournée qui n'aurait jamais dû exister ; elle
+   * est refusée dès qu'un arrêt est livré. L'annulation couvre le cas courant
+   * de l'exploitation : la tournée était juste, mais elle n'aura pas lieu. Elle
+   * reste donc au planning, barrée d'un « Annulée », et c'est la SEULE issue
+   * quand la journée a déjà commencé.
+   */
+  const cancelMutation = useMutation({
+    mutationFn: (roundId: string) =>
+      api.patch(
+        `/deliveries/rounds/${roundId}/cancel`,
+        motif.trim() ? { motif: motif.trim() } : {},
+      ),
+    onSuccess: () => {
+      toast("Tournée annulée — le livreur et les clients concernés sont prévenus");
+      void invalidateAfter(queryClient, "delivery");
+      setCancelOpen(false);
+      setMotif("");
+      setSelectedRoundId(null);
+    },
+    onError: (err: unknown) =>
+      toast(err instanceof Error ? err.message : "Erreur lors de l'annulation", "error"),
   });
 
   const roundsByDay = useMemo(() => {
@@ -536,7 +565,22 @@ export function RoundsTab() {
               </div>
             </div>
 
-            <div className="flex justify-start border-t border-gray-100 pt-4">
+            <div className="flex flex-wrap items-center justify-start gap-3 border-t border-gray-100 pt-4">
+              {/* Annulation — proposée tant que la tournée n'est ni terminée ni
+                  déjà annulée. C'est la seule action possible quand des arrêts
+                  sont livrés, la suppression étant alors refusée. */}
+              {roundDetail.status !== "COMPLETED" && roundDetail.status !== "CANCELLED" && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setMotif("");
+                    setCancelOpen(true);
+                  }}
+                >
+                  Annuler la tournée
+                </Button>
+              )}
+
               {/* Une tournée dont un arrêt est livré porte des preuves de remise
                   (signature, quantités) : l'API refuse alors la suppression
                   (422 ROUND_HAS_COMPLETED_STOPS), et l'UI le dit avant l'appel. */}
@@ -557,6 +601,66 @@ export function RoundsTab() {
                 scopes={["delivery"]}
                 onDeleted={() => setSelectedRoundId(null)}
               />
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ---- Confirmation d'annulation ---- */}
+      <Modal open={cancelOpen} onClose={() => setCancelOpen(false)} title="Annuler cette tournée ?">
+        {roundDetail && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-700">
+              La tournée du{" "}
+              <span className="font-medium">
+                {new Date(roundDetail.date).toLocaleDateString("fr-FR")}
+              </span>{" "}
+              restera au planning, marquée « Annulée ».
+            </p>
+
+            {/* L'admin doit savoir ce que le bouton déclenche VRAIMENT : trois
+                effets partent avec le changement de statut, dont deux envois. */}
+            <ul className="list-disc space-y-1 pl-5 text-sm text-gray-600">
+              <li>
+                Les {roundDetail.stops.filter((s) => s.status === "PENDING").length} arrêt(s)
+                restant(s) passent en « Sauté ».
+              </li>
+              <li>Les arrêts déjà livrés sont conservés, avec leurs preuves de remise.</li>
+              <li>
+                Les propositions de passage groupé liées à cette tournée sont retirées — plus de
+                camion, plus d&apos;offre.
+              </li>
+              <li>Le livreur et les clients non servis sont prévenus.</li>
+            </ul>
+
+            <div>
+              <label htmlFor="motif-annulation" className="mb-1 block text-sm font-medium">
+                Motif <span className="text-gray-400">(facultatif)</span>
+              </label>
+              <Input
+                id="motif-annulation"
+                value={motif}
+                maxLength={500}
+                onChange={(e) => setMotif(e.target.value)}
+                placeholder="camion en panne, livreur souffrant…"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Conservé dans les notes de la tournée et le journal d&apos;audit : dans trois
+                semaines, c&apos;est la seule chose qui expliquera ce trou au planning.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setCancelOpen(false)}>
+                Revenir
+              </Button>
+              <Button
+                variant="danger"
+                disabled={cancelMutation.isPending}
+                onClick={() => cancelMutation.mutate(roundDetail.id)}
+              >
+                {cancelMutation.isPending ? "Annulation…" : "Confirmer l'annulation"}
+              </Button>
             </div>
           </div>
         )}

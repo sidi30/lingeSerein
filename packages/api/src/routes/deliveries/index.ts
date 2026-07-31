@@ -7,6 +7,7 @@ import {
   createRoundSchema,
   listRoundsQuerySchema,
   completeStopSchema,
+  cancelRoundSchema,
 } from "../../schemas/deliveries.schema.js";
 import { operatorIdOf } from "../../utils/operator.js";
 
@@ -172,6 +173,51 @@ export default async function deliveryRoutes(app: FastifyInstance): Promise<void
       );
 
       return reply.send({ success: true, data: round });
+    },
+  );
+
+  // ---- PATCH /deliveries/rounds/:id/cancel (admin) ----
+  app.patch<{ Params: { id: string } }>(
+    "/rounds/:id/cancel",
+    {
+      preHandler: [app.authenticate, requireRole("ROLE_ADMIN", "ROLE_SUPER_ADMIN")],
+      schema: {
+        tags: ["Livraisons"],
+        summary: "Annuler une tournée sans l'effacer",
+        description:
+          "Complément du DELETE : la suppression vaut pour une tournée qui n'aurait jamais dû " +
+          "exister, l'annulation pour une tournée juste qui n'aura pas lieu (livreur souffrant, " +
+          "panne). Les arrêts restants passent en SKIPPED, les opportunités de passage groupé " +
+          "de la tournée sont supprimées — elles n'existent que parce qu'un camion passe — et " +
+          "le livreur comme les clients non servis sont prévenus. Refuse une tournée déjà " +
+          "terminée (422 ROUND_ALREADY_COMPLETED) ou déjà annulée (422 ROUND_ALREADY_CANCELLED). " +
+          "C'est la seule issue quand des arrêts sont déjà livrés, le DELETE étant alors refusé.",
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      const paramsParsed = idParamSchema.safeParse(request.params);
+      if (!paramsParsed.success) {
+        throw new ValidationError(
+          paramsParsed.error.flatten().fieldErrors as Record<string, string[]>,
+        );
+      }
+
+      // Corps facultatif : `PATCH .../cancel` sans corps est légitime.
+      const parsed = cancelRoundSchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.flatten().fieldErrors as Record<string, string[]>);
+      }
+
+      const result = await service.cancelRound(
+        paramsParsed.data.id,
+        request.user.sub,
+        parsed.data.motif,
+        request.ip,
+        request.headers["user-agent"],
+      );
+
+      return reply.send({ success: true, data: result });
     },
   );
 

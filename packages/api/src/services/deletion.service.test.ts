@@ -98,6 +98,11 @@ interface Fixture {
   deliveryStops?: any[];
   refreshTokens?: any[];
   deviceTokens?: any[];
+  passageResponses?: any[];
+  notifications?: any[];
+  notificationSettings?: any[];
+  clientStocks?: any[];
+  deliveryRounds?: any[];
 }
 
 function createFakePrisma(f: Fixture = {}) {
@@ -132,6 +137,11 @@ function createFakePrisma(f: Fixture = {}) {
     deliveryStop: delegate(f.deliveryStops ?? []),
     refreshToken: delegate(f.refreshTokens ?? []),
     deviceToken: delegate(f.deviceTokens ?? []),
+    passageResponse: delegate(f.passageResponses ?? []),
+    notification: delegate(f.notifications ?? []),
+    notificationSetting: delegate(f.notificationSettings ?? []),
+    clientStock: delegate(f.clientStocks ?? []),
+    deliveryRound: delegate(f.deliveryRounds ?? []),
     auditLog: { rows: [] as any[] },
   };
 
@@ -200,8 +210,10 @@ describe("aperçu avant suppression d'un client", () => {
       rotations: [rotation(), rotation({ status: "REPRISE" }), rotation({ status: "ANNULEE" })],
       subscriptions: [{ id: "s1", userId: CLIENT, operatorId: OP }],
       deliveryStops: [
-        { id: "st1", clientId: CLIENT },
-        { id: "st2", clientId: CLIENT },
+        { id: "st1", clientId: CLIENT, status: "PENDING" },
+        { id: "st2", clientId: CLIENT, status: "PENDING" },
+        // Déjà livré : compté à part, et il survivra à la suppression.
+        { id: "st3", clientId: CLIENT, status: "COMPLETED" },
       ],
     });
 
@@ -212,7 +224,7 @@ describe("aperçu avant suppression d'un client", () => {
     assert.equal(preview.orders, 1);
     assert.deepEqual(preview.rotations, { active: 1, closed: 2 });
     assert.equal(preview.subscription, true);
-    assert.equal(preview.deliveryStops, 2);
+    assert.deepEqual(preview.deliveryStops, { pending: 2, joue: 1 });
   });
 
   it("annonce le blocage quand une facture est émise", async () => {
@@ -327,6 +339,10 @@ describe("cascade sur un client", () => {
       orders: 2,
       rotations: 2,
       subscription: true,
+      deliveryStops: 0,
+      passageResponses: 0,
+      notifications: 0,
+      stocksLiberes: [],
     });
     assert.ok(ctx.store.quote.rows.every((q) => q.deletedAt !== null));
     assert.ok(ctx.store.order.rows.every((o) => o.deletedAt !== null));
@@ -624,5 +640,208 @@ describe("aperçu et suppression d'un abonnement", () => {
     await assert.rejects(() => service(prisma).previewSubscription(SUB, "autre-op"), {
       code: "NOT_FOUND",
     });
+  });
+});
+
+// ===========================================================================
+
+/**
+ * Ce que la cascade laissait derrière elle.
+ *
+ * Le symptôme visible était un arrêt « Client supprimé » au milieu d'une
+ * tournée : le client n'existait plus nulle part, sauf dans l'application du
+ * livreur, qui partait le servir. Ces tests fixent la frontière entre ce qui
+ * disparaît (la planification) et ce qui reste (les preuves).
+ */
+describe("cascade — tournées, passages et stock", () => {
+  function contexte() {
+    return createFakePrisma({
+      deliveryStops: [
+        { id: "st1", clientId: CLIENT, status: "PENDING" },
+        { id: "st2", clientId: CLIENT, status: "COMPLETED" },
+        { id: "st3", clientId: CLIENT, status: "SKIPPED" },
+        { id: "st4", clientId: CLIENT, status: "FAILED" },
+        // Arrêt d'un AUTRE client : la cascade ne doit jamais déborder.
+        { id: "st5", clientId: "client-2", status: "PENDING" },
+      ],
+      passageResponses: [
+        { id: "pr1", userId: CLIENT },
+        { id: "pr2", userId: "client-2" },
+      ],
+      notifications: [
+        { id: "n1", userId: CLIENT },
+        { id: "n2", userId: "client-2" },
+      ],
+      notificationSettings: [{ id: "ns1", userId: CLIENT }],
+      clientStocks: [
+        { id: "cs1", userId: CLIENT, productRange: "BAIN", totalInCirculation: 12 },
+        { id: "cs2", userId: CLIENT, productRange: "LIT", totalInCirculation: 0 },
+      ],
+    });
+  }
+
+  it("supprime les arrêts À VENIR du client", async () => {
+    const { prisma, store } = contexte();
+    const result = await service(prisma).cascadeDeleteUser(CLIENT, OP, ADMIN, "ROLE_ADMIN");
+
+    assert.equal(result.deleted.deliveryStops, 1);
+    assert.equal(
+      store.deliveryStop.rows.find((s: any) => s.id === "st1"),
+      undefined,
+    );
+  });
+
+  it("CONSERVE les arrêts déjà joués — ils portent les preuves de remise", async () => {
+    const { prisma, store } = contexte();
+    await service(prisma).cascadeDeleteUser(CLIENT, OP, ADMIN, "ROLE_ADMIN");
+
+    // Livré, sauté, échoué : trois faits datés. Les effacer réécrirait
+    // l'historique d'une journée de livraison.
+    for (const id of ["st2", "st3", "st4"]) {
+      assert.ok(
+        store.deliveryStop.rows.some((s: any) => s.id === id),
+        "l'arrêt " + id + " devait survivre",
+      );
+    }
+  });
+
+  it("ne déborde jamais sur un autre client", async () => {
+    const { prisma, store } = contexte();
+    await service(prisma).cascadeDeleteUser(CLIENT, OP, ADMIN, "ROLE_ADMIN");
+
+    assert.ok(store.deliveryStop.rows.some((s: any) => s.id === "st5"));
+    assert.ok(store.passageResponse.rows.some((r: any) => r.id === "pr2"));
+    assert.ok(store.notification.rows.some((n: any) => n.id === "n2"));
+  });
+
+  it("efface les réponses aux passages groupés", async () => {
+    // En laisser une ferait charger du linge pour un client disparu.
+    const { prisma, store } = contexte();
+    const result = await service(prisma).cascadeDeleteUser(CLIENT, OP, ADMIN, "ROLE_ADMIN");
+
+    assert.equal(result.deleted.passageResponses, 1);
+    assert.equal(store.passageResponse.rows.filter((r: any) => r.userId === CLIENT).length, 0);
+  });
+
+  it("efface notifications et préférences", async () => {
+    const { prisma, store } = contexte();
+    const result = await service(prisma).cascadeDeleteUser(CLIENT, OP, ADMIN, "ROLE_ADMIN");
+
+    assert.equal(result.deleted.notifications, 1);
+    assert.equal(store.notificationSetting.rows.length, 0);
+  });
+
+  it("relève le linge encore dehors avant d'effacer l'attribution", async () => {
+    // La suppression ne fait pas rentrer le textile : sans ce relevé, personne
+    // ne saurait plus que 12 sets sont partis avec le compte.
+    const { prisma, store } = contexte();
+    const result = await service(prisma).cascadeDeleteUser(CLIENT, OP, ADMIN, "ROLE_ADMIN");
+
+    assert.deepEqual(result.deleted.stocksLiberes, [{ gamme: "BAIN", sets: 12 }]);
+    assert.equal(store.clientStock.rows.length, 0);
+  });
+
+  it("annonce dans l'aperçu ce que la suppression laissera dehors", async () => {
+    const { prisma } = contexte();
+    const preview = await service(prisma).previewUser(CLIENT, OP);
+
+    assert.equal(preview.setsEnCirculation, 12);
+    assert.equal(preview.passageResponses, 1);
+    assert.deepEqual(preview.deliveryStops, { pending: 1, joue: 3 });
+  });
+});
+
+/**
+ * Le compte peut être un LIVREUR. `DeliveryRound.driverId` est obligatoire :
+ * le supprimer laisserait des tournées attendues pointer un compte inexistant.
+ */
+describe("cascade — le cas du livreur", () => {
+  const LIVREUR = CLIENT;
+
+  it("refuse de supprimer un livreur attendu sur une tournée", async () => {
+    const { prisma, store } = createFakePrisma({
+      deliveryRounds: [{ id: "dr1", driverId: LIVREUR, status: "PLANNED" }],
+      quotes: [quote()],
+    });
+
+    await assert.rejects(
+      () => service(prisma).cascadeDeleteUser(LIVREUR, OP, ADMIN, "ROLE_ADMIN"),
+      {
+        code: "DRIVER_HAS_ACTIVE_ROUNDS",
+      },
+    );
+
+    // Le refus ne laisse AUCUNE écriture partielle.
+    assert.equal(store.quote.rows[0]?.deletedAt, null);
+    assert.equal(store.user.rows[0]?.deletedAt, null);
+  });
+
+  it("refuse aussi pendant une tournée en cours", async () => {
+    const { prisma } = createFakePrisma({
+      deliveryRounds: [{ id: "dr1", driverId: LIVREUR, status: "IN_PROGRESS" }],
+    });
+
+    await assert.rejects(
+      () => service(prisma).cascadeDeleteUser(LIVREUR, OP, ADMIN, "ROLE_ADMIN"),
+      {
+        code: "DRIVER_HAS_ACTIVE_ROUNDS",
+      },
+    );
+  });
+
+  it("laisse passer quand ses tournées sont soldées ou annulées", async () => {
+    // C'est précisément ce que débloque l'annulation de tournée : l'admin annule,
+    // puis le compte redevient supprimable.
+    const { prisma } = createFakePrisma({
+      deliveryRounds: [
+        { id: "dr1", driverId: LIVREUR, status: "COMPLETED" },
+        { id: "dr2", driverId: LIVREUR, status: "CANCELLED" },
+      ],
+    });
+
+    const result = await service(prisma).cascadeDeleteUser(LIVREUR, OP, ADMIN, "ROLE_ADMIN");
+    assert.ok(result.deleted);
+  });
+
+  it("signale le blocage dans l'aperçu, avant que l'admin ne tente", async () => {
+    const { prisma } = createFakePrisma({
+      deliveryRounds: [{ id: "dr1", driverId: LIVREUR, status: "PLANNED" }],
+    });
+
+    const preview = await service(prisma).previewUser(LIVREUR, OP);
+    assert.equal(preview.canHardDelete, false);
+    assert.equal(preview.blockingReason, "DRIVER_HAS_ACTIVE_ROUNDS");
+    assert.equal(preview.activeDriverRounds, 1);
+  });
+
+  it("la facture émise reste prioritaire sur le motif livreur", async () => {
+    const { prisma } = createFakePrisma({
+      invoices: [invoice({ status: "SENT" })],
+      deliveryRounds: [{ id: "dr1", driverId: LIVREUR, status: "PLANNED" }],
+    });
+
+    const preview = await service(prisma).previewUser(LIVREUR, OP);
+    assert.equal(preview.blockingReason, "CLIENT_HAS_ISSUED_INVOICES");
+  });
+});
+
+describe("anonymisation — exploitation", () => {
+  it("retire les arrêts à venir et les réponses de passage", async () => {
+    // Un camion ne doit pas continuer de se présenter chez « Client anonymisé ».
+    const { prisma, store } = createFakePrisma({
+      deliveryStops: [
+        { id: "st1", clientId: CLIENT, status: "PENDING" },
+        { id: "st2", clientId: CLIENT, status: "COMPLETED" },
+      ],
+      passageResponses: [{ id: "pr1", userId: CLIENT }],
+      notifications: [{ id: "n1", userId: CLIENT }],
+    });
+
+    const result = await service(prisma).anonymizeUser(CLIENT, OP, ADMIN, "ROLE_ADMIN");
+
+    assert.equal(result.deliveryStops, 1);
+    assert.equal(result.passageResponses, 1);
+    assert.ok(store.deliveryStop.rows.some((s: any) => s.id === "st2"));
+    assert.equal(store.notification.rows.length, 0);
   });
 });

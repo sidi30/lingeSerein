@@ -946,6 +946,182 @@ export class DeliveriesService {
     return updated;
   }
 
+  // ---- Annulation d'une tournée (PATCH /deliveries/rounds/:id/cancel) --------
+
+  /**
+   * Annule une tournée sans l'effacer.
+   *
+   * Distincte de `deleteRound`, et complémentaire : la suppression convient à
+   * une erreur de saisie — la tournée n'aurait jamais dû exister, il n'en reste
+   * rien. L'annulation couvre le cas réel de l'exploitation : la tournée était
+   * juste, mais elle n'aura pas lieu (livreur souffrant, camion en panne, route
+   * coupée). On garde alors la trace du passage prévu et de son annulation,
+   * ce qu'un DELETE détruirait.
+   *
+   * C'est aussi la seule issue quand des arrêts ont DÉJÀ été livrés : la
+   * suppression est refusée (leurs preuves de remise ne s'effacent pas), tandis
+   * que l'annulation solde proprement le reste de la journée.
+   *
+   * Trois conséquences, indissociables :
+   *  1. les arrêts encore PENDING passent en SKIPPED — ils n'auront pas lieu,
+   *     et un arrêt laissé PENDING dans une tournée annulée resterait affiché
+   *     comme « à faire » dans l'application du livreur ;
+   *  2. les opportunités de passage groupé de cette tournée sont supprimées.
+   *     Elles n'existent QUE parce qu'un camion passe (cf. `PassageOpportunity`) :
+   *     laisser l'offre vivante proposerait une remise de 50 % pour un passage
+   *     annulé, et les réponses déjà données suivent en cascade ;
+   *  3. le livreur et les clients non servis sont prévenus.
+   */
+  async cancelRound(
+    roundId: string,
+    adminId: string,
+    motif?: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ) {
+    const round = await this.prisma.deliveryRound.findUnique({
+      where: { id: roundId },
+      include: {
+        stops: { select: { id: true, status: true, clientId: true } },
+        driver: { select: { id: true, name: true, email: true } },
+        zone: { select: { name: true } },
+      },
+    });
+
+    if (!round) {
+      throw new NotFoundError("Tournée", roundId);
+    }
+
+    if (round.status === "CANCELLED") {
+      throw new UnprocessableEntityError(
+        "Cette tournée est déjà annulée",
+        "ROUND_ALREADY_CANCELLED",
+      );
+    }
+
+    // Une tournée terminée est un fait passé : l'annuler après coup
+    // contredirait des arrêts livrés, signés, et des mouvements de stock déjà
+    // enregistrés. Le geste correct à ce stade est un avoir, pas une annulation.
+    if (round.status === "COMPLETED") {
+      throw new UnprocessableEntityError(
+        "Cette tournée est terminée : elle ne peut plus être annulée",
+        "ROUND_ALREADY_COMPLETED",
+      );
+    }
+
+    // Relevé AVANT bascule, même raison que dans `completeRound` : après
+    // l'update, plus rien ne distingue « sauté à l'instant » de « déjà sauté ».
+    const clientsNonServis = [
+      ...new Set(round.stops.filter((s) => s.status === "PENDING").map((s) => s.clientId)),
+    ];
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const stops = await tx.deliveryStop.updateMany({
+        where: { roundId, status: "PENDING" },
+        data: { status: "SKIPPED" },
+      });
+
+      const opportunites = await tx.passageOpportunity.deleteMany({ where: { roundId } });
+
+      const updatedRound = await tx.deliveryRound.update({
+        where: { id: roundId },
+        data: {
+          status: "CANCELLED",
+          // Le motif est AJOUTÉ aux notes existantes, jamais substitué : elles
+          // portent souvent des consignes de chargement qu'on ne doit pas perdre.
+          ...(motif
+            ? { notes: round.notes ? `${round.notes}\n\nAnnulée : ${motif}` : `Annulée : ${motif}` }
+            : {}),
+        },
+      });
+
+      return { round: updatedRound, stopsSkipped: stops.count, opportunites: opportunites.count };
+    });
+
+    await createAuditLog({
+      prisma: this.prisma,
+      userId: adminId,
+      action: "UPDATE",
+      entity: "DeliveryRound",
+      entityId: roundId,
+      changes: {
+        cancelled: true,
+        previousStatus: round.status,
+        stopsSkipped: updated.stopsSkipped,
+        opportunitesSupprimees: updated.opportunites,
+        ...(motif ? { motif } : {}),
+      },
+      ipAddress,
+      userAgent,
+    });
+
+    // ---- Prévenir, hors transaction ----
+    //
+    // Hors transaction et sans propager l'erreur, comme partout ailleurs dans ce
+    // service : la tournée EST annulée, une notification en échec ne doit pas
+    // faire revenir la base en arrière.
+    //
+    // Le livreur d'abord : il a été prévenu de l'affectation, il doit l'être de
+    // l'annulation. Sans ce message, il part.
+    try {
+      await notify(this.prisma, {
+        userId: round.driverId,
+        type: "DELIVERY_REMINDER",
+        channel: "BOTH",
+        title: "Tournée annulée",
+        body:
+          `La tournée du ${formatDateFr(round.date)} a été annulée` +
+          `${motif ? ` : ${motif}` : "."} Elle ne figure plus dans « Mes tournées ».`,
+        data: {
+          type: "DELIVERY_REMINDER",
+          roundId,
+          date: round.date.toISOString(),
+          cancelled: true,
+          path: "/tournee",
+        } as Prisma.InputJsonValue,
+      });
+    } catch (err) {
+      const raison = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[deliveries] Notification d'annulation au livreur abandonnée (tournée ${roundId}) : ${raison}`,
+      );
+    }
+
+    // Puis les clients qui attendaient un passage. `DELIVERY_DELAYED` et non
+    // `DELIVERY_CANCELLED` : c'est le PASSAGE qui tombe, pas leur commande.
+    for (const clientId of clientsNonServis) {
+      try {
+        await notify(this.prisma, {
+          userId: clientId,
+          type: "DELIVERY_DELAYED",
+          channel: "BOTH",
+          title: "Votre passage est reporté",
+          body:
+            "Le passage prévu n'aura pas lieu comme prévu. " +
+            "Notre équipe vous recontacte pour convenir d'une nouvelle date.",
+          data: {
+            type: "DELIVERY_DELAYED",
+            roundId,
+            path: "/orders",
+          } as Prisma.InputJsonValue,
+        });
+      } catch (err) {
+        const raison = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[deliveries] Notification d'annulation abandonnée (client ${clientId}) : ${raison}`,
+        );
+      }
+    }
+
+    return {
+      id: roundId,
+      status: "CANCELLED" as const,
+      stopsSkipped: updated.stopsSkipped,
+      opportunitesSupprimees: updated.opportunites,
+      clientsPrevenus: clientsNonServis.length,
+    };
+  }
+
   // ---- Suppression d'une tournée (DELETE /deliveries/rounds/:id) --------------
 
   /**

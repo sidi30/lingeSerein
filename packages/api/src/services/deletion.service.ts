@@ -34,13 +34,40 @@ const ROTATION_CLOSED = ["REPRISE", "ANNULEE"] as const;
 /** Préfixe du pseudonyme. Sert aussi à numéroter les anonymisations suivantes. */
 const ANON_PREFIX = "Client anonymisé #";
 
+/**
+ * Arrêts de tournée déjà joués : ils portent une preuve (signature, quantités
+ * remises, réserves) ou la trace d'une tentative. Ils survivent à la suppression
+ * du client, exactement comme une facture émise — c'est de l'historique, pas de
+ * la planification.
+ */
+const STOP_JOUE = ["COMPLETED", "SKIPPED", "FAILED"] as const;
+
+/** Tournées qui n'ont pas encore rendu leur verdict : le livreur est attendu. */
+const ROUND_EN_COURS = ["PLANNED", "IN_PROGRESS"] as const;
+
 export interface UserDeletionPreview {
   quotes: { draft: number; other: number };
   invoices: { draft: number; issued: number };
   orders: number;
   rotations: { active: number; closed: number };
   subscription: boolean;
-  deliveryStops: number;
+  /** `pending` disparaît avec le client ; `joue` reste, il porte les preuves. */
+  deliveryStops: { pending: number; joue: number };
+  /** Réponses à des propositions de passage groupé — toutes effacées. */
+  passageResponses: number;
+  notifications: number;
+  /**
+   * Linge encore attribué au client. Le compte est signalé parce que la
+   * suppression efface la ligne SANS faire rentrer le linge : si le compteur
+   * n'est pas à zéro, du textile physique reste dehors et le stock opérateur
+   * devra être repris à la main.
+   */
+  setsEnCirculation: number;
+  /**
+   * Tournées où cet utilisateur est le LIVREUR et qui ne sont pas soldées.
+   * Bloquant : voir `blockingReason`.
+   */
+  activeDriverRounds: number;
   canHardDelete: boolean;
   blockingReason?: string;
 }
@@ -92,7 +119,12 @@ export class DeletionService {
       rotationsActive,
       rotationsClosed,
       subscription,
-      deliveryStops,
+      stopsPending,
+      stopsJoue,
+      passageResponses,
+      notifications,
+      stocks,
+      activeDriverRounds,
     ] = await Promise.all([
       this.prisma.quote.count({ where: { userId, deletedAt: null, status: "BROUILLON" } }),
       this.prisma.quote.count({
@@ -108,10 +140,36 @@ export class DeletionService {
         where: { userId, deletedAt: null, status: { in: [...ROTATION_CLOSED] } },
       }),
       this.prisma.subscription.count({ where: { userId } }),
-      this.prisma.deliveryStop.count({ where: { clientId: userId } }),
+      this.prisma.deliveryStop.count({ where: { clientId: userId, status: "PENDING" } }),
+      this.prisma.deliveryStop.count({
+        where: { clientId: userId, status: { in: [...STOP_JOUE] } },
+      }),
+      this.prisma.passageResponse.count({ where: { userId } }),
+      this.prisma.notification.count({ where: { userId } }),
+      this.prisma.clientStock.findMany({
+        where: { userId },
+        select: { totalInCirculation: true },
+      }),
+      // L'utilisateur vu comme LIVREUR, et non comme client : un compte peut
+      // porter les deux rôles dans le temps.
+      this.prisma.deliveryRound.count({
+        where: { driverId: userId, status: { in: [...ROUND_EN_COURS] } },
+      }),
     ]);
 
-    const canHardDelete = invoicesIssued === 0;
+    const setsEnCirculation = stocks.reduce((somme, s) => somme + s.totalInCirculation, 0);
+
+    // Deux motifs de blocage, dans cet ordre de gravité : la loi d'abord, puis
+    // l'exploitation. Supprimer un livreur attendu sur une tournée laisserait
+    // celle-ci pointer un compte inexistant — le mobile n'afficherait plus
+    // aucun livreur, et personne ne saurait qui doit partir.
+    const canHardDelete = invoicesIssued === 0 && activeDriverRounds === 0;
+    const blockingReason =
+      invoicesIssued > 0
+        ? "CLIENT_HAS_ISSUED_INVOICES"
+        : activeDriverRounds > 0
+          ? "DRIVER_HAS_ACTIVE_ROUNDS"
+          : undefined;
 
     return {
       quotes: { draft: quotesDraft, other: quotesOther },
@@ -119,11 +177,15 @@ export class DeletionService {
       orders,
       rotations: { active: rotationsActive, closed: rotationsClosed },
       subscription: subscription > 0,
-      deliveryStops,
+      deliveryStops: { pending: stopsPending, joue: stopsJoue },
+      passageResponses,
+      notifications,
+      setsEnCirculation,
+      activeDriverRounds,
       canHardDelete,
       // Le motif est renvoyé tel quel pour que l'interface propose directement
       // l'anonymisation, au lieu d'un « suppression impossible » sans issue.
-      ...(canHardDelete ? {} : { blockingReason: "CLIENT_HAS_ISSUED_INVOICES" }),
+      ...(blockingReason ? { blockingReason } : {}),
     };
   }
 
@@ -198,6 +260,24 @@ export class DeletionService {
           );
         }
 
+        // ─── Garde-fou d'exploitation ────────────────────────────────────────
+        // L'utilisateur peut être un LIVREUR. `DeliveryRound.driverId` est
+        // obligatoire : supprimer le compte laisserait des tournées attendues
+        // pointer un livreur qui n'existe plus, sans que rien ne le signale.
+        // On refuse plutôt que de deviner — l'admin annule la tournée (elle
+        // dispose désormais d'une annulation) ou la réaffecte.
+        const roundsActifs = await tx.deliveryRound.count({
+          where: { driverId: userId, status: { in: [...ROUND_EN_COURS] } },
+        });
+
+        if (roundsActifs > 0) {
+          throw new UnprocessableEntityError(
+            `Ce compte est le livreur de ${roundsActifs} tournée(s) non soldée(s). ` +
+              `Annulez-les ou réaffectez-les à un autre livreur avant de le supprimer.`,
+            "DRIVER_HAS_ACTIVE_ROUNDS",
+          );
+        }
+
         const quotes = await tx.quote.updateMany({
           where: { userId, deletedAt: null },
           data: { deletedAt: now },
@@ -219,6 +299,44 @@ export class DeletionService {
           where: { userId, deletedAt: null },
           data: { deletedAt: now },
         });
+
+        // ─── Tournées ────────────────────────────────────────────────────────
+        // Seuls les arrêts ENCORE À FAIRE partent. Sans cela, le livreur garde
+        // dans son application un client supprimé à qui livrer — c'est le
+        // symptôme visible du problème, l'admin affichant même « Client
+        // supprimé » au milieu d'une tournée.
+        //
+        // Suppression sèche et non soft-delete : `DeliveryStop` n'a pas de
+        // colonne `deletedAt`, et un arrêt PENDING n'est que de la
+        // planification — rien à conserver. Les arrêts déjà joués (livrés,
+        // sautés, échoués) restent : ils portent signature, quantités et
+        // réserves, exactement ce que `deleteRound` refuse déjà d'effacer.
+        const stops = await tx.deliveryStop.deleteMany({
+          where: { clientId: userId, status: "PENDING" },
+        });
+
+        // Réponses aux passages groupés : une intention pour un camion à venir.
+        // En laisser une ferait charger du linge pour un client disparu.
+        const passageResponses = await tx.passageResponse.deleteMany({ where: { userId } });
+
+        // ─── Stock détenu par le client ──────────────────────────────────────
+        // La ligne d'attribution part avec le client. Les quantités sont
+        // relevées AVANT pour atterrir dans la trace d'audit : la suppression
+        // ne fait pas rentrer le linge physique, et sans ce relevé personne ne
+        // saurait plus combien de sets sont partis avec le compte.
+        const stocksDetenus = await tx.clientStock.findMany({
+          where: { userId },
+          select: { productRange: true, totalInCirculation: true },
+        });
+        await tx.clientStock.deleteMany({ where: { userId } });
+
+        // Notifications et préférences : sans destinataire, elles n'ont plus
+        // d'objet. `StockMovement` en revanche N'EST PAS touché — c'est le
+        // grand livre du stock, l'effacer fausserait les totaux opérateur.
+        // `Consent` non plus : c'est la preuve d'un consentement recueilli, au
+        // même titre que `AuditLog`.
+        const notifications = await tx.notification.deleteMany({ where: { userId } });
+        await tx.notificationSetting.deleteMany({ where: { userId } });
 
         // Hard delete : `SubscriptionProduct` suit en cascade (onDelete: Cascade).
         const subscription = await tx.subscription.deleteMany({ where: { userId } });
@@ -243,6 +361,13 @@ export class DeletionService {
           orders: orders.count,
           rotations: rotations.count,
           subscription: subscription.count > 0,
+          deliveryStops: stops.count,
+          passageResponses: passageResponses.count,
+          notifications: notifications.count,
+          // Détail par gamme : c'est la seule trace de ce qui reste dehors.
+          stocksLiberes: stocksDetenus
+            .filter((s) => s.totalInCirculation > 0)
+            .map((s) => ({ gamme: s.productRange, sets: s.totalInCirculation })),
         };
       },
       // `Serializable` : le garde-fou légal ci-dessus lit puis décide. Sans ce
@@ -360,6 +485,22 @@ export class DeletionService {
 
       await tx.deviceToken.deleteMany({ where: { userId } });
 
+      // Anonymiser, c'est aussi sortir le client de l'exploitation : il est
+      // désactivé et daté comme supprimé. Ses arrêts À VENIR doivent donc partir
+      // au même titre que dans la cascade, sinon un camion continue de se
+      // présenter chez « Client anonymisé #3 ». Les arrêts déjà joués restent :
+      // ils ne portent aucun nom en propre, ils lisent celui du compte — qui
+      // vient précisément d'être remplacé par le pseudonyme.
+      const stops = await tx.deliveryStop.deleteMany({
+        where: { clientId: userId, status: "PENDING" },
+      });
+      const passageResponses = await tx.passageResponse.deleteMany({ where: { userId } });
+
+      // Le titre et le corps d'une notification citent le client en clair
+      // (« Votre livraison chez Gîte des Oliviers ») : les anonymiser un par un
+      // serait illusoire, on les efface.
+      await tx.notification.deleteMany({ where: { userId } });
+
       // Snapshots nominatifs — un devis ou une rotation n'a aucune obligation
       // de conservation nominative.
       const quotes = await tx.quote.updateMany({
@@ -385,6 +526,8 @@ export class DeletionService {
         quotes: quotes.count,
         rotations: rotations.count,
         invoices: { anonymized: invoicesAnonymized.count, preserved },
+        deliveryStops: stops.count,
+        passageResponses: passageResponses.count,
       };
     });
 

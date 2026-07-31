@@ -62,6 +62,18 @@ export const completeStopSchema = z.object({
   reserves: z.string().max(5000).optional(),
 });
 
+/**
+ * Annulation d'une tournée. Le motif est facultatif — l'exiger ferait renoncer
+ * à l'annulation un admin pressé, qui laisserait alors une tournée fantôme
+ * planifiée. Il est en revanche conservé tel quel dans les notes et l'audit :
+ * trois semaines plus tard, « camion en panne » est la seule chose qui explique
+ * un trou dans le planning.
+ */
+export const cancelRoundSchema = z.object({
+  motif: z.string().trim().max(500).optional(),
+});
+
 export type CreateRoundInput = z.infer<typeof createRoundSchema>;
 export type ListRoundsQuery = z.infer<typeof listRoundsQuerySchema>;
 export type CompleteStopInput = z.infer<typeof completeStopSchema>;
+export type CancelRoundInput = z.infer<typeof cancelRoundSchema>;
