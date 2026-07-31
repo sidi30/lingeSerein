@@ -4,6 +4,7 @@ import type { QuoteStatus } from "@lingengo/shared";
 import { NotFoundError, ConflictError, UnprocessableEntityError } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
 import { NotificationsService } from "./notifications.service.js";
+import { libelleLivraisonDevis } from "../utils/livraison.js";
 import type {
   CreateQuoteInput,
   UpdateQuoteInput,
@@ -69,24 +70,7 @@ export class QuotesService {
     ]);
 
     // Calculer les totaux pour chaque devis
-    const data = quotes.map((q) => {
-      const devisData = {
-        numero: q.numero,
-        date: q.createdAt.toISOString().slice(0, 10),
-        validiteJours: q.validiteJours,
-        client: { nom: q.clientNom },
-        lines: q.lignes.map((l) => ({
-          designation: l.designation,
-          qty: l.qty,
-          unitCents: l.unitCents,
-        })),
-        remisePct: q.remisePct,
-        livraisonCents: q.livraisonCents,
-        tvaApplicable: q.tvaApplicable,
-      };
-      const totals = computeDevisTotals(devisData);
-      return { ...q, totals };
-    });
+    const data = quotes.map((q) => this.avecTotaux(q));
 
     return {
       data,
@@ -109,22 +93,7 @@ export class QuotesService {
       throw new NotFoundError("Devis", id);
     }
 
-    const devisData = {
-      numero: quote.numero,
-      date: quote.createdAt.toISOString().slice(0, 10),
-      validiteJours: quote.validiteJours,
-      client: { nom: quote.clientNom },
-      lines: quote.lignes.map((l) => ({
-        designation: l.designation,
-        qty: l.qty,
-        unitCents: l.unitCents,
-      })),
-      remisePct: quote.remisePct,
-      livraisonCents: quote.livraisonCents,
-      tvaApplicable: quote.tvaApplicable,
-    };
-    const totals = computeDevisTotals(devisData);
-    return { ...quote, totals };
+    return this.avecTotaux(quote);
   }
 
   // ---- Création (transaction Serializable + retry P2002) ----
@@ -180,22 +149,8 @@ export class QuotesService {
           { isolationLevel: "Serializable" },
         );
 
-        const devisData = {
-          numero: quote.numero,
-          date: quote.createdAt.toISOString().slice(0, 10),
-          validiteJours: quote.validiteJours,
-          client: { nom: quote.clientNom },
-          lines: quote.lignes.map((l) => ({
-            designation: l.designation,
-            qty: l.qty,
-            unitCents: l.unitCents,
-          })),
-          remisePct: quote.remisePct,
-          livraisonCents: quote.livraisonCents,
-          tvaApplicable: quote.tvaApplicable,
-        };
-        const totals = computeDevisTotals(devisData);
-        const result = { ...quote, totals };
+        const result = this.avecTotaux(quote);
+        const totals = result.totals;
 
         await createAuditLog({
           prisma: this.prisma,
@@ -306,22 +261,7 @@ export class QuotesService {
       });
     });
 
-    const devisData = {
-      numero: updated.numero,
-      date: updated.createdAt.toISOString().slice(0, 10),
-      validiteJours: updated.validiteJours,
-      client: { nom: updated.clientNom },
-      lines: updated.lignes.map((l) => ({
-        designation: l.designation,
-        qty: l.qty,
-        unitCents: l.unitCents,
-      })),
-      remisePct: updated.remisePct,
-      livraisonCents: updated.livraisonCents,
-      tvaApplicable: updated.tvaApplicable,
-    };
-    const totals = computeDevisTotals(devisData);
-    const result = { ...updated, totals };
+    const result = this.avecTotaux(updated);
 
     await createAuditLog({
       prisma: this.prisma,
@@ -384,22 +324,7 @@ export class QuotesService {
       },
     });
 
-    const devisData = {
-      numero: updated.numero,
-      date: updated.createdAt.toISOString().slice(0, 10),
-      validiteJours: updated.validiteJours,
-      client: { nom: updated.clientNom },
-      lines: updated.lignes.map((l) => ({
-        designation: l.designation,
-        qty: l.qty,
-        unitCents: l.unitCents,
-      })),
-      remisePct: updated.remisePct,
-      livraisonCents: updated.livraisonCents,
-      tvaApplicable: updated.tvaApplicable,
-    };
-    const totals = computeDevisTotals(devisData);
-    const result = { ...updated, totals };
+    const result = this.avecTotaux(updated);
 
     await createAuditLog({
       prisma: this.prisma,
@@ -455,6 +380,9 @@ export class QuotesService {
                 userId: source.userId,
                 remisePct: source.remisePct,
                 livraisonCents: source.livraisonCents,
+                // Recopié avec le montant : un duplicata qui perdrait le drapeau
+                // rendrait « offerte » une livraison restée à chiffrer.
+                livraisonSurDevis: source.livraisonSurDevis,
                 tvaApplicable: source.tvaApplicable,
                 notes: source.notes,
                 validiteJours: source.validiteJours,
@@ -476,22 +404,7 @@ export class QuotesService {
           { isolationLevel: "Serializable" },
         );
 
-        const devisData = {
-          numero: duplicate.numero,
-          date: duplicate.createdAt.toISOString().slice(0, 10),
-          validiteJours: duplicate.validiteJours,
-          client: { nom: duplicate.clientNom },
-          lines: duplicate.lignes.map((l) => ({
-            designation: l.designation,
-            qty: l.qty,
-            unitCents: l.unitCents,
-          })),
-          remisePct: duplicate.remisePct,
-          livraisonCents: duplicate.livraisonCents,
-          tvaApplicable: duplicate.tvaApplicable,
-        };
-        const totals = computeDevisTotals(devisData);
-        const result = { ...duplicate, totals };
+        const result = this.avecTotaux(duplicate);
 
         await createAuditLog({
           prisma: this.prisma,
@@ -618,6 +531,15 @@ export class QuotesService {
           userId: clientUserId,
           orderNumber,
           totalCents,
+          // Frais REPRIS du devis, jamais recalculés : le devis fait foi, c'est
+          // lui que le client a accepté. Les recalculer ici les rendrait
+          // différents de la pièce signée dès que le délai a bougé entre-temps.
+          deliveryFeeCents: quote.livraisonCents,
+          // Le drapeau se repose avec le montant : un devis à 0 € JAMAIS chiffré
+          // produisait une commande qui se relisait partout « livraison offerte »,
+          // et la boucle commande → devis → commande perdait en route la seule
+          // information qui distingue « gratuit » de « reste à chiffrer ».
+          deliveryFeeSurDevis: quote.livraisonSurDevis,
           source: "QUOTE_CONVERSION",
           deliveryDate: new Date(input.deliveryDate),
           timeSlot: input.timeSlot ?? null,
@@ -658,6 +580,215 @@ export class QuotesService {
     });
 
     return { orderId: order.id, orderNumber: order.orderNumber };
+  }
+
+  // ---- Création depuis une commande (idempotent) ----
+
+  /**
+   * Émet le devis correspondant à une commande — typiquement à sa confirmation.
+   *
+   * **Idempotent.** Un devis existe déjà pour cette commande ⇒ il est RENVOYÉ tel
+   * quel, sans écriture ni nouveau numéro : le lien `Quote.fromOrderId` est UNIQUE
+   * en base, si bien que deux requêtes concurrentes (double-clic) ne peuvent pas
+   * produire deux devis — la seconde se heurte à la contrainte et retombe sur le
+   * devis déjà créé.
+   *
+   * Les frais de livraison vont dans `livraisonCents`, PAS dans une ligne de devis :
+   * c'est le champ dédié que le PDF imprime en ligne distincte et que
+   * `InvoicesService.createFromQuote` recopie dans `metadata.livraisonCents` +
+   * `livraisonLabel`. En faire une `QuoteLine` les soumettrait à la remise
+   * commerciale et les compterait deux fois dans `computeDevisTotals`.
+   */
+  async createFromOrder(
+    orderId: string,
+    operatorId: string,
+    adminId: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ) {
+    const order = await this.prisma.order.findFirst({
+      // `user.operatorId` : un admin ne peut pas faire un devis sur la commande
+      // d'un autre opérateur — la commande n'a pas d'opérateur à elle, c'est son
+      // client qui en porte un.
+      where: { id: orderId, deletedAt: null, user: { operatorId } },
+      include: {
+        items: { include: { product: { select: { name: true } } } },
+        user: {
+          select: {
+            id: true,
+            name: true,
+            companyName: true,
+            email: true,
+            phone: true,
+            address: true,
+          },
+        },
+        quoteFromOrder: {
+          include: {
+            lignes: { orderBy: { position: "asc" } },
+            user: { select: { id: true, name: true, email: true } },
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundError("Commande", orderId);
+    }
+
+    // Seule interdiction : une commande ANNULÉE. Un devis est une proposition
+    // commerciale ; l'émettre pour une commande que le client a renoncé à passer
+    // n'a pas de sens et ferait partir un document contredisant l'annulation.
+    // Tous les autres statuts sont acceptés, PENDING compris : le gestionnaire
+    // chiffre souvent AVANT de confirmer, c'est même l'usage le plus courant.
+    if (order.status === "CANCELLED") {
+      throw new UnprocessableEntityError(
+        "Une commande annulée ne peut pas donner lieu à un devis",
+        "ORDER_CANCELLED",
+      );
+    }
+
+    const dejaEmis = order.quoteFromOrder;
+    if (dejaEmis && !dejaEmis.deletedAt) {
+      // Rien à écrire : ni devis, ni audit. Journaliser une création qui n'a pas
+      // eu lieu polluerait la piste d'audit à chaque rechargement de l'écran.
+      return { quote: this.avecTotaux(dejaEmis), created: false };
+    }
+
+    // Le devis précédent a été supprimé (brouillon jeté) : il ne doit pas
+    // interdire d'en réémettre un. On libère le lien unique, comme une facture
+    // annulée rouvre le droit de refacturer un devis.
+    const lienALiberer = dejaEmis?.id;
+
+    // Les lignes de commande n'ont pas d'ordre propre en base : le tri par
+    // désignation rend le devis reproductible d'une émission à l'autre.
+    const lignes = order.items
+      .map((item) => ({
+        designation: item.product.name,
+        qty: item.quantity,
+        unitCents: item.unitCents,
+      }))
+      .sort((a, b) => a.designation.localeCompare(b.designation, "fr"))
+      .map((ligne, position) => ({ ...ligne, position }));
+
+    // « Sur devis » signifie 0 € en base ET frais à chiffrer : sans cette note,
+    // le gestionnaire enverrait un devis annonçant une livraison offerte.
+    const notes = [
+      order.deliveryFeeSurDevis
+        ? "Frais de livraison à chiffrer (hors zone ou livraison Flash) — le montant de 0 € " +
+          "porté par la commande ne vaut pas gratuité."
+        : null,
+      order.specialNotes,
+    ]
+      .filter((n): n is string => Boolean(n))
+      .join("\n");
+
+    const MAX_RETRIES = 5;
+    let attempt = 0;
+
+    while (attempt < MAX_RETRIES) {
+      try {
+        const quote = await this.prisma.$transaction(
+          async (tx) => {
+            if (lienALiberer) {
+              await tx.quote.update({ where: { id: lienALiberer }, data: { fromOrderId: null } });
+            }
+
+            // Même générateur que les devis saisis à la main : une seule suite
+            // LSQ-AAAA-NNNN, deux compteurs indépendants finiraient par attribuer
+            // le même numéro à deux devis du même exercice.
+            const numero = await this.generateNumero(tx as unknown as PrismaClient);
+
+            const created = await tx.quote.create({
+              data: {
+                numero,
+                operatorId,
+                createdBy: adminId,
+                status: "BROUILLON",
+                fromOrderId: order.id,
+                userId: order.userId,
+                // Snapshot client, figé comme sur tout devis : renommer le client
+                // plus tard ne doit pas réécrire un devis déjà envoyé.
+                clientNom: order.user.companyName ?? order.user.name,
+                clientEmail: order.user.email,
+                clientTel: order.user.phone,
+                clientAdresse: order.user.address,
+                remisePct: 0,
+                livraisonCents: order.deliveryFeeCents,
+                // Le drapeau suit le montant, sans quoi 0 € s'imprime
+                // « Livraison offerte » DANS LE TABLEAU DES TOTAUX du devis que
+                // le client signe. La note libre plus haut ne suffit pas : elle
+                // vit hors des totaux, et c'est la ligne de prix qui engage.
+                livraisonSurDevis: order.deliveryFeeSurDevis,
+                // Défaut des devis saisis à la main : l'opérateur relève de la
+                // franchise en base. Le gestionnaire bascule au besoin, le devis
+                // naît en BROUILLON précisément pour être relu.
+                tvaApplicable: false,
+                ...(notes ? { notes } : {}),
+                lignes: { create: lignes },
+              },
+              include: {
+                lignes: { orderBy: { position: "asc" } },
+                user: { select: { id: true, name: true, email: true } },
+              },
+            });
+
+            // Audit DANS la transaction : un devis annulé par un échec ultérieur
+            // ne doit pas laisser derrière lui la trace d'une émission.
+            await createAuditLog({
+              prisma: tx,
+              userId: adminId,
+              action: "CREATE",
+              entity: "Quote",
+              entityId: created.id,
+              changes: {
+                numero: created.numero,
+                fromOrderId: order.id,
+                orderNumber: order.orderNumber,
+                lineCount: lignes.length,
+                livraisonCents: order.deliveryFeeCents,
+                ...(order.deliveryFeeSurDevis ? { livraisonSurDevis: true } : {}),
+              },
+              ipAddress,
+              userAgent,
+            });
+
+            return created;
+          },
+          { isolationLevel: "Serializable" },
+        );
+
+        return { quote: this.avecTotaux(quote), created: true };
+      } catch (err: unknown) {
+        const prismaError = err as { code?: string };
+        if (prismaError.code !== "P2002") throw err;
+
+        // P2002 vient soit du numéro (deux émissions simultanées), soit du lien
+        // unique vers la commande — c'est-à-dire qu'une requête concurrente vient
+        // d'émettre LE devis de cette commande. Dans ce second cas, réessayer
+        // échouerait indéfiniment : on renvoie le devis de l'autre requête, ce
+        // qui est exactement le contrat d'idempotence.
+        const concurrent = await this.prisma.quote.findFirst({
+          where: { fromOrderId: order.id, deletedAt: null },
+          include: {
+            lignes: { orderBy: { position: "asc" } },
+            user: { select: { id: true, name: true, email: true } },
+          },
+        });
+        if (concurrent) {
+          return { quote: this.avecTotaux(concurrent), created: false };
+        }
+
+        attempt++;
+        if (attempt >= MAX_RETRIES) {
+          throw new ConflictError(
+            "Impossible de générer un numéro de devis unique après plusieurs tentatives",
+          );
+        }
+      }
+    }
+
+    throw new ConflictError("Impossible de générer un numéro de devis unique");
   }
 
   // ---- Suppression (soft-delete, BROUILLON uniquement) ----
@@ -765,6 +896,54 @@ export class QuotesService {
     });
 
     return { expired: ids };
+  }
+
+  // ---- Totaux ----
+
+  /**
+   * Devis + totaux + libellé de livraison, la seule forme que les écrans savent lire.
+   *
+   * Les totaux ne sont JAMAIS recalculés à la main : `computeDevisTotals` de
+   * `@lingengo/shared` est la même fonction que celle qui imprime le PDF et
+   * calcule la facture — deux implémentations finiraient par diverger d'un
+   * centime, et c'est le client qui découvrirait l'écart.
+   *
+   * `livraisonLabel` accompagne le montant pour la même raison : 0 € seul ne dit
+   * pas si la livraison est offerte ou reste à chiffrer, et l'imprimeur du PDF
+   * n'a que ce montant pour trancher. Le libellé part donc d'ICI, calculé sur le
+   * drapeau, et non déduit à l'arrivée.
+   */
+  private avecTotaux<
+    T extends {
+      numero: string;
+      createdAt: Date;
+      validiteJours: number;
+      clientNom: string;
+      lignes: { designation: string; qty: number; unitCents: number }[];
+      remisePct: number;
+      livraisonCents: number;
+      livraisonSurDevis: boolean;
+      tvaApplicable: boolean;
+    },
+  >(quote: T) {
+    return {
+      ...quote,
+      livraisonLabel: libelleLivraisonDevis(quote),
+      totals: computeDevisTotals({
+        numero: quote.numero,
+        date: quote.createdAt.toISOString().slice(0, 10),
+        validiteJours: quote.validiteJours,
+        client: { nom: quote.clientNom },
+        lines: quote.lignes.map((l) => ({
+          designation: l.designation,
+          qty: l.qty,
+          unitCents: l.unitCents,
+        })),
+        remisePct: quote.remisePct,
+        livraisonCents: quote.livraisonCents,
+        tvaApplicable: quote.tvaApplicable,
+      }),
+    };
   }
 
   // ---- Générateur de numéro séquentiel (dans une transaction) ----

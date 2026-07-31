@@ -273,6 +273,13 @@ model User {
   companyName         String?            @map("company_name") @db.VarChar(200) // établissement (distinct du contact)
   city                String?            @db.VarChar(120)
   postalCode          String?            @map("postal_code") @db.VarChar(10)
+  // Commune de livraison, code INSEE — SEUL identifiant stable de l'adresse.
+  // Le nom change (fusions de communes) et le code postal ne désigne pas une
+  // commune : 84100 couvre Orange ET Uchaux, et 7 codes postaux du Vaucluse sont
+  // à cheval sur deux paliers tarifaires. C'est ce code, choisi dans la liste
+  // fermée de `@lingengo/shared` (VAUCLUSE_COMMUNES), qui fixe le prix de la
+  // livraison — plus jamais un code postal saisi librement par le client.
+  communeInsee        String?            @map("commune_insee") @db.VarChar(5)
   rating              Int?               @db.SmallInt // appréciation interne 1-5 (CHECK en base)
   requirements        String?            @db.Text // exigences particulières du client
   source              ClientSource       @default(APP)
@@ -495,26 +502,40 @@ model SubscriptionConfig {
 
 /// Commande (ponctuelle ou générée par abonnement)
 model Order {
-  id              String      @id @default(uuid()) @db.Uuid
-  userId          String      @map("user_id") @db.Uuid
-  orderNumber     String      @unique @map("order_number") @db.VarChar(30) // ex: LNG-2026-000001
-  status          OrderStatus @default(PENDING)
-  source          OrderSource @default(MOBILE) @map("source") // origine de la commande
-  isRecurring     Boolean     @default(false) @map("is_recurring") // commande auto via abonnement
-  totalCents      Int         @map("total_cents")
-  deliveryDate    DateTime    @map("delivery_date") @db.Date
-  timeSlot        String?     @map("time_slot") @db.VarChar(20)
-  specialNotes    String?     @map("special_notes") @db.Text
-  cancelledAt     DateTime?   @map("cancelled_at")
-  cancelledReason String?     @map("cancelled_reason") @db.Text
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
-  deletedAt       DateTime?   @map("deleted_at")
+  id                  String      @id @default(uuid()) @db.Uuid
+  userId              String      @map("user_id") @db.Uuid
+  orderNumber         String      @unique @map("order_number") @db.VarChar(30) // ex: LNG-2026-000001
+  status              OrderStatus @default(PENDING)
+  source              OrderSource @default(MOBILE) @map("source") // origine de la commande
+  isRecurring         Boolean     @default(false) @map("is_recurring") // commande auto via abonnement
+  totalCents          Int         @map("total_cents") // sous-total des ARTICLES, hors livraison
+  /// Frais de livraison figés à la création (barème computeDeliveryFee de @lingengo/shared).
+  /// Le total à payer vaut total_cents + delivery_fee_cents — `total_cents` garde sa
+  /// sémantique d'origine, plusieurs écrans s'en servent comme sous-total d'articles.
+  deliveryFeeCents    Int         @default(0) @map("delivery_fee_cents")
+  /// Vrai quand le barème ne publie AUCUN tarif (hors zone, urgence Flash < 3 h) :
+  /// les frais valent alors 0 en base et restent à chiffrer à la main sur le devis.
+  /// Sans ce drapeau, « livraison offerte » et « livraison à chiffrer » seraient
+  /// indiscernables une fois la commande enregistrée.
+  deliveryFeeSurDevis Boolean     @default(false) @map("delivery_fee_sur_devis")
+  deliveryDate        DateTime    @map("delivery_date") @db.Date
+  timeSlot            String?     @map("time_slot") @db.VarChar(20)
+  specialNotes        String?     @map("special_notes") @db.Text
+  cancelledAt         DateTime?   @map("cancelled_at")
+  cancelledReason     String?     @map("cancelled_reason") @db.Text
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+  deletedAt           DateTime?   @map("deleted_at")
 
-  user         User          @relation(fields: [userId], references: [id])
-  items        OrderItem[]
-  deliveryStop DeliveryStop?
-  quote        Quote?        @relation("QuoteOrder")
+  user           User          @relation(fields: [userId], references: [id])
+  items          OrderItem[]
+  deliveryStop   DeliveryStop?
+  quote          Quote?        @relation("QuoteOrder")
+  /// Devis ÉMIS À PARTIR de cette commande (POST /quotes/from-order/:orderId).
+  /// Relation distincte de `quote` : celle-ci dit « ce devis a produit cette
+  /// commande », celle-là « cette commande a produit ce devis ». Les confondre
+  /// afficherait « commande issue du devis X » sur une commande saisie au comptoir.
+  quoteFromOrder Quote?        @relation("QuoteFromOrder")
 
   @@index([userId])
   @@index([status])
@@ -556,21 +577,36 @@ model Quote {
   userId             String?     @map("user_id") @db.Uuid // client lié optionnel
   remisePct          Int         @default(0) @map("remise_pct") // centièmes de % : 1000 = 10%
   livraisonCents     Int         @default(0) @map("livraison_cents")
+  /// Vrai quand les frais de livraison restent À CHIFFRER (hors zone, urgence
+  /// Flash) : 0 € ne vaut alors PAS gratuité. Pendant de `Order.deliveryFeeSurDevis`,
+  /// qu'un devis émis depuis une commande doit reporter — sans ce drapeau, le
+  /// devis imprimait « Livraison offerte » dans son tableau de totaux et
+  /// PROMETTAIT au client, sur le document qu'il signe, la gratuité d'une course
+  /// hors secteur. La valeur redescend ensuite dans la facture (`metadata.livraisonLabel`).
+  livraisonSurDevis  Boolean     @default(false) @map("livraison_sur_devis")
   tvaApplicable      Boolean     @default(false) @map("tva_applicable")
   notes              String?     @db.Text
   validiteJours      Int         @default(30) @map("validite_jours")
   dateEnvoi          DateTime?   @map("date_envoi")
   dateReponse        DateTime?   @map("date_reponse")
   convertedToOrderId String?     @unique @map("converted_to_order_id") @db.Uuid // lien si converti
+  /// Commande D'ORIGINE quand le devis a été émis depuis une commande.
+  /// UNIQUE : c'est la base elle-même qui garantit « un seul devis par commande »
+  /// (POST /quotes/from-order/:orderId est idempotent) — une vérification
+  /// applicative seule laisserait passer un double-clic concurrent.
+  fromOrderId        String?     @unique @map("from_order_id") @db.Uuid
   createdBy          String      @map("created_by") @db.Uuid // userId admin créateur
   createdAt          DateTime    @default(now()) @map("created_at")
   updatedAt          DateTime    @updatedAt @map("updated_at")
   deletedAt          DateTime?   @map("deleted_at")
 
-  operator Operator    @relation(fields: [operatorId], references: [id])
-  user     User?       @relation("QuoteClient", fields: [userId], references: [id])
-  creator  User        @relation("QuoteCreator", fields: [createdBy], references: [id])
-  order    Order?      @relation("QuoteOrder", fields: [convertedToOrderId], references: [id])
+  operator  Operator    @relation(fields: [operatorId], references: [id])
+  user      User?       @relation("QuoteClient", fields: [userId], references: [id])
+  creator   User        @relation("QuoteCreator", fields: [createdBy], references: [id])
+  order     Order?      @relation("QuoteOrder", fields: [convertedToOrderId], references: [id])
+  // SetNull et non Restrict : un devis est une pièce commerciale qui doit survivre
+  // à la disparition de la commande qui l'a fait naître, sans la bloquer.
+  fromOrder Order?      @relation("QuoteFromOrder", fields: [fromOrderId], references: [id], onDelete: SetNull)
   lignes    QuoteLine[]
   invoices  Invoice[]
   rotations Rotation[]
@@ -771,7 +807,7 @@ model Invoice {
   updatedAt             DateTime      @updatedAt @map("updated_at")
   deletedAt             DateTime?     @map("deleted_at") // soft-delete BROUILLON only (obligation de conservation)
 
-  operator Operator @relation(fields: [operatorId], references: [id])
+  operator  Operator   @relation(fields: [operatorId], references: [id])
   // onDelete: Restrict explicite — le défaut Prisma d'une relation optionnelle est
   // SET NULL, qui viderait le client ou le devis source d'une facture déjà émise.
   // Une facture est une pièce comptable : elle ne doit jamais perdre son rattachement.
@@ -807,46 +843,46 @@ model Invoice {
 /// aucun compte dans `users`, et une tournée déjà effectuée ne doit pas changer
 /// d'adresse parce que la fiche client a été corrigée depuis.
 model Rotation {
-  id             String          @id @default(uuid()) @db.Uuid
-  operatorId     String          @map("operator_id") @db.Uuid
-  userId         String?         @map("user_id") @db.Uuid // null : client sans compte
-  clientNom      String          @map("client_nom") @db.VarChar(200)
-  clientEmail    String?         @map("client_email") @db.VarChar(320)
-  clientAdresse  String?         @map("client_adresse") @db.Text
-  quoteId        String?         @map("quote_id") @db.Uuid
-  invoiceId      String?         @map("invoice_id") @db.Uuid
-  deliveryStopId String?         @map("delivery_stop_id") @db.Uuid // arrêt de tournée qui a livré
-  formule        RotationFormule @default(PONCTUEL)
-  status         RotationStatus  @default(PLANIFIEE)
-  dateLivraison  DateTime        @map("date_livraison") @db.Date
-  dateReprisePrevue DateTime     @map("date_reprise_prevue") @db.Date
-  dateRepriseReelle DateTime?    @map("date_reprise_reelle") @db.Date
+  id                     String          @id @default(uuid()) @db.Uuid
+  operatorId             String          @map("operator_id") @db.Uuid
+  userId                 String?         @map("user_id") @db.Uuid // null : client sans compte
+  clientNom              String          @map("client_nom") @db.VarChar(200)
+  clientEmail            String?         @map("client_email") @db.VarChar(320)
+  clientAdresse          String?         @map("client_adresse") @db.Text
+  quoteId                String?         @map("quote_id") @db.Uuid
+  invoiceId              String?         @map("invoice_id") @db.Uuid
+  deliveryStopId         String?         @map("delivery_stop_id") @db.Uuid // arrêt de tournée qui a livré
+  formule                RotationFormule @default(PONCTUEL)
+  status                 RotationStatus  @default(PLANIFIEE)
+  dateLivraison          DateTime        @map("date_livraison") @db.Date
+  dateReprisePrevue      DateTime        @map("date_reprise_prevue") @db.Date
+  dateRepriseReelle      DateTime?       @map("date_reprise_reelle") @db.Date
   /// N° de passage pour un abonnement (1, 2, 3…) — null en location ponctuelle.
-  passage        Int?
+  passage                Int?
   /// Retard > RETARD_ESCALADE_JOURS : le remplacement DEVIENT facturable au barème.
   /// Posé par le cron, jamais facturé automatiquement — la décision reste humaine.
-  facturableRemplacement Boolean  @default(false) @map("facturable_remplacement")
+  facturableRemplacement Boolean         @default(false) @map("facturable_remplacement")
   /// Horodatage de l'EMAIL de rappel J-1 réellement accepté par le mailer (HTTP 200).
   /// Distinct de la notification in-app : si le mailer est indisponible, la notification
   /// part quand même et ce champ reste null, ce qui autorise une nouvelle tentative au
   /// prochain passage du cron. Marquer avant d'avoir la confirmation ferait taire
   /// définitivement un rappel jamais envoyé.
-  reminderSentAt    DateTime? @map("reminder_sent_at")
+  reminderSentAt         DateTime?       @map("reminder_sent_at")
   /// Idem pour l'email de relance de retard.
-  overdueNotifiedAt DateTime? @map("overdue_notified_at")
-  notes          String?         @db.Text
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
-  deletedAt      DateTime?       @map("deleted_at")
+  overdueNotifiedAt      DateTime?       @map("overdue_notified_at")
+  notes                  String?         @db.Text
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+  deletedAt              DateTime?       @map("deleted_at")
 
-  operator     Operator      @relation(fields: [operatorId], references: [id])
+  operator     Operator       @relation(fields: [operatorId], references: [id])
   // onDelete: SetNull explicite sur le client : supprimer un compte ne doit pas
   // effacer la trace du linge encore dehors — le snapshot nominatif suffit à
   // identifier chez qui aller le reprendre.
-  user         User?         @relation("RotationClient", fields: [userId], references: [id], onDelete: SetNull)
-  quote        Quote?        @relation(fields: [quoteId], references: [id], onDelete: SetNull)
-  invoice      Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
-  deliveryStop DeliveryStop? @relation(fields: [deliveryStopId], references: [id], onDelete: SetNull)
+  user         User?          @relation("RotationClient", fields: [userId], references: [id], onDelete: SetNull)
+  quote        Quote?         @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  invoice      Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  deliveryStop DeliveryStop?  @relation(fields: [deliveryStopId], references: [id], onDelete: SetNull)
   lignes       RotationLine[]
 
   @@index([operatorId, status])

@@ -32,7 +32,12 @@ test.describe("UI F1 — Devis", () => {
   test('Sidebar contient lien "Devis"', async ({ page }) => {
     await page.goto("/");
     await expect(
-      page.locator('nav a[href*="/devis"], aside a[href*="/devis"]').first(),
+      // Menu de BUREAU : le tiroir mobile de la refonte responsive porte les
+      // mêmes liens, plus haut dans le DOM et hors écran.
+      page
+        .getByRole("complementary", { name: "Menu principal" })
+        .locator('a[href*="/devis"]')
+        .first(),
     ).toBeVisible({ timeout: 8_000 });
   });
 

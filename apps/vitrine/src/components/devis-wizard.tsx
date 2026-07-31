@@ -20,9 +20,11 @@ import {
   DELIVERY_DEFAULTS,
   SUBSCRIPTION_DEFAULTS,
   URGENCY_TIERS,
+  VAUCLUSE_COMMUNES,
+  chercherCommunes,
   urgencyTier,
 } from "@lingengo/shared";
-import type { DeliveryZone, UrgencyLevel } from "@lingengo/shared";
+import type { CommuneLivrable, DeliveryZone, UrgencyLevel } from "@lingengo/shared";
 import {
   ABO_PRICE,
   EXTRAS,
@@ -197,6 +199,8 @@ export function DevisWizard() {
   const [qty, setQty] = useState<Preset>({ complet: 0, bain: 0, lit: 0 });
   const [extraQtys, setExtraQtys] = useState<Record<string, number>>({});
   const [zone, setZone] = useState<DeliveryZone>("ORANGE");
+  const [commune, setCommune] = useState<CommuneLivrable | null>(null);
+  const [communeQuery, setCommuneQuery] = useState("");
   const [urgency, setUrgency] = useState<UrgencyLevel>("STANDARD");
   const [formule, setFormule] = useState<"ROTATION" | "PACK">("ROTATION");
 
@@ -228,6 +232,37 @@ export function DevisWizard() {
   const setQtyField = useCallback((field: keyof Preset, v: number) => {
     setQty((prev) => ({ ...prev, [field]: v }));
   }, []);
+
+  /* ─── Commune → palier ─── */
+
+  const chooseQuery = useCallback((valeur: string) => {
+    setCommuneQuery(valeur);
+    setCommune(null);
+  }, []);
+
+  const chooseCommune = useCallback((c: CommuneLivrable) => {
+    setCommune(c);
+    setCommuneQuery(c.nom);
+    setZone(c.zone);
+  }, []);
+
+  // Choisir un palier à la main contredit la commune saisie : on l'oublie plutôt
+  // que d'afficher « Avignon » sous un tarif d'Orange.
+  const chooseZone = useCallback(
+    (z: DeliveryZone) => {
+      setZone(z);
+      if (commune && commune.zone !== z) {
+        setCommune(null);
+        setCommuneQuery("");
+      }
+    },
+    [commune],
+  );
+
+  const suggestions = useMemo(
+    () => (commune ? [] : chercherCommunes(communeQuery, 6)),
+    [commune, communeQuery],
+  );
 
   const cart = useMemo(
     () =>
@@ -292,7 +327,7 @@ export function DevisWizard() {
     const profil = HEBERGEMENTS.find((h) => h.id === hebergement);
     const entete = [
       profil ? `Type d'hébergement : ${profil.label}` : "",
-      `Zone : ${zoneInfo.name}`,
+      commune ? `Commune : ${commune.nom} (${zoneInfo.name})` : `Zone : ${zoneInfo.name}`,
       packActif
         ? `Rythme : ${SUBSCRIPTION_DEFAULTS.DELIVERIES_PER_MONTH} livraisons & reprises par mois, une par quinzaine`
         : `Délai souhaité : ${urgenceTier.label} — ${urgenceTier.delaiText}`,
@@ -329,7 +364,7 @@ export function DevisWizard() {
     ]
       .filter(Boolean)
       .join("\n");
-  }, [hebergement, zoneInfo.name, urgenceTier, packActif, cart]);
+  }, [hebergement, commune, zoneInfo.name, urgenceTier, packActif, cart]);
 
   /* ─── Rendu d'une étape ─── */
 
@@ -467,6 +502,53 @@ export function DevisWizard() {
       case "zone":
         return (
           <div className="space-y-3">
+            {/* Chercher sa commune évite de se classer soi-même dans un palier :
+                personne ne sait de tête s'il est à 14 ou 16 km d'Orange. */}
+            <div>
+              <label
+                htmlFor="wz-commune"
+                className="mb-1.5 block text-xs font-medium text-gray-700"
+              >
+                Votre commune
+              </label>
+              <input
+                id="wz-commune"
+                type="text"
+                value={communeQuery}
+                onChange={(e) => chooseQuery(e.target.value)}
+                autoComplete="off"
+                placeholder="Avignon, Carpentras, Cavaillon…"
+                className="w-full rounded-lg border border-lavender-200 bg-white px-3 py-2 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest"
+              />
+              {suggestions.length > 0 && (
+                <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                  {suggestions.map((c) => (
+                    <li key={c.codeInsee}>
+                      <button
+                        type="button"
+                        onClick={() => chooseCommune(c)}
+                        className="rounded-full border border-lavender-200 bg-white px-3 py-1.5 text-xs text-gray-800 transition-colors hover:border-forest hover:bg-lavender-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest"
+                      >
+                        {c.nom}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {communeQuery.trim() !== "" && suggestions.length === 0 && !commune && (
+                <p className="mt-1.5 text-xs leading-relaxed text-lavender-800">
+                  Aucune commune du Vaucluse ne porte ce nom. Nous ne livrons pas hors du
+                  département — écrivez-nous, nous vous orienterons.
+                </p>
+              )}
+              {commune && (
+                <p className="mt-1.5 text-xs text-gray-600">
+                  {commune.nom} — {ZONE_BY_ID[commune.zone].name}, livraison{" "}
+                  {ZONE_BY_ID[commune.zone].prix.toLowerCase()}.
+                </p>
+              )}
+            </div>
+
             <div
               role="radiogroup"
               aria-label="Zone de livraison"
@@ -481,7 +563,7 @@ export function DevisWizard() {
                     type="button"
                     role="radio"
                     aria-checked={active}
-                    onClick={() => setZone(z.id)}
+                    onClick={() => chooseZone(z.id)}
                     className={`${cardBase} ${active ? cardActive : cardIdle}`}
                   >
                     <span className="flex items-center justify-between gap-3">
@@ -502,23 +584,11 @@ export function DevisWizard() {
               })}
             </div>
 
-            {zone === "HORS_ZONE" ? (
-              <div className="rounded-xl border border-lavender-200 bg-lavender-50 p-4">
-                <p className="text-sm font-semibold text-lavender-800">
-                  On vous fait un devis personnalisé
-                </p>
-                <p className="mt-1 text-xs leading-relaxed text-gray-700">
-                  Au-delà des communes limitrophes d&apos;Orange, nous ne publions pas de tarif de
-                  livraison : la course est chiffrée au cas par cas. Continuez votre devis, nous
-                  vous rappelons avec le montant exact.
-                </p>
-              </div>
-            ) : (
-              <p className="text-[11px] leading-relaxed text-gray-500">
-                Livraison offerte dès {DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits à Orange ou dès{" "}
-                {DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande.
-              </p>
-            )}
+            <p className="text-[11px] leading-relaxed text-gray-500">
+              Nous livrons les {VAUCLUSE_COMMUNES.length} communes du Vaucluse. Livraison incluse à
+              Orange, et offerte sur les autres paliers dès{" "}
+              {DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande.
+            </p>
           </div>
         );
 
@@ -702,7 +772,7 @@ export function DevisWizard() {
                   : `${fmt(cart.venteApresReduc)} / rotation`}
               </p>
               <p className="mt-1 text-xs text-gray-600">
-                {zoneInfo.name} · {rythmeTexte}
+                {commune ? `${commune.nom} — ${zoneInfo.name}` : zoneInfo.name} · {rythmeTexte}
                 {!packActif && cart.livraisonSurDevis ? " · livraison sur devis" : ""}
               </p>
             </div>
@@ -710,7 +780,7 @@ export function DevisWizard() {
               recap={recap}
               lignes={lignesEnvoyees}
               livraisonCents={packActif ? 0 : cart.livraisonFrais}
-              zone={zoneInfo.name}
+              zone={commune ? `${commune.nom} (${zoneInfo.name})` : zoneInfo.name}
             />
             <p className="text-[11px] leading-relaxed text-gray-500">
               Nous vous répondons sous 24 h ouvrées avec un devis officiel. Aucune information

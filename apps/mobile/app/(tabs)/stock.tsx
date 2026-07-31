@@ -9,8 +9,10 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
-import { useMyStock, useOrders, formatDateShort, formatCents } from "@/lib/api";
+import { useMyStock, useMyRotations, useOrders, formatDateShort, formatCents } from "@/lib/api";
 import type { ClientStock, StockMovement } from "@/lib/api";
+import { buildClientStockView, type ClientStockView } from "@/lib/stock-summary";
+import { consumedTotals } from "@/lib/order-total";
 import { colors, font, spacing, radius } from "@/lib/theme";
 
 // ─── Constants ───────────────────────────────────────────────────
@@ -172,7 +174,11 @@ function ActivitySection() {
   const periodOrders =
     ordersData?.filter((o) => o.status === "DELIVERED" && new Date(o.deliveryDate) >= cutoff) ?? [];
 
-  const totalCommandé = periodOrders.reduce((s, o) => s + o.totalCents, 0);
+  // Frais de livraison compris : « total consommé » doit correspondre à ce que
+  // le client a réellement payé, pas au seul montant des articles. Les courses
+  // restées à chiffrer (hors zone, urgence) valent 0 en base : elles ne gonflent
+  // pas le cumul d'un montant inventé, mais l'écran DIT qu'il est incomplet.
+  const { totalCents: totalCommandé, surDevisCount } = consumedTotals(periodOrders);
   const nbCommandes = periodOrders.length;
 
   return (
@@ -209,6 +215,12 @@ function ActivitySection() {
           <Text style={styles.activityLabel}>Total consommé</Text>
         </Card>
       </View>
+      {surDevisCount > 0 && (
+        <Text style={styles.activityHint}>
+          Hors frais de livraison de {surDevisCount} commande{surDevisCount > 1 ? "s" : ""}, encore
+          à confirmer.
+        </Text>
+      )}
     </View>
   );
 }
@@ -225,10 +237,108 @@ function StockSkeleton() {
   );
 }
 
+// ─── Vue d'ensemble ──────────────────────────────────────────────
+
+/** Agrégats serveur : ventilation propre / sale / transit connue. */
+function ServerOverview({ totals }: { totals: ClientStockView["totals"] }) {
+  const clean = totals.clean ?? 0;
+  const dirty = totals.dirty ?? 0;
+  const inTransit = totals.inTransit ?? 0;
+
+  return (
+    <Card style={styles.overviewCard}>
+      <Text style={styles.overviewTitle} accessibilityRole="header">
+        Vue d&apos;ensemble
+      </Text>
+      <View style={styles.overviewNums}>
+        <View style={styles.bigNum}>
+          <Text style={[styles.bigNumValue, { color: colors.success }]}>{clean}</Text>
+          <Text style={styles.bigNumLabel}>Propres</Text>
+        </View>
+        <View style={[styles.bigNum, styles.bigNumCenter]}>
+          <Text
+            style={[styles.bigNumValue, { fontSize: font.sizes.xxxl, color: colors.textPrimary }]}
+          >
+            {totals.inCirculation}
+          </Text>
+          <Text style={[styles.bigNumLabel, { color: colors.textSecondary }]}>En circulation</Text>
+        </View>
+        <View style={styles.bigNum}>
+          <Text style={[styles.bigNumValue, { color: colors.warning }]}>{dirty}</Text>
+          <Text style={styles.bigNumLabel}>Sales</Text>
+        </View>
+      </View>
+
+      <DonutChart
+        segments={[
+          { value: clean, color: colors.clean, label: "Propres" },
+          { value: dirty, color: colors.dirty, label: "Sales" },
+          { value: inTransit, color: colors.circulation, label: "En transit" },
+        ]}
+        centerValue={String(totals.inCirculation)}
+        centerLabel="en circulation"
+        size={170}
+      />
+    </Card>
+  );
+}
+
+/**
+ * Repli sur les rotations en cours : on connaît la quantité chez le client,
+ * article par article, mais pas ce qui est encore propre. On affiche donc le
+ * nombre et le détail — et on ne montre AUCUN donut propre/sale, qui serait un
+ * chiffre inventé présenté comme une mesure.
+ */
+function RotationsOverview({ view }: { view: ClientStockView }) {
+  return (
+    <Card style={styles.overviewCard}>
+      <Text style={styles.overviewTitle} accessibilityRole="header">
+        Chez vous en ce moment
+      </Text>
+      <View style={styles.circulationBlock}>
+        <Text
+          style={styles.circulationValue}
+          accessibilityLabel={`${view.totals.inCirculation} articles chez vous`}
+        >
+          {view.totals.inCirculation}
+        </Text>
+        <Text style={styles.circulationLabel}>
+          article{view.totals.inCirculation > 1 ? "s" : ""} en circulation
+        </Text>
+      </View>
+
+      <View style={styles.itemList}>
+        {view.items.map((item, i) => (
+          <View key={item.designation} style={[styles.itemRow, i > 0 && styles.itemRowBorder]}>
+            <Ionicons name="cube-outline" size={18} color={colors.primary} />
+            <Text style={styles.itemName} numberOfLines={2}>
+              {item.designation}
+            </Text>
+            <Text style={styles.itemQty}>{item.quantity}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.noteBox}>
+        <Ionicons name="information-circle-outline" size={16} color={colors.info} />
+        <Text style={styles.noteText}>
+          Décompte établi d&apos;après vos livraisons en cours. La répartition propre / sale sera
+          affichée dès que l&apos;inventaire détaillé sera enregistré.
+        </Text>
+      </View>
+    </Card>
+  );
+}
+
 // ─── Main screen ─────────────────────────────────────────────────
 
 export default function StockScreen() {
   const { data, isLoading, isError, refetch, isRefetching } = useMyStock();
+  // Deuxième source : les rotations disent ce qui est parti chez le client et
+  // n'est pas revenu. Indispensable ici — la table d'agrégats `client_stocks`
+  // n'est alimentée que par un ajustement manuel d'admin, donc vide pour un
+  // client livré normalement (cf. lib/stock-summary.ts).
+  const rotations = useMyRotations();
 
   // Hook déclaré AVANT tout return conditionnel (Rules of Hooks) — sinon le
   // nombre de hooks change entre le rendu loading et le rendu data → crash
@@ -241,7 +351,12 @@ export default function StockScreen() {
     [movementsCount],
   );
 
-  if (isLoading) return <StockSkeleton />;
+  const refreshAll = () => {
+    void refetch();
+    void rotations.refetch();
+  };
+
+  if (isLoading || rotations.isLoading) return <StockSkeleton />;
 
   // « Pas de stock » et « je n'ai pas pu joindre le serveur » n'appellent pas la
   // même réaction : le premier se règle à la prochaine livraison, le second en
@@ -249,77 +364,62 @@ export default function StockScreen() {
   if (isError) {
     return (
       <ScreenWrapper>
-        <ErrorState what="votre stock" onRetry={() => void refetch()} />
+        <ErrorState what="votre stock" onRetry={refreshAll} />
       </ScreenWrapper>
     );
   }
 
-  if (!data?.stocks.length) {
+  const view = buildClientStockView({ stocks: data?.stocks, rotations: rotations.data });
+  const movements = data?.recentMovements ?? [];
+
+  // Vraiment rien : ni agrégat, ni rotation ouverte, ni mouvement. Tant qu'il
+  // reste des mouvements, l'écran a quelque chose à montrer — les jeter pour
+  // afficher « Pas de stock » était précisément le bug remonté.
+  if (view.source === "none" && movements.length === 0) {
+    // Sauf si la seule autre source n'a pas répondu : annoncer « rien chez
+    // vous » sur une rotation injoignable serait affirmer plus que ce qu'on sait.
+    if (rotations.isError) {
+      return (
+        <ScreenWrapper>
+          <ErrorState what="votre stock" onRetry={refreshAll} />
+        </ScreenWrapper>
+      );
+    }
     return (
       <ScreenWrapper>
         <EmptyState
           icon="stats-chart-outline"
-          title="Pas de stock"
+          title="Pas encore de linge chez vous"
           description="Votre stock apparaîtra ici après votre première livraison."
         />
       </ScreenWrapper>
     );
   }
 
-  const totalClean = data.stocks.reduce((s, st) => s + st.cleanSets, 0);
-  const totalDirty = data.stocks.reduce((s, st) => s + st.dirtySets, 0);
-  const totalCirculation = data.stocks.reduce((s, st) => s + st.totalInCirculation, 0);
-
   return (
-    <ScreenWrapper refreshing={isRefetching} onRefresh={refetch}>
-      {/* Global overview */}
-      <Card style={styles.overviewCard}>
-        <Text style={styles.overviewTitle} accessibilityRole="header">
-          Vue d'ensemble
-        </Text>
-        {/* Big numbers */}
-        <View style={styles.overviewNums}>
-          <View style={styles.bigNum}>
-            <Text style={[styles.bigNumValue, { color: colors.success }]}>{totalClean}</Text>
-            <Text style={styles.bigNumLabel}>Propres</Text>
-          </View>
-          <View style={[styles.bigNum, styles.bigNumCenter]}>
-            <Text
-              style={[styles.bigNumValue, { fontSize: font.sizes.xxxl, color: colors.textPrimary }]}
-            >
-              {totalCirculation}
-            </Text>
-            <Text style={[styles.bigNumLabel, { color: colors.textSecondary }]}>
-              En circulation
-            </Text>
-          </View>
-          <View style={styles.bigNum}>
-            <Text style={[styles.bigNumValue, { color: colors.warning }]}>{totalDirty}</Text>
-            <Text style={styles.bigNumLabel}>Sales</Text>
-          </View>
-        </View>
-
-        <DonutChart
-          segments={[
-            { value: totalClean, color: colors.clean, label: "Propres" },
-            { value: totalDirty, color: colors.dirty, label: "Sales" },
-            {
-              value: Math.max(totalCirculation - totalClean - totalDirty, 0),
-              color: colors.circulation,
-              label: "En transit",
-            },
-          ]}
-          centerValue={String(totalCirculation)}
-          centerLabel="en circulation"
-          size={170}
-        />
-      </Card>
+    <ScreenWrapper refreshing={isRefetching || rotations.isRefetching} onRefresh={refreshAll}>
+      {/* Vue d'ensemble — la ventilation propre/sale n'existe que côté serveur */}
+      {view.source === "server" ? (
+        <ServerOverview totals={view.totals} />
+      ) : view.source === "rotations" ? (
+        <RotationsOverview view={view} />
+      ) : (
+        <Card style={styles.overviewCard}>
+          <Text style={styles.overviewTitle} accessibilityRole="header">
+            Rien en circulation
+          </Text>
+          <Text style={styles.emptyMov}>
+            Tout votre linge est rentré. L&apos;historique ci-dessous retrace vos derniers
+            mouvements.
+          </Text>
+        </Card>
+      )}
 
       {/* Per-range breakdown */}
-      {data.stocks.length > 1 && (
+      {view.source === "server" && view.ranges.length > 1 && (
         <>
           <SectionHeader title="Par gamme" />
-          {data.stocks.map((stock) => (
+          {view.ranges.map((stock) => (
             <StockDonut key={stock.productRange} stock={stock} />
           ))}
         </>
@@ -330,14 +430,14 @@ export default function StockScreen() {
 
       {/* Recent movements */}
       <SectionHeader title="Historique des mouvements" />
-      {data.recentMovements.length === 0 ? (
+      {movements.length === 0 ? (
         <Card>
           <Text style={styles.emptyMov}>Aucun mouvement récent</Text>
         </Card>
       ) : (
         <Card padded={false}>
           <FlatList
-            data={data.recentMovements}
+            data={movements}
             keyExtractor={(m) => m.id}
             renderItem={renderMovement}
             scrollEnabled={false}
@@ -391,6 +491,62 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textTransform: "uppercase",
     letterSpacing: 0.3,
+  },
+  // Repli rotations : un seul grand chiffre, puis le détail par article
+  circulationBlock: {
+    alignItems: "center",
+    marginBottom: spacing.lg,
+  },
+  circulationValue: {
+    fontSize: font.sizes.xxxl,
+    fontWeight: font.weights.heavy,
+    color: colors.primary,
+  },
+  circulationLabel: {
+    fontSize: font.sizes.sm,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  itemList: {
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  itemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  itemRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  itemName: {
+    flex: 1,
+    fontSize: font.sizes.md,
+    color: colors.textPrimary,
+  },
+  itemQty: {
+    fontSize: font.sizes.lg,
+    fontWeight: font.weights.heavy,
+    color: colors.textPrimary,
+    minWidth: 32,
+    textAlign: "right",
+  },
+  noteBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    backgroundColor: colors.infoLight,
+    borderRadius: radius.sm,
+    padding: spacing.md,
+    marginTop: spacing.md,
+  },
+  noteText: {
+    flex: 1,
+    fontSize: font.sizes.xs,
+    color: colors.infoText,
+    lineHeight: 17,
   },
   donutCard: { marginBottom: spacing.md },
   donutHeader: {
@@ -505,5 +661,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
     textTransform: "uppercase",
     letterSpacing: 0.3,
+  },
+  activityHint: {
+    fontSize: font.sizes.xs,
+    color: colors.textTertiary,
+    lineHeight: 17,
+    marginTop: -spacing.xs,
+    marginBottom: spacing.md,
   },
 });

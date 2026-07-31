@@ -92,9 +92,10 @@ test.describe("UI F3 — Utilisateurs", () => {
     const roleSelect = page.locator('select[name*="role"]').first();
     const roleVisible = await roleSelect.isVisible({ timeout: 2_000 }).catch(() => false);
     if (roleVisible) {
-      await roleSelect.selectOption({ label: /client|livreur/i } as Parameters<
-        typeof roleSelect.selectOption
-      >[0]);
+      // `selectOption` n'accepte PAS d'expression régulière (« expected string,
+      // got object ») : on désigne la valeur du <option>, qui est le contrat
+      // stable du formulaire.
+      await roleSelect.selectOption("CLIENT");
     } else {
       // Try radio or combobox
       const clientOption = page
@@ -107,7 +108,12 @@ test.describe("UI F3 — Utilisateurs", () => {
       if (clientOptionVisible) await clientOption.click();
     }
 
-    await page.getByRole("button", { name: /créer|enregistrer|soumettre|submit/i }).click();
+    // Le bouton est dupliqué : un raccourci dans l'en-tête de page et le vrai
+    // `type="submit"` du formulaire. On vise celui du formulaire.
+    await page
+      .locator("form")
+      .getByRole("button", { name: /créer|enregistrer|soumettre|submit/i })
+      .click();
 
     // Modale with password should appear
     const modal = page.locator('[role="dialog"], [data-testid="modal"], .modal').first();

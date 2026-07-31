@@ -8,6 +8,7 @@ import { ValidationError, NotFoundError } from "../../utils/errors.js";
 import { requireRole } from "../../middleware/rbac.js";
 import { createAuditLog } from "../../utils/audit.js";
 import { createOrderSchema } from "../../schemas/orders.schema.js";
+import { communeInseeSchema } from "../../schemas/commune.schema.js";
 
 const CLIENT_SOURCES = ["APP", "ADMIN", "BOUCHE_A_OREILLE", "MARCHE", "DEVIS", "SITE_WEB"] as const;
 
@@ -32,6 +33,10 @@ const createClientSchema = z.object({
   address: z.string().max(2000).optional(),
   city: z.string().max(120).optional(),
   postalCode: z.string().max(10).optional(),
+  // Commune de livraison : même liste fermée et même refus qu'à l'inscription.
+  // L'admin n'a pas plus le droit que le client d'enregistrer une adresse hors
+  // Vaucluse — la promesse de livraison serait tenue par personne.
+  communeInsee: communeInseeSchema.optional(),
   accommodationType: z.enum(ACCOMMODATION_TYPES).optional(),
   zoneId: z.string().uuid().optional(),
   preferredTimeSlot: z.string().max(20).optional(),
@@ -53,6 +58,11 @@ const updateClientSchema = z.object({
   address: z.string().max(2000).nullable().optional(),
   city: z.string().max(120).nullable().optional(),
   postalCode: z.string().max(10).nullable().optional(),
+  // NON `nullable`, à la différence des autres champs d'adresse : effacer la
+  // commune remettrait le tarif sur la déduction par code postal, qui retient le
+  // palier le moins cher en cas d'ambiguïté (84100 = Orange ET Uchaux). Une
+  // commune se corrige, elle ne se supprime pas.
+  communeInsee: communeInseeSchema.optional(),
   accommodationType: z.enum(ACCOMMODATION_TYPES).nullable().optional(),
   zoneId: z.string().uuid().nullable().optional(),
   preferredTimeSlot: z.string().max(20).nullable().optional(),

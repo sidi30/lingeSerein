@@ -180,9 +180,9 @@ export function Services() {
         {/* Delivery note */}
         <Reveal>
           <p className="text-center text-sm text-gray-600 mb-16">
-            <span className="text-forest font-medium">✓ Livraison offerte</span> à Orange dès{" "}
-            {DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits &nbsp;·&nbsp;
-            <span className="text-forest font-medium">Orange &amp; villes limitrophes</span> à
+            <span className="text-forest font-medium">✓ Livraison incluse à Orange</span>{" "}
+            &nbsp;·&nbsp;
+            <span className="text-forest font-medium">Tout le Vaucluse</span> livré, offerte à
             partir de {DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande &nbsp;·&nbsp;
             Location ponctuelle sans abonnement
           </p>

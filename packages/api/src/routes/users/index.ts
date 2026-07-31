@@ -58,7 +58,11 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
               data: {
                 type: "object",
                 properties: {
-                  user: { type: "object" },
+                  // `additionalProperties: true` : fast-json-stringify retire du
+                  // corps sérialisé tout ce qui n'est pas déclaré. Un
+                  // `type: "object"` nu renvoyait `user: {}` — un utilisateur
+                  // créé, mais sans `id` ni `email` pour l'écran qui l'affiche.
+                  user: { type: "object", additionalProperties: true },
                   temporaryPassword: {
                     type: "string",
                     description: "Mot de passe provisoire (affiché une seule fois)",
@@ -353,7 +357,9 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
             type: "object",
             properties: {
               success: { type: "boolean" },
-              data: { type: "object" },
+              // Même motif que POST /users : sans `additionalProperties`, le
+              // détail de la cascade (entités effacées, compteurs) est vidé.
+              data: { type: "object", additionalProperties: true },
             },
           },
         },

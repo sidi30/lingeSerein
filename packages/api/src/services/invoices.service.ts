@@ -2,6 +2,7 @@ import type { PrismaClient, Prisma, InvoiceStatus } from "@prisma/client";
 import { computeDevisTotals, resolveLivraisonLabel } from "@lingengo/shared";
 import { NotFoundError, ConflictError, UnprocessableEntityError } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
+import { libelleLivraisonDevis } from "../utils/livraison.js";
 import type {
   CreateInvoiceFromQuoteInput,
   UpdateInvoiceStatusInput,
@@ -261,7 +262,13 @@ export class InvoicesService {
       // Libellé FIGÉ à l'émission. Sans lui, le PDF déduit l'intitulé du seul
       // montant (25 € → « Express 24 h ») : un montant saisi à la main pour une
       // course hors zone se retrouverait imprimé comme un forfait d'urgence.
-      livraisonLabel: resolveLivraisonLabel({ livraisonCents: quote.livraisonCents }),
+      // Le libellé est fourni EXPLICITEMENT parce que le montant seul ne dit pas
+      // si 0 € vaut « offerte » ou « reste à chiffrer » — le drapeau du devis,
+      // lui, le dit.
+      livraisonLabel: resolveLivraisonLabel({
+        livraisonCents: quote.livraisonCents,
+        livraisonLabel: libelleLivraisonDevis(quote),
+      }),
       tvaApplicable: quote.tvaApplicable,
       ...(quote.tvaApplicable ? {} : { mentionLegale: VAT_EXEMPTION_MENTION }),
       ...(reglement ? { reglement } : {}),

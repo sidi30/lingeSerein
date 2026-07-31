@@ -9,6 +9,7 @@ import { router } from "expo-router";
 import { useAuthStore } from "./store";
 import { invalidateAfter } from "./query";
 import { queryClient, SHARED_STATE_STALE_TIME } from "./queryClient";
+import { findRoundStop, roundsWindow } from "./rounds";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -227,7 +228,26 @@ export interface Order {
   orderNumber: string;
   status: string;
   isRecurring: boolean;
+  /** SOUS-TOTAL des articles — les frais de livraison sont à part. */
   totalCents: number;
+  /**
+   * Frais de livraison (centimes). Facultatif : les commandes antérieures à la
+   * mise en service du champ n'en ont pas, et `orderTotals` traite alors
+   * l'absence comme « inconnu » plutôt que comme une livraison offerte.
+   */
+  deliveryFeeCents?: number | null;
+  /**
+   * Aucun tarif public sur cette course (hors zone, urgence Flash) : les frais
+   * valent 0 en base SANS être offerts. Sans ce drapeau, « à chiffrer » et
+   * « offerte » sont indiscernables et l'app promet une gratuité que personne
+   * n'a décidée (`resumeFrais`, packages/api/src/services/orders.service.ts).
+   */
+  deliveryFeeSurDevis?: boolean | null;
+  /**
+   * Résumé des frais ajouté par la fiche (`GET /orders/:id`) et par la création
+   * (`POST /orders`) — la liste, elle, ne renvoie que les colonnes brutes.
+   */
+  deliveryFee?: { cents: number; label: string; surDevis: boolean } | null;
   deliveryDate: string;
   timeSlot: string | null;
   specialNotes: string | null;
@@ -362,6 +382,39 @@ export interface UserProfile {
   stockAlertThreshold: number;
   preferredTimeSlot: string | null;
   createdAt: string;
+  // Coordonnées modifiables par le client lui-même (PATCH /auth/me).
+  // Déclarées facultatives : `GET /auth/me` ne les a pas toujours renvoyées, et
+  // les traiter comme obligatoires ferait mentir le type sur un profil ancien.
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  /**
+   * Code INSEE de la commune de livraison, choisie dans la liste fermée du
+   * Vaucluse. C'est LUI qui détermine le palier tarifaire, pas `postalCode` —
+   * un code postal ne désigne même pas une commune (84100 = Orange ET Uchaux).
+   * `null` sur toute fiche antérieure à la liste fermée.
+   */
+  communeInsee?: string | null;
+}
+
+/**
+ * Corps de `PATCH /auth/me` — liste blanche du serveur (`updateMyProfileSchema`).
+ *
+ * L'e-mail en est volontairement absent : le serveur le REFUSE (un champ inconnu
+ * fait échouer toute la requête). Changer d'adresse est un vecteur de reprise de
+ * compte, qui demande re-vérification et déconnexion des sessions.
+ * `null` = effacer le champ.
+ */
+export interface UpdateMyProfileInput {
+  name?: string;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  /** Code INSEE (5 caractères) de la commune choisie ; `null` pour l'effacer. */
+  communeInsee?: string | null;
+  preferredTimeSlot?: string | null;
 }
 
 // ─── CRM client ───────────────────────────────────────────────────
@@ -778,6 +831,30 @@ export function useProfile() {
   });
 }
 
+/**
+ * Le client corrige lui-même ses coordonnées.
+ *
+ * On n'amorce PAS le cache avec la réponse : elle a beau annoncer la même forme
+ * que `GET /auth/me`, une réponse de mutation plus pauvre que le GET a déjà
+ * planté l'app par le passé. L'invalidation par domaine relance le GET, qui fait
+ * foi — l'écran garde entre-temps les valeurs précédentes, il ne se vide pas.
+ */
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation<UserProfile, ApiError, UpdateMyProfileInput>({
+    mutationFn: async (input) => {
+      const res = await apiFetch<ApiRes<UserProfile>>("/auth/me", {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      });
+      return res.data;
+    },
+    // Domaine « client » : le profil, mais aussi la fiche et la liste côté
+    // admin, qui affichent les mêmes coordonnées.
+    onSuccess: () => invalidateAfter(qc, "client"),
+  });
+}
+
 // ─── Hooks: Deliveries (driver only) ─────────────────────────────
 
 export interface DeliveryRound {
@@ -789,6 +866,28 @@ export interface DeliveryRound {
   completedAt: string | null;
   stops: DeliveryStop[];
   zone?: { name: string };
+  /** Aplati par `GET /deliveries/mine` — absent sur `/today`. */
+  zoneName?: string | null;
+  stopsCount?: number;
+}
+
+/**
+ * Client d'un arrêt (`CLIENT_ARRET_SELECT` côté serveur).
+ *
+ * `address` est un champ TEXTE LIBRE ; `city` et `postalCode` sont des colonnes
+ * séparées. Composer une adresse GPS impose donc de les réunir — cf.
+ * `lib/navigation-links.ts`. Tous facultatifs : un client saisi à la volée sur
+ * un marché peut n'avoir qu'un nom.
+ */
+export interface StopClient {
+  id: string;
+  name: string;
+  /** Nom de l'établissement (hôtel, gîte) quand il existe. */
+  companyName?: string | null;
+  address?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  phone?: string | null;
 }
 
 export interface DeliveryStop {
@@ -800,7 +899,7 @@ export interface DeliveryStop {
   dirtyPickedUp: number | null;
   specialInstructions: string | null;
   completedAt: string | null;
-  client: { id: string; name: string; address?: string; phone?: string };
+  client: StopClient;
   order?: { orderNumber: string } | null;
 }
 
@@ -825,6 +924,141 @@ export function useTodayRound() {
     // l'app, pas deux minutes plus tard.
     staleTime: SHARED_STATE_STALE_TIME,
   });
+}
+
+/**
+ * Mes tournées sur une fenêtre glissante (`GET /deliveries/mine`).
+ *
+ * `/today` ne renvoie que la journée en cours : une tournée créée pour demain
+ * était INVISIBLE au livreur — « j'ai créé une tournée, le livreur n'a rien
+ * vu ». Cette route ouvre la fenêtre ; le périmètre est forcé côté serveur sur
+ * le livreur authentifié.
+ *
+ * Repli explicite sur 404 : tant que la route n'est pas déployée partout,
+ * l'écran doit rester celui d'avant, pas afficher une panne. `null` signifie
+ * donc « pas de liste disponible » et se distingue de `[]`, « aucune tournée ».
+ * Toute autre erreur remonte : la masquer ferait passer une vraie panne pour un
+ * planning vide.
+ */
+export function useUpcomingRounds(fromYmd: string, toYmd: string) {
+  const token = useAuthStore((s) => s.accessToken);
+  const role = useAuthStore((s) => s.user?.role);
+  return useQuery<DeliveryRound[] | null>({
+    queryKey: ["upcoming-rounds", fromYmd, toYmd],
+    queryFn: async () => {
+      const params = new URLSearchParams({ from: fromYmd, to: toYmd, limit: "50" });
+      try {
+        const res = await apiFetch<ApiListRes<DeliveryRound>>(
+          `/deliveries/mine?${params.toString()}`,
+        );
+        return res.data;
+      } catch (e) {
+        if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return null;
+        throw e;
+      }
+    },
+    enabled: !!token && role === "ROLE_LIVREUR",
+    // Même raison que `/today` : l'admin planifie sans que le mobile en soit
+    // averti.
+    staleTime: SHARED_STATE_STALE_TIME,
+    // La fenêtre glisse d'un jour à minuit et change la clé : sans ça, la
+    // section se vide et clignote à la première ouverture du lendemain.
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Mes tournées sur la fenêtre standard (aujourd'hui → J+30).
+ *
+ * À préférer partout : la fenêtre vient de `roundsWindow()`, donc tous les
+ * écrans tournée partagent une seule requête et une seule liste. Deux fenêtres
+ * différentes = deux caches, et un arrêt visible à l'écran précédent devenait
+ * « introuvable » à l'écran suivant.
+ */
+export function useMyRounds() {
+  const { fromYmd, toYmd } = roundsWindow();
+  return useUpcomingRounds(fromYmd, toYmd);
+}
+
+/**
+ * Une tournée par son identifiant, qu'elle soit celle du jour ou à venir.
+ *
+ * Les deux sources sont interrogées et fusionnées dans cet ordre : `/today`
+ * d'abord (elle porte l'état le plus frais de la journée en cours), la fenêtre
+ * ensuite. Aucune requête dédiée n'est émise : les deux listes sont déjà en
+ * cache pour l'écran tournée.
+ */
+export function useRoundById(roundId: string | undefined) {
+  const todayQuery = useTodayRound();
+  const windowQuery = useMyRounds();
+
+  const round =
+    todayQuery.data && todayQuery.data.id === roundId
+      ? todayQuery.data
+      : ((windowQuery.data ?? []).find((r) => r.id === roundId) ?? null);
+
+  return {
+    round,
+    isToday: !!round && !!todayQuery.data && todayQuery.data.id === round.id,
+    ...combineDeliveryQueries(todayQuery, windowQuery, !!round),
+  };
+}
+
+/**
+ * Un arrêt par son identifiant, dans n'importe laquelle de mes tournées.
+ *
+ * Chercher uniquement dans `/today` était la limite de l'écran de détail : un
+ * arrêt de la tournée de demain — ou ouvert depuis une notification push
+ * d'affectation — s'affichait « Arrêt introuvable » alors qu'il existait bel et
+ * bien.
+ */
+export function useStopById(stopId: string | undefined) {
+  const todayQuery = useTodayRound();
+  const windowQuery = useMyRounds();
+
+  const inToday = todayQuery.data?.stops.find((s) => s.id === stopId);
+  const found = inToday
+    ? { round: todayQuery.data as DeliveryRound, stop: inToday }
+    : findRoundStop(windowQuery.data, stopId);
+
+  return {
+    stop: found?.stop ?? null,
+    round: found?.round ?? null,
+    ...combineDeliveryQueries(todayQuery, windowQuery, !!found),
+  };
+}
+
+/**
+ * État d'affichage de deux requêtes qui alimentent une même recherche.
+ *
+ * Même règle que `detailState` : **une donnée trouvée l'emporte sur une erreur
+ * de rafraîchissement**. On n'annonce « introuvable » que lorsque les deux
+ * sources ont répondu sans erreur ; et une erreur ne s'affiche que si rien n'a
+ * été trouvé, sinon un livreur perdrait de vue un arrêt qu'il a sous les yeux
+ * parce que le réseau a lâché.
+ */
+function combineDeliveryQueries(
+  todayQuery: { isPending: boolean; isFetching: boolean; isError: boolean; refetch: () => unknown },
+  windowQuery: {
+    isPending: boolean;
+    isFetching: boolean;
+    isError: boolean;
+    isRefetching: boolean;
+    refetch: () => unknown;
+  },
+  found: boolean,
+) {
+  return {
+    /** Rien à montrer pour l'instant, mais une réponse est en route. */
+    isLoading: !found && (todayQuery.isPending || windowQuery.isPending || todayQuery.isFetching),
+    isRefetching: windowQuery.isRefetching,
+    /** Les deux sources ont échoué et il n'y a rien en cache : vraie panne. */
+    isError: !found && todayQuery.isError && windowQuery.isError,
+    refetch: () => {
+      void todayQuery.refetch();
+      void windowQuery.refetch();
+    },
+  };
 }
 
 /**

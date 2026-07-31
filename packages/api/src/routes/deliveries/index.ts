@@ -76,6 +76,43 @@ export default async function deliveryRoutes(app: FastifyInstance): Promise<void
     },
   );
 
+  // ---- GET /deliveries/mine (driver) ----
+  //
+  // `/today` ne montre que la journée en cours : une tournée créée pour demain
+  // était invisible au livreur, qui n'avait donc AUCUN moyen de savoir ce qui
+  // l'attendait. Cette route ouvre la fenêtre (7 jours en arrière, 30 en avant
+  // par défaut) sans rien changer à `/today`, dont l'application dépend.
+  app.get(
+    "/mine",
+    {
+      preHandler: [app.authenticate, requireRole("ROLE_LIVREUR")],
+      schema: {
+        tags: ["Livraisons"],
+        summary: "Mes tournées (livreur) — à venir et récentes",
+        description:
+          "Périmètre FORCÉ côté serveur sur le livreur authentifié : un `driverId` passé en " +
+          "query est ignoré. Fenêtre par défaut J-7 → J+30, ajustable via `from` / `to`.",
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      const parsed = listRoundsQuerySchema.safeParse(request.query);
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.flatten().fieldErrors as Record<string, string[]>);
+      }
+
+      // `driverId` est RETIRÉ de la requête avant tout usage. Le laisser passer,
+      // même à côté d'un périmètre serveur, c'est laisser une porte que le
+      // prochain refactor ouvrira sans s'en rendre compte : ici la valeur ne
+      // survit tout simplement pas à la ligne suivante, et `listMyRounds` ne
+      // l'accepte même pas dans son type.
+      const { driverId: _ignore, ...query } = parsed.data;
+
+      const result = await service.listMyRounds(request.user.sub, query);
+      return reply.send({ success: true, ...result });
+    },
+  );
+
   // ---- GET /deliveries/today (driver) ----
   app.get(
     "/today",

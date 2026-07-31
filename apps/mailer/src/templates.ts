@@ -593,6 +593,299 @@ export function rotationOverdueEmail(data: RotationOverdueData): string {
   `);
 }
 
+// ─── Tournées (API → /api/internal/notify) ───
+
+export interface RoundAssignedDriverData {
+  livreurNom: string;
+  /** Jour de la tournée au format AAAA-MM-JJ. */
+  datePassage: string;
+  /** Nombre d'arrêts planifiés sur la tournée. */
+  stopsCount: number;
+  /** Secteur couvert, quand la tournée en porte un. */
+  zone?: string;
+}
+
+/**
+ * Affectation d'une TOURNÉE à un livreur.
+ *
+ * Gabarit propre à ce cas, et non un « email générique » réutilisé : dire à un
+ * livreur « reprises prévues demain » pour lui annoncer une affectation serait
+ * trompeur, et un email trompeur coûte plus cher qu'une absence d'email.
+ *
+ * N'affirme QUE ce que la charge utile contient — qui, quel jour, combien
+ * d'arrêts, quel secteur. Ni horaires, ni adresses, ni ordre de passage : ces
+ * informations vivent dans l'application, et les inventer ici ferait partir un
+ * planning faux que le livreur suivrait.
+ */
+export function roundAssignedDriverEmail(data: RoundAssignedDriverData): string {
+  const stops = data.stopsCount;
+
+  const zoneBlock = data.zone
+    ? `<p style="margin:10px 0 0;font-size:15px;color:${BRAND.gray};">
+         Secteur : <strong style="color:${BRAND.forest};">${esc(data.zone)}</strong>
+       </p>`
+    : "";
+
+  // Une tournée sans arrêt est anormale : le dire au livreur vaut mieux que de
+  // lui afficher « 0 arrêt » sans commentaire, qu'il lirait comme un bug.
+  const arretsBlock =
+    stops > 0
+      ? `<p style="margin:0;font-size:15px;color:${BRAND.gray};">
+           <strong style="color:${BRAND.forest};">${stops} arrêt${stops > 1 ? "s" : ""}</strong> planifié${
+             stops > 1 ? "s" : ""
+           }
+         </p>`
+      : `<p style="margin:0;font-size:15px;color:${BRAND.gray};">
+           Aucun arrêt n'est encore planifié sur cette tournée — le détail vous parviendra
+           dans l'application.
+         </p>`;
+
+  return layout(`
+    <h2 style="margin:0 0 20px;font-size:22px;color:${BRAND.forest};font-weight:600;">
+      Une tournée vous est affectée, ${esc(data.livreurNom)}
+    </h2>
+    <div style="background-color:${BRAND.lavender50};border-radius:12px;padding:20px 24px;margin-bottom:24px;border-left:4px solid ${BRAND.lavender};">
+      <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:${BRAND.forest};text-transform:uppercase;letter-spacing:0.5px;">Jour de la tournée</p>
+      <p style="margin:0 0 10px;font-size:18px;color:${BRAND.forest};font-weight:700;">${formatDateFr(
+        data.datePassage,
+      )}</p>
+      ${arretsBlock}
+      ${zoneBlock}
+    </div>
+    <p style="margin:0 0 24px;font-size:15px;color:${BRAND.gray};line-height:1.7;">
+      Le détail des arrêts — adresses, ordre de passage et articles à charger — est
+      dans l'application, onglet <strong style="color:${BRAND.forest};">Tournée</strong>.
+      Pensez à vérifier votre chargement avant de partir.
+    </p>
+    <p style="margin:0;font-size:14px;color:${BRAND.gray};line-height:1.7;">
+      Un empêchement ? Prévenez-nous au plus tôt au
+      <a href="tel:+33685218270" style="color:${BRAND.forest};font-weight:600;text-decoration:none;">06 85 21 82 70</a>
+      pour que la tournée soit réaffectée.
+    </p>
+  `);
+}
+
+// ─── Commandes (API → /api/internal/notify) ───
+
+export interface OrderLigneData {
+  designation: string;
+  qty: number;
+}
+
+interface OrderMontants {
+  /** Sous-total des ARTICLES, hors livraison. */
+  sousTotalCents: number;
+  livraisonCents: number;
+  /** Sous-total + livraison. */
+  totalCents: number;
+  /**
+   * Frais de livraison sans tarif public (hors zone, urgence Flash) : 0 € ne
+   * vaut PAS gratuité, le montant reste à confirmer.
+   */
+  livraisonSurDevis?: boolean;
+}
+
+export interface OrderConfirmationClientData extends OrderMontants {
+  clientNom: string;
+  orderNumber: string;
+  /** Date de livraison souhaitée, au format AAAA-MM-JJ. */
+  dateLivraison: string;
+  creneau?: string;
+  lignes: OrderLigneData[];
+}
+
+/**
+ * Bloc de totaux d'une commande.
+ *
+ * La ligne de livraison ne dit « offerte » que lorsqu'elle l'est RÉELLEMENT :
+ * quand les frais sont sur devis, elle annonce « à confirmer » et le total est
+ * marqué « hors livraison ». Afficher 0 € en gratuité pour une course hors zone
+ * serait un engagement commercial que personne n'a pris.
+ */
+function orderTotauxTable(m: OrderMontants): string {
+  const livraisonValeur = m.livraisonSurDevis
+    ? `<span style="color:#b45309;font-weight:600;">à confirmer</span>`
+    : m.livraisonCents > 0
+      ? formatEuroCents(m.livraisonCents)
+      : `<span style="color:${BRAND.forestLight};font-weight:600;">offerte</span>`;
+
+  const totalLabel = m.livraisonSurDevis ? "Total (hors livraison)" : "Total";
+
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+      <tbody>
+        <tr>
+          <td style="padding:10px 12px;font-size:14px;color:${BRAND.gray};background-color:#ffffff;">Sous-total des articles</td>
+          <td align="right" style="padding:10px 12px;font-size:14px;color:#374151;background-color:#ffffff;">${formatEuroCents(
+            m.sousTotalCents,
+          )}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px;font-size:14px;color:${BRAND.gray};background-color:${BRAND.lavender50};">Livraison</td>
+          <td align="right" style="padding:10px 12px;font-size:14px;color:#374151;background-color:${BRAND.lavender50};">${livraisonValeur}</td>
+        </tr>
+        <tr>
+          <td style="padding:14px 12px;font-size:15px;color:${BRAND.forest};font-weight:700;background-color:${BRAND.lavender50};border-top:1px solid #e5e7eb;">${totalLabel}</td>
+          <td align="right" style="padding:14px 12px;font-size:16px;color:${BRAND.forest};font-weight:700;background-color:${BRAND.lavender50};border-top:1px solid #e5e7eb;">${formatEuroCents(
+            m.totalCents,
+          )}</td>
+        </tr>
+      </tbody>
+    </table>`;
+}
+
+/**
+ * Confirmation CLIENT à l'enregistrement de sa commande.
+ *
+ * Accuse réception et récapitule ce qui a été commandé, pour quelle date et à
+ * quel prix. La commande est ENREGISTRÉE, pas encore confirmée : le texte ne
+ * promet donc aucune livraison ferme.
+ */
+export function orderConfirmationClientEmail(data: OrderConfirmationClientData): string {
+  const creneauBlock = data.creneau
+    ? `<p style="margin:10px 0 0;font-size:15px;color:${BRAND.gray};">
+         Créneau souhaité : <strong style="color:${BRAND.forest};">${esc(data.creneau)}</strong>
+       </p>`
+    : "";
+
+  const livraisonSurDevisBlock = data.livraisonSurDevis
+    ? `<div style="background-color:#fef3c7;border-radius:12px;padding:16px 20px;margin-bottom:24px;border-left:4px solid #b45309;">
+         <p style="margin:0;font-size:14px;color:#7c2d12;line-height:1.7;">
+           Votre adresse sort de nos secteurs à tarif public : les
+           <strong>frais de livraison vous seront confirmés</strong> avant toute
+           préparation. Ils ne sont pas inclus dans le total ci-dessus.
+         </p>
+       </div>`
+    : "";
+
+  return layout(`
+    <h2 style="margin:0 0 8px;font-size:22px;color:${BRAND.forest};font-weight:600;">
+      Votre commande est enregistrée, ${esc(data.clientNom)}
+    </h2>
+    <p style="margin:0 0 24px;font-size:15px;color:${BRAND.gray};line-height:1.7;">
+      Commande <strong style="color:${BRAND.forest};">${esc(data.orderNumber)}</strong>
+    </p>
+    <div style="background-color:${BRAND.lavender50};border-radius:12px;padding:20px 24px;margin-bottom:24px;border-left:4px solid ${BRAND.lavender};">
+      <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:${BRAND.forest};text-transform:uppercase;letter-spacing:0.5px;">Livraison souhaitée</p>
+      <p style="margin:0;font-size:18px;color:${BRAND.forest};font-weight:700;">${formatDateFr(
+        data.dateLivraison,
+      )}</p>
+      ${creneauBlock}
+    </div>
+    <h3 style="margin:0 0 12px;font-size:16px;color:${BRAND.forest};font-weight:600;">Votre commande</h3>
+    ${
+      data.lignes.length > 0
+        ? lignesTable(data.lignes)
+        : `<p style="margin:0 0 24px;font-size:14px;color:${BRAND.gray};font-style:italic;">Aucun article renseigné.</p>`
+    }
+    ${orderTotauxTable(data)}
+    ${livraisonSurDevisBlock}
+    <p style="margin:0;font-size:14px;color:${BRAND.gray};line-height:1.7;">
+      Nous revenons vers vous pour confirmer le passage. Une question ? Appelez-nous au
+      <a href="tel:+33685218270" style="color:${BRAND.forest};font-weight:600;text-decoration:none;">06 85 21 82 70</a>.
+    </p>
+  `);
+}
+
+/** Origine de la commande — libellés figés, jamais saisis. */
+const ORDER_SOURCE_LABELS: Record<string, string> = {
+  MOBILE: "Application mobile",
+  QUOTE_CONVERSION: "Conversion d'un devis",
+  MANUAL: "Saisie manuelle",
+};
+
+export interface OrderNotificationOwnerData extends OrderMontants {
+  clientNom: string;
+  clientEmail?: string;
+  clientTel?: string;
+  clientAdresse?: string;
+  orderNumber: string;
+  dateLivraison: string;
+  creneau?: string;
+  lignes: OrderLigneData[];
+  /** MOBILE, QUOTE_CONVERSION ou MANUAL. */
+  source?: string;
+}
+
+/**
+ * Signalement GESTIONNAIRE d'une nouvelle commande.
+ *
+ * Porte le détail complet ET les coordonnées du client : c'est ce qui permet de
+ * rappeler sans ouvrir l'admin, notamment quand les frais de livraison restent
+ * à chiffrer.
+ */
+export function orderNotificationOwnerEmail(data: OrderNotificationOwnerData): string {
+  const ligne = (label: string, valeur: string, alt: boolean) =>
+    `<tr>
+        <td style="padding:12px 16px;background-color:${
+          alt ? BRAND.lavender50 : "#ffffff"
+        };border-bottom:1px solid #e5e7eb;">
+          <span style="font-size:12px;color:${BRAND.gray};text-transform:uppercase;letter-spacing:0.5px;">${label}</span><br>
+          <span style="font-size:15px;color:${BRAND.forest};font-weight:600;">${valeur}</span>
+        </td>
+      </tr>`;
+
+  const contact = [
+    ligne("Client", esc(data.clientNom), false),
+    data.clientEmail
+      ? ligne(
+          "Email",
+          `<a href="mailto:${esc(data.clientEmail)}" style="color:${BRAND.forest};text-decoration:none;">${esc(
+            data.clientEmail,
+          )}</a>`,
+          true,
+        )
+      : "",
+    data.clientTel
+      ? ligne(
+          "Téléphone",
+          `<a href="tel:${esc(data.clientTel)}" style="color:${BRAND.forest};text-decoration:none;">${esc(
+            data.clientTel,
+          )}</a>`,
+          false,
+        )
+      : "",
+    data.clientAdresse ? ligne("Adresse", esc(data.clientAdresse), true) : "",
+    data.source
+      ? ligne("Origine", esc(ORDER_SOURCE_LABELS[data.source] ?? data.source), false)
+      : "",
+  ].join("");
+
+  const creneau = data.creneau
+    ? ` &mdash; créneau <strong style="color:${BRAND.forest};">${esc(data.creneau)}</strong>`
+    : "";
+
+  const alerteFrais = data.livraisonSurDevis
+    ? `<div style="background-color:#fef3c7;border-radius:12px;padding:16px 20px;margin-bottom:24px;border-left:4px solid #b45309;">
+         <p style="margin:0;font-size:14px;color:#7c2d12;line-height:1.7;">
+           <strong>Frais de livraison à chiffrer.</strong> Aucun tarif public ne s'applique
+           (hors zone ou urgence Flash) : le montant de 0 € porté par la commande ne vaut
+           pas gratuité. À confirmer au client avant préparation.
+         </p>
+       </div>`
+    : "";
+
+  return layout(`
+    <h2 style="margin:0 0 8px;font-size:22px;color:${BRAND.forest};font-weight:600;">
+      Nouvelle commande ${esc(data.orderNumber)}
+    </h2>
+    <p style="margin:0 0 24px;font-size:15px;color:${BRAND.gray};line-height:1.7;">
+      Livraison souhaitée le
+      <strong style="color:${BRAND.forest};">${formatDateFr(data.dateLivraison)}</strong>${creneau}
+    </p>
+    ${alerteFrais}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+      ${contact}
+    </table>
+    <h3 style="margin:0 0 12px;font-size:16px;color:${BRAND.forest};font-weight:600;">Articles commandés</h3>
+    ${
+      data.lignes.length > 0
+        ? lignesTable(data.lignes)
+        : `<p style="margin:0 0 24px;font-size:14px;color:${BRAND.gray};font-style:italic;">Aucun article renseigné.</p>`
+    }
+    ${orderTotauxTable(data)}
+  `);
+}
+
 export function notificationEmail(data: ContactData): string {
   return layout(`
     <h2 style="margin:0 0 20px;font-size:22px;color:${BRAND.forest};font-weight:600;">

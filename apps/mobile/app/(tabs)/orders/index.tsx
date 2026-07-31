@@ -11,6 +11,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { useOrders, useIsClient, formatCents, formatDateShort } from "@/lib/api";
 import type { Order } from "@/lib/api";
+import { orderTotals } from "@/lib/order-total";
 import { colors, font, spacing, radius, shadow, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
 
 const FILTERS = [
@@ -32,6 +33,7 @@ export default function OrdersListScreen() {
     // `items` n'est pas garanti : plusieurs réponses de mutation renvoient la
     // commande sans ses lignes. Sans ce garde, la liste entière plante.
     const itemCount = (item.items ?? []).reduce((n, i) => n + i.quantity, 0);
+    const totals = orderTotals(item);
     return (
       <Animated.View entering={FadeInDown.delay(Math.min(index, 8) * 50).springify()}>
         <Pressable
@@ -71,7 +73,17 @@ export default function OrdersListScreen() {
                 )}
 
                 <View style={styles.priceRow}>
-                  <Text style={styles.price}>{formatCents(item.totalCents)}</Text>
+                  {/* Frais de livraison compris quand l'API les fournit :
+                      afficher le seul sous-total annoncerait un montant
+                      inférieur à celui de la facture. Sur devis, ils ne sont pas
+                      encore chiffrés — on le dit au lieu de laisser croire que
+                      ce montant est définitif. */}
+                  <View style={styles.priceGroup}>
+                    <Text style={styles.price}>{formatCents(totals.totalCents)}</Text>
+                    {totals.deliveryFeeSurDevis && (
+                      <Text style={styles.priceNote}>hors livraison</Text>
+                    )}
+                  </View>
                   <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
                 </View>
               </View>
@@ -257,10 +269,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: spacing.sm,
   },
+  priceGroup: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.xs,
+  },
   price: {
     fontSize: font.sizes.lg,
     fontWeight: font.weights.bold,
     color: colors.textPrimary,
+  },
+  priceNote: {
+    fontSize: font.sizes.xs,
+    color: colors.textTertiary,
   },
   fab: {
     position: "absolute",

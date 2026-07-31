@@ -30,6 +30,7 @@ import {
   errorMessage,
 } from "@/lib/api";
 import type { StatusHistoryEntry } from "@/lib/api";
+import { DELIVERY_FEE_A_CONFIRMER, orderTotals } from "@/lib/order-total";
 import { detailState } from "@/lib/query";
 import { useAuthStore } from "@/lib/store";
 import { colors, font, spacing, radius } from "@/lib/theme";
@@ -307,6 +308,8 @@ export default function OrderDetailScreen() {
 
   if (!order) return null;
 
+  const totals = orderTotals(order);
+
   const canCancel =
     isClient &&
     order.status !== "CANCELLED" &&
@@ -439,11 +442,49 @@ export default function OrderDetailScreen() {
             <Text style={styles.itemTotal}>{formatCents(item.totalCents)}</Text>
           </View>
         ))}
-        <View style={[styles.itemRow, styles.itemBorder]}>
-          <Text style={styles.totalLabel}>Total</Text>
-          <Text style={styles.totalValue}>{formatCents(order.totalCents)}</Text>
-        </View>
+        {/* Sous-total, frais, total : trois lignes distinctes dès que l'API
+            communique les frais. Sinon une seule ligne « Total » — afficher
+            « Frais : 0,00 € » sur une commande dont on ignore les frais
+            annoncerait une gratuité que personne n'a décidée. */}
+        {totals.showBreakdown ? (
+          <>
+            <View style={[styles.itemRow, styles.itemBorder]}>
+              <Text style={styles.subTotalLabel}>Sous-total articles</Text>
+              <Text style={styles.subTotalValue}>{formatCents(totals.subtotalCents)}</Text>
+            </View>
+            <View style={styles.itemRow}>
+              <Text style={styles.subTotalLabel}>Frais de livraison</Text>
+              {/* « À confirmer » et non « offerte » : hors zone et urgence Flash
+                  n'ont aucun tarif public, la colonne vaut 0 sans gratuité.
+                  Même vocabulaire que l'e-mail de confirmation. */}
+              {totals.deliveryFeeSurDevis ? (
+                <Text style={styles.pendingValue}>{DELIVERY_FEE_A_CONFIRMER}</Text>
+              ) : totals.deliveryOffered ? (
+                <Text style={styles.offeredValue}>Livraison offerte</Text>
+              ) : (
+                <Text style={styles.subTotalValue}>
+                  {formatCents(totals.deliveryFeeCents ?? 0)}
+                </Text>
+              )}
+            </View>
+            <View style={[styles.itemRow, styles.itemBorder]}>
+              <Text style={styles.totalLabel}>{totals.totalLabel}</Text>
+              <Text style={styles.totalValue}>{formatCents(totals.totalCents)}</Text>
+            </View>
+          </>
+        ) : (
+          <View style={[styles.itemRow, styles.itemBorder]}>
+            <Text style={styles.totalLabel}>{totals.totalLabel}</Text>
+            <Text style={styles.totalValue}>{formatCents(totals.totalCents)}</Text>
+          </View>
+        )}
       </Card>
+      {totals.deliveryFeeSurDevis && (
+        <Text style={styles.feeSurDevisHint}>
+          Les frais de livraison de cette commande sont chiffrés à la main (hors zone ou demande
+          urgente) : nous vous communiquons le montant avant la livraison.
+        </Text>
+      )}
 
       {/* Notes */}
       {order.specialNotes && (
@@ -714,6 +755,32 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     minWidth: 72,
     textAlign: "right",
+  },
+  subTotalLabel: {
+    flex: 1,
+    fontSize: font.sizes.sm,
+    color: colors.textSecondary,
+  },
+  subTotalValue: {
+    fontSize: font.sizes.md,
+    fontWeight: font.weights.medium,
+    color: colors.textPrimary,
+  },
+  offeredValue: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.bold,
+    color: colors.success,
+  },
+  pendingValue: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.bold,
+    color: colors.warningText,
+  },
+  feeSurDevisHint: {
+    fontSize: font.sizes.xs,
+    color: colors.textTertiary,
+    lineHeight: 17,
+    marginTop: spacing.sm,
   },
   totalLabel: {
     flex: 1,

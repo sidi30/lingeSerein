@@ -20,11 +20,35 @@
  *     sont deux conteneurs distincts.
  */
 
-/** Gabarits exposés par le mailer — union fermée, il refuse tout autre nom. */
+/**
+ * Gabarits exposés par le mailer — union fermée, il refuse tout autre nom.
+ *
+ * ⚠️ Ajouter un nom ICI ne suffit PAS : `apps/mailer` valide le corps en union
+ * discriminée `.strict()` et répond 400 pour un `template` qu'il ne connaît pas,
+ * ou pour un champ de données qu'il n'attend pas. Tout ajout ici doit avoir son
+ * pendant dans `apps/mailer/src/app.ts` (schéma + `renderNotify`) ET
+ * `apps/mailer/src/templates.ts` (gabarit HTML) — sans quoi l'envoi échoue
+ * proprement (l'appelant journalise et poursuit) mais l'email n'arrive jamais.
+ *
+ * Charges utiles, à garder synchronisées avec les schémas du mailer :
+ *   - `order_confirmation_client` : clientNom, orderNumber, dateLivraison
+ *     (AAAA-MM-JJ), creneau?, lignes[{designation, qty}], sousTotalCents,
+ *     livraisonCents, totalCents, livraisonSurDevis ;
+ *   - `order_notification_owner`  : idem + clientEmail?, clientTel?,
+ *     clientAdresse?, source ;
+ *   - `round_assigned_driver`     : livreurNom, datePassage (AAAA-MM-JJ),
+ *     stopsCount, zone?.
+ */
 export type MailTemplate =
   | "rotation_reminder_client"
   | "rotation_reminder_owner"
-  | "rotation_overdue";
+  | "rotation_overdue"
+  /** Confirmation envoyée au client dès l'enregistrement de sa commande. */
+  | "order_confirmation_client"
+  /** Détail complet de la commande envoyé aux gestionnaires. */
+  | "order_notification_owner"
+  /** Prévient un livreur qu'une tournée vient de lui être affectée. */
+  | "round_assigned_driver";
 
 export interface SendMailInput {
   to: string;

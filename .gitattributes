@@ -1,0 +1,30 @@
+# Normalisation des fins de ligne.
+#
+# Sans ce fichier, `git archive HEAD` lancé depuis Windows applique core.autocrlf
+# et livre des scripts shell en CRLF. Conséquence vécue le 2026-07-30 en
+# production : `set -euo pipefail\r` fait lire à bash une option nommée
+# "pipefail\r", l'entrypoint meurt, et le conteneur API redémarre en boucle.
+# Le déploiement devait compenser à la main (`sed -i "s/\r$//"`) ; désormais la
+# correction est portée par le dépôt, donc elle ne peut plus être oubliée.
+
+* text=auto
+
+# Tout ce qui est exécuté par un noyau Linux ou un shell POSIX doit rester en LF,
+# quel que soit le système du poste de développement.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+docker-entrypoint.sh text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+
+# Fichiers binaires : aucune conversion.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.ico  binary
+*.pdf  binary
+*.ttf  binary
+*.woff binary
+*.woff2 binary

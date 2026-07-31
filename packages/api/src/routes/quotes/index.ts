@@ -9,6 +9,7 @@ import {
   updateQuoteStatusSchema,
   listQuotesQuerySchema,
   convertQuoteSchema,
+  fromOrderParamsSchema,
 } from "../../schemas/quotes.schema.js";
 
 export default async function quoteRoutes(app: FastifyInstance): Promise<void> {
@@ -74,7 +75,15 @@ export default async function quoteRoutes(app: FastifyInstance): Promise<void> {
             type: "object",
             properties: {
               success: { type: "boolean" },
-              data: { type: "object" },
+              // `additionalProperties: true` et NON un `type: "object"` nu :
+              // fast-json-stringify SUPPRIME du corps sérialisé toute propriété
+              // non déclarée. Un `data` sans `properties` partait donc en `{}`,
+              // et l'écran d'admin recevait un devis sans `id` ni `numero` alors
+              // qu'il venait d'être créé en base (navigation vers
+              // `/devis/undefined`). Énumérer les champs ici serait pire : le
+              // DTO porte `lignes`, `user` et `totals` calculés, et la moindre
+              // divergence rétablirait silencieusement la troncature.
+              data: { type: "object", additionalProperties: true },
             },
           },
         },
@@ -96,6 +105,65 @@ export default async function quoteRoutes(app: FastifyInstance): Promise<void> {
       );
 
       return reply.status(201).send({ success: true, data: quote });
+    },
+  );
+
+  // ---- POST /quotes/from-order/:orderId (émettre le devis d'une commande) ----
+  app.post<{ Params: { orderId: string } }>(
+    "/from-order/:orderId",
+    {
+      preHandler: adminMiddleware,
+      schema: {
+        tags: ["Devis"],
+        summary: "Émettre le devis d'une commande (idempotent)",
+        description:
+          "Reprend les articles de la commande et ses frais de livraison, en BROUILLON. " +
+          "Rappelée sur la même commande, la route renvoie le devis déjà émis (200) au lieu " +
+          "d'en créer un second — le lien commande → devis est unique en base.",
+        security: [{ bearerAuth: [] }],
+        response: {
+          // `additionalProperties: true` sur les deux réponses — cf. POST /quotes :
+          // sans lui, fast-json-stringify vide `data` et l'admin reçoit un devis
+          // sans `id` ni `numero`.
+          200: {
+            description: "Devis déjà émis pour cette commande",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: { type: "object", additionalProperties: true },
+            },
+          },
+          201: {
+            description: "Devis créé",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const paramsParsed = fromOrderParamsSchema.safeParse(request.params);
+      if (!paramsParsed.success) {
+        throw new ValidationError(
+          paramsParsed.error.flatten().fieldErrors as Record<string, string[]>,
+        );
+      }
+
+      const operatorId = await getOperatorId(request.user.sub);
+      const { quote, created } = await service.createFromOrder(
+        paramsParsed.data.orderId,
+        operatorId,
+        request.user.sub,
+        request.ip,
+        request.headers["user-agent"],
+      );
+
+      // 201 seulement quand un devis vient d'être créé : l'appelant sait ainsi
+      // s'il a déclenché l'émission ou retrouvé un devis existant.
+      return reply.status(created ? 201 : 200).send({ success: true, data: quote });
     },
   );
 

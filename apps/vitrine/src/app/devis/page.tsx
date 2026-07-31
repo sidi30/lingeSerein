@@ -4,20 +4,10 @@ import { Suspense, useState, useMemo, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Percent,
-  TrendingUp,
-  Calendar,
-  Truck,
-  Sparkles,
-} from "lucide-react";
-import { DevisGenerator } from "@/components/devis-generator";
-import { ContractGenerator } from "@/components/contract-generator";
+import { ArrowLeft, ArrowRight, Percent, Calendar, Truck, Sparkles } from "lucide-react";
 import { DevisRequest } from "@/components/devis-request";
 import { DevisWizard } from "@/components/devis-wizard";
-import { SUBSCRIPTION_DEFAULTS, DELIVERY_DEFAULTS } from "@lingengo/shared";
+import { SUBSCRIPTION_DEFAULTS, DELIVERY_DEFAULTS, VAUCLUSE_COMMUNES } from "@lingengo/shared";
 import type { DeliveryZone } from "@lingengo/shared";
 import {
   ABO_PRICE,
@@ -129,22 +119,16 @@ function DevisPageInner() {
       reductionPct: reduction,
     });
 
-    const margeLivraison = cart.venteApresReduc - cart.sumCout;
-    const margePct = cart.venteApresReduc > 0 ? (margeLivraison / cart.venteApresReduc) * 100 : 0;
-
+    // Aucun calcul de marge ici : il exigerait les prix de revient, et tout ce
+    // que cette page calcule est livré au navigateur de n'importe quel visiteur
+    // (export statique). La rentabilité se lit dans l'admin, derrière
+    // authentification. Ne réintroduire ni coût ni marge dans ce fichier.
     const venteMois = cart.venteApresReduc * livraisonsParMois;
-    const coutMois = cart.sumCout * livraisonsParMois;
-    const margeMois = venteMois - coutMois;
 
     return {
       ...cart,
-      margeLivraison,
-      margePct,
       venteMois,
-      margeMois,
       venteTotal: venteMois * mois,
-      coutTotal: coutMois * mois,
-      margeTotal: (venteMois - coutMois) * mois,
     };
   }, [kitQtys, extraQtys, grouper, zoneId, reduction, livraisonsParMois, mois]);
 
@@ -206,14 +190,15 @@ function DevisPageInner() {
           </p>
           {isAdmin && (
             <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-lavender-100 px-3 py-1 text-[11px] font-semibold text-lavender-800">
-              Mode commercial — rentabilité & génération de devis
+              Mode commercial — simulateur de devis
             </span>
           )}
         </div>
 
-        {/* Générateurs PDF — admin uniquement */}
-        {isAdmin && <DevisGenerator />}
-        {isAdmin && <ContractGenerator />}
+        {/* Les générateurs PDF ne sont plus ici : rendus depuis cette page, ils
+            rouvraient exactement ce que le verrou d'accès de /contrat ferme —
+            un contrôle contourné par une autre URL ne protège rien. Ils vivent
+            sur /contrat, derrière l'authentification nginx. */}
 
         {!isAdmin && <DevisWizard />}
 
@@ -288,7 +273,7 @@ function DevisPageInner() {
                   <h2 className="font-serif text-sm font-bold text-forest">Zone de livraison</h2>
                 </div>
                 <div
-                  className="grid grid-cols-3 gap-2"
+                  className="grid grid-cols-2 sm:grid-cols-4 gap-2"
                   role="radiogroup"
                   aria-label="Zone de livraison"
                 >
@@ -315,10 +300,9 @@ function DevisPageInner() {
                   ))}
                 </div>
                 <p className="text-[11px] text-gray-500 mt-3">
-                  {zones.find((z) => z.id === zoneId)?.note}. Livraison offerte dès{" "}
-                  {DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits à Orange ou dès{" "}
-                  {DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande. Au-delà des villes
-                  limitrophes, la course est chiffrée sur devis.
+                  {zones.find((z) => z.id === zoneId)?.note}. Livraison incluse à Orange, offerte
+                  sur les autres paliers dès {DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de
+                  commande. Hors Vaucluse : non desservi.
                 </p>
               </div>
 
@@ -506,77 +490,6 @@ function DevisPageInner() {
                   </div>
                 )}
 
-                {/* Rentabilité admin */}
-                {isAdmin && calc.lignes.length > 0 && (
-                  <div className="rounded-2xl bg-forest/5 border border-forest/10 p-5">
-                    <div className="flex items-center gap-2 mb-3">
-                      <TrendingUp size={16} aria-hidden className="text-forest" />
-                      <h3 className="font-serif text-sm font-bold text-forest">
-                        Rentabilité (interne)
-                      </h3>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-xl bg-white p-3 text-center">
-                        <p className="text-[10px] uppercase tracking-wider text-gray-700 mb-1">
-                          Marge / rotation
-                        </p>
-                        <p
-                          className={`font-serif text-lg font-bold tabular-nums ${calc.margeLivraison >= 0 ? "text-forest" : "text-red-700"}`}
-                        >
-                          {fmt(calc.margeLivraison)}
-                        </p>
-                        <p className="text-[10px] text-gray-700 tabular-nums">
-                          {calc.margePct.toFixed(1)}% de marge
-                        </p>
-                      </div>
-                      <div className="rounded-xl bg-white p-3 text-center">
-                        <p className="text-[10px] uppercase tracking-wider text-gray-700 mb-1">
-                          Marge / mois
-                        </p>
-                        <p
-                          className={`font-serif text-lg font-bold tabular-nums ${calc.margeMois >= 0 ? "text-forest" : "text-red-700"}`}
-                        >
-                          {fmt(calc.margeMois)}
-                        </p>
-                        <p className="text-[10px] text-gray-700">
-                          {livraisonsParMois} rotation{livraisonsParMois > 1 ? "s" : ""}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 rounded-xl bg-white p-3 text-center">
-                      <p className="text-[10px] uppercase tracking-wider text-gray-700 mb-1">
-                        Total sur {mois} mois
-                      </p>
-                      <div className="flex items-center justify-center gap-4 tabular-nums">
-                        <div>
-                          <p className="text-xs text-gray-700">CA client</p>
-                          <p className="font-serif text-base font-bold text-gray-900">
-                            {fmt(calc.venteTotal)}
-                          </p>
-                        </div>
-                        <div className="h-8 w-px bg-lavender-200" />
-                        <div>
-                          <p className="text-xs text-gray-700">Coût</p>
-                          <p className="font-serif text-base font-bold text-gray-700">
-                            {fmt(calc.coutTotal)}
-                          </p>
-                        </div>
-                        <div className="h-8 w-px bg-lavender-200" />
-                        <div>
-                          <p className="text-xs text-forest">Marge</p>
-                          <p
-                            className={`font-serif text-base font-bold ${calc.margeTotal >= 0 ? "text-forest" : "text-red-700"}`}
-                          >
-                            {fmt(calc.margeTotal)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 <div className="space-y-2">
                   {calc.lignes.length > 0 ? (
                     <DevisRequest
@@ -732,13 +645,20 @@ function TarifsReference() {
         </ul>
 
         <h3 className="font-serif text-base font-bold text-forest mb-3">Livraison</h3>
+        <ul className="mb-3 flex flex-col gap-1">
+          {zones.map((z) => (
+            <li key={z.id} className="flex justify-between gap-3 text-sm text-gray-700">
+              <span>{z.note}</span>
+              <span className="shrink-0 font-semibold text-forest tabular-nums">{z.prix}</span>
+            </li>
+          ))}
+        </ul>
         <p className="text-sm text-gray-700 leading-relaxed">
-          {DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS / 100} € à Orange comme dans les communes
-          limitrophes, offerte dès {DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits à Orange ou dès{" "}
-          {DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande. Au-delà des communes
-          limitrophes, la livraison est chiffrée sur devis. Délai standard J+2 à J+3 ; Express 24 h{" "}
-          {DELIVERY_DEFAULTS.EXPRESS_24H_FEE_CENTS / 100} € ou jour même{" "}
-          {DELIVERY_DEFAULTS.JOUR_MEME_FEE_CENTS / 100} € en option.
+          Barème calculé depuis Orange, sur les {VAUCLUSE_COMMUNES.length} communes du Vaucluse ;
+          hors du département, nous ne livrons pas. Livraison offerte dès{" "}
+          {DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande sur les paliers payants.
+          Délai standard J+2 à J+3 ; Express 24 h {DELIVERY_DEFAULTS.EXPRESS_24H_FEE_CENTS / 100} €
+          ou jour même {DELIVERY_DEFAULTS.JOUR_MEME_FEE_CENTS / 100} € en option.
         </p>
         <p className="mt-3 text-sm text-gray-700 leading-relaxed">
           {SUBSCRIPTION_DEFAULTS.PLAN_NAME} : {fmtShort(ABO_PRICE)} / mois pour{" "}

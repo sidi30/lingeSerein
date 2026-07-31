@@ -49,7 +49,10 @@ export default async function invoiceRoutes(app: FastifyInstance): Promise<void>
             type: "object",
             properties: {
               success: { type: "boolean" },
-              data: { type: "object" },
+              // Même défaut que POST /quotes : un `data` sans `properties` est
+              // VIDÉ par fast-json-stringify, et l'écran reçoit une facture sans
+              // `id` ni `invoiceNumber`.
+              data: { type: "object", additionalProperties: true },
             },
           },
         },

@@ -28,8 +28,10 @@ import { DetailFallback } from "@/components/ui/detail-fallback";
 import { detailState, invalidateAfter } from "@/lib/query";
 import { EmailText } from "@/components/ui/email-text";
 import { RatingStars } from "@/components/clients/rating-stars";
+import { CommuneField } from "@/components/clients/commune-field";
 import { OrderForm } from "@/components/orders/order-form";
 import { formatDate, formatPrice } from "@/lib/format";
+import { formatDeliveryFee, orderAmounts } from "@/lib/order-quote";
 import {
   CLIENT_SOURCE_LABELS,
   type ClientDetailDTO,
@@ -81,6 +83,8 @@ interface EditableFields {
   address: string;
   city: string;
   postalCode: string;
+  /** Code INSEE de la commune — c'est lui qui fixe le palier de livraison. */
+  communeInsee: string;
   accommodationType: string;
   zoneId: string;
   preferredTimeSlot: string;
@@ -100,6 +104,7 @@ function toEditable(client: ClientDetailDTO): EditableFields {
     address: client.address ?? "",
     city: client.city ?? "",
     postalCode: client.postalCode ?? "",
+    communeInsee: client.communeInsee ?? "",
     accommodationType: client.accommodationType ?? "",
     zoneId: client.zoneId ?? "",
     preferredTimeSlot: client.preferredTimeSlot ?? "",
@@ -320,6 +325,7 @@ export default function ClientDetailPage() {
       address: vide(form.address),
       city: vide(form.city),
       postalCode: vide(form.postalCode),
+      communeInsee: vide(form.communeInsee),
       accommodationType: vide(form.accommodationType),
       zoneId: vide(form.zoneId),
       preferredTimeSlot: vide(form.preferredTimeSlot),
@@ -446,15 +452,18 @@ export default function ClientDetailPage() {
                 onChange={(e) => set("postalCode", e.target.value)}
               />
             </div>
+            {/* La commune remplace la ville en texte libre : c'est elle qui fixe
+                le palier de livraison, et le code INSEE est son seul identifiant
+                stable (84100 = Orange ET Uchaux, deux paliers différents). */}
             <div>
-              <label className={labelCls} htmlFor="edit-city">
-                Ville
-              </label>
-              <input
-                id="edit-city"
-                className={inputCls}
-                value={form.city}
-                onChange={(e) => set("city", e.target.value)}
+              <CommuneField
+                idPrefix="edit"
+                value={{
+                  communeInsee: form.communeInsee,
+                  city: form.city,
+                  postalCode: form.postalCode,
+                }}
+                onChange={(next) => setForm((prev) => (prev ? { ...prev, ...next } : prev))}
               />
             </div>
             <div>
@@ -675,6 +684,13 @@ export default function ClientDetailPage() {
             <ol className="space-y-4">
               {orders.map((order) => {
                 const sc = orderStatusConfig[order.status];
+                // Même calcul que la fiche et la liste des commandes : deux
+                // écrans qui affichent deux montants pour la même commande font
+                // douter de tous les chiffres. `GET /clients/:id` ne renvoie pas
+                // encore les frais ⇒ `deliveryFeeCents` vaut `null`, le montant
+                // reste celui d'aujourd'hui, et la ligne de détail se remplira
+                // d'elle-même le jour où la route sera enrichie.
+                const amounts = orderAmounts(order);
                 return (
                   <li key={order.id} className="relative flex gap-3 pl-1">
                     {/* Puce + trait de timeline */}
@@ -697,11 +713,29 @@ export default function ClientDetailPage() {
                         {order.timeSlot ? ` — ${order.timeSlot}` : ""}
                       </p>
                       <div className="mt-1.5 flex flex-wrap items-end justify-between gap-2">
+                        {/* `?? []` obligatoire : `GET /clients/:id` projette les
+                            commandes avec un `select` qui ne contient PAS
+                            `items`. Sans ce garde-fou, `.map` sur `undefined`
+                            faisait planter la fiche de tout client ayant au
+                            moins une commande. */}
                         <p className="min-w-0 text-xs text-gray-600">
-                          {order.items.map((i) => `${i.quantity}× ${i.product.name}`).join(", ")}
+                          {(order.items ?? [])
+                            .map((i) => `${i.quantity}× ${i.product.name}`)
+                            .join(", ")}
                         </p>
-                        <span className="shrink-0 font-semibold text-gray-900 tabular-nums">
-                          {formatPrice(order.totalCents)}
+                        <span className="shrink-0 text-right">
+                          <span className="block font-semibold text-gray-900 tabular-nums">
+                            {formatPrice(amounts.totalCents)}
+                          </span>
+                          {amounts.deliveryFeeCents !== null && (
+                            <span className="block text-[11px] font-normal text-gray-500">
+                              dont livraison{" "}
+                              {formatDeliveryFee(
+                                amounts.deliveryFeeCents,
+                                amounts.deliveryFeeSurDevis,
+                              ).toLowerCase()}
+                            </span>
+                          )}
                         </span>
                       </div>
                     </Link>

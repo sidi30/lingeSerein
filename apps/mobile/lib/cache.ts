@@ -39,6 +39,7 @@ export const KEY = {
   notifications: "notifications",
   profile: "profile",
   todayRound: "today-round",
+  upcomingRounds: "upcoming-rounds",
   rotationsMe: "rotations-me",
   dashboardKpis: "dashboard-kpis",
   dashboardAlerts: "dashboard-alerts",
@@ -77,6 +78,10 @@ export const AFFECTED: Record<MutationScope, readonly string[]> = {
   ],
   delivery: [
     KEY.todayRound,
+    // Valider un arrêt fait avancer la tournée du jour, qui figure aussi dans
+    // la fenêtre glissante : sans cette clé, la section « à venir » gardait
+    // l'état d'avant la livraison.
+    KEY.upcomingRounds,
     KEY.orders,
     KEY.order,
     KEY.clients,
@@ -89,7 +94,17 @@ export const AFFECTED: Record<MutationScope, readonly string[]> = {
     KEY.dashboardKpis,
     KEY.dashboardAlerts,
   ],
-  client: [KEY.clients, KEY.client, KEY.stockClients, KEY.notifications, KEY.dashboardKpis],
+  // `profile` en fait partie depuis que le client modifie lui-même ses
+  // coordonnées (`PATCH /auth/me`) : sans elle, l'écran de profil continuait
+  // d'afficher l'ancienne adresse après un enregistrement réussi.
+  client: [
+    KEY.clients,
+    KEY.client,
+    KEY.profile,
+    KEY.stockClients,
+    KEY.notifications,
+    KEY.dashboardKpis,
+  ],
   subscription: [
     KEY.subscriptionMe,
     KEY.subscriptionConfig,

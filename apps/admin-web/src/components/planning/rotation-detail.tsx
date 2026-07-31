@@ -13,6 +13,7 @@ import {
   FORMULE_LABELS,
   lateDaysOf,
   remainingQty,
+  qtyReprise,
   ROTATION_STATUS_BADGE,
   ROTATION_STATUS_LABELS,
   useSaveReprise,
@@ -50,7 +51,7 @@ export function RotationDetail({ rotation, onClose }: RotationDetailProps) {
     [rotation],
   );
   const totalDejaReprise = useMemo(
-    () => (rotation?.lignes ?? []).reduce((sum, l) => sum + l.qtyReprise, 0),
+    () => (rotation?.lignes ?? []).reduce((sum, l) => sum + qtyReprise(l), 0),
     [rotation],
   );
 
@@ -64,7 +65,7 @@ export function RotationDetail({ rotation, onClose }: RotationDetailProps) {
         // `qtyReprise` décrit l'état de la ligne, pas un delta.
         lignes: rotation.lignes.map((l) => ({
           id: l.id,
-          qtyReprise: Math.min(l.qtyReprise + (quantities[l.id] ?? 0), l.qtyLivree),
+          qtyReprise: Math.min(qtyReprise(l) + (quantities[l.id] ?? 0), l.qtyLivree),
         })),
         dateRepriseReelle: dateReprise,
       },
@@ -154,7 +155,7 @@ export function RotationDetail({ rotation, onClose }: RotationDetailProps) {
                     </span>
                     <span className="shrink-0 text-right text-xs tabular-nums">
                       <span className="block font-semibold text-gray-900">
-                        {ligne.qtyReprise} / {ligne.qtyLivree}
+                        {qtyReprise(ligne)} / {ligne.qtyLivree}
                       </span>
                       <span className={reste > 0 ? "text-warning-600" : "text-success-600"}>
                         {reste > 0 ? `${reste} à reprendre` : "complet"}

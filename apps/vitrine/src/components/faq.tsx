@@ -3,8 +3,14 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { DELIVERY_DEFAULTS, SUBSCRIPTION_DEFAULTS, URGENCY_TIERS } from "@lingengo/shared";
+import {
+  DELIVERY_DEFAULTS,
+  SUBSCRIPTION_DEFAULTS,
+  URGENCY_TIERS,
+  VAUCLUSE_COMMUNES,
+} from "@lingengo/shared";
 import { Reveal } from "./reveal";
+import { ZONES } from "@/lib/devis-catalog";
 
 const ABO = SUBSCRIPTION_DEFAULTS;
 const LIV = DELIVERY_DEFAULTS;
@@ -15,6 +21,9 @@ const urgenceText = URGENCY_TIERS.filter((t) => t.level !== "STANDARD")
   )
   .join(" · ");
 
+// Le barème de zone en une phrase, jamais recopié à la main.
+const zonesText = ZONES.map((z) => `${z.note} : ${z.prix.toLowerCase()}`).join(" ; ");
+
 const faqs = [
   {
     q: "Quels types d'établissements peuvent travailler avec Linge Serein ?",
@@ -22,7 +31,7 @@ const faqs = [
   },
   {
     q: "Y a-t-il un volume minimum de commande ?",
-    a: `Non, vous pouvez commencer par un kit unique. La livraison est offerte dès ${LIV.FREE_MIN_KITS_ORANGE} kits à Orange, dès ${LIV.FREE_THRESHOLD_CENTS / 100} € de commande, ou en formule d'abonnement. En dessous de ces seuils, la livraison est facturée ${LIV.ZONE_PROCHE_CENTS / 100} € à Orange comme dans les villes limitrophes.`,
+    a: `Non, vous pouvez commencer par un kit unique. La livraison est incluse à Orange, quel que soit le volume, et offerte partout ailleurs dès ${LIV.FREE_THRESHOLD_CENTS / 100} € de commande ou en formule d'abonnement. En dessous de ce seuil, elle est facturée selon la distance depuis Orange : ${zonesText}.`,
   },
   {
     q: "Quels sont vos délais de livraison ?",
@@ -30,7 +39,7 @@ const faqs = [
   },
   {
     q: "Jusqu'où livrez-vous ?",
-    a: "Nous livrons Orange et ses villes limitrophes (Jonquières, Courthézon, Camaret-sur-Aigues, Piolenc, Caderousse, Châteauneuf-du-Pape…) au même tarif de 12 €. Au-delà, nous ne publions pas de tarif : contactez-nous, chaque demande en bordure de zone est étudiée et chiffrée sur devis.",
+    a: `Nous livrons les ${VAUCLUSE_COMMUNES.length} communes du Vaucluse, Avignon, Carpentras, Cavaillon, L'Isle-sur-la-Sorgue, Pertuis et Apt comprises. Le tarif dépend de la distance depuis Orange : ${zonesText}. Chaque commune du département a donc un tarif publié — nous ne livrons pas hors du Vaucluse.`,
   },
   {
     q: "Le linge est-il traité de manière écologique ?",
@@ -45,8 +54,8 @@ const faqs = [
     a: "L'usure normale est incluse. Pour les dégradations anormales (taches indélébiles, brûlures, déchirures), un barème transparent vous est communiqué à la signature du contrat.",
   },
   {
-    q: "Linge Serein livre-t-il toute l'année autour d'Orange ?",
-    a: "Oui, Linge Serein livre toute l'année à Orange et dans les villes limitrophes, y compris pendant les pics de la saison estivale. Durant l'été, nous renforçons nos tournées pour absorber les volumes supplémentaires des hôtels, gîtes et locations saisonnières, sans allonger les délais de livraison.",
+    q: "Linge Serein livre-t-il toute l'année dans le Vaucluse ?",
+    a: "Oui, Linge Serein livre toute l'année dans l'ensemble du Vaucluse, y compris pendant les pics de la saison estivale. Durant l'été, nous renforçons nos tournées pour absorber les volumes supplémentaires des hôtels, gîtes et locations saisonnières, sans allonger les délais de livraison.",
   },
 ];
 

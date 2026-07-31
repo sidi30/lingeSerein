@@ -35,6 +35,13 @@ export interface DevisData {
    * quel sur le contrat dérivé — c'est ce qui garantit la concordance devis ↔ contrat.
    */
   livraisonLabel?: string;
+  /**
+   * Vrai quand la course n'a AUCUN tarif public et reste à chiffrer (hors
+   * Vaucluse, urgence Flash). `livraisonCents` vaut alors 0 — le même 0 qu'une
+   * livraison réellement offerte. Sans ce drapeau, le document imprime
+   * « Offerte » sur une course dont personne n'a jamais accordé la gratuité.
+   */
+  livraisonSurDevis?: boolean;
   /** Délai de livraison demandé, en jours (0 = jour même, 1 = lendemain). */
   delaiJours?: number;
   /** Niveau d'urgence choisi sur la jauge (prioritaire sur delaiJours). */
@@ -122,6 +129,32 @@ export function resolveLivraisonLabel(d: {
   return explicit || deliveryLabelFromCents(d.livraisonCents);
 }
 
+/**
+ * MONTANT des frais de livraison à imprimer, en toutes lettres.
+ *
+ * Pendant indispensable de {@link resolveLivraisonLabel} : le libellé pouvait
+ * bien dire « sur devis », la colonne du montant affichait « Offerte » à côté,
+ * parce que 0 € est indiscernable d'une gratuité. Le document se contredisait
+ * alors dans sa propre ligne — et sur le contrat, la contradiction tombait dans
+ * la prose de l'article qui engage, où c'est la seconde moitié de la phrase que
+ * le client retient.
+ *
+ * Trois états, jamais deux :
+ *   - à chiffrer  → « sur devis »   (aucun tarif public n'a été publié)
+ *   - 0 € accordé → « Offerte »     (une gratuité a réellement été consentie)
+ *   - sinon       → le montant formaté par l'appelant
+ *
+ * @param formatCents mise en forme monétaire de l'appelant (le PDF a la sienne).
+ */
+export function resolveLivraisonMontant(
+  d: { livraisonCents: number; livraisonSurDevis?: boolean },
+  formatCents: (cents: number) => string,
+): string {
+  if (d.livraisonSurDevis) return "sur devis";
+  if (d.livraisonCents <= 0) return "Offerte";
+  return formatCents(d.livraisonCents);
+}
+
 // ============================================================================
 // Machine à états — Devis
 // ============================================================================
@@ -188,6 +221,10 @@ export interface QuoteForDevis {
   lignes: QuoteLineDTO[];
   remisePct: number;
   livraisonCents: number;
+  /** Libellé figé à l'émission — prime toujours sur toute déduction. */
+  livraisonLabel?: string | null;
+  /** Course sans tarif public, à chiffrer à la main. */
+  livraisonSurDevis?: boolean | null;
   notes?: string | null;
   tvaApplicable: boolean;
 }
@@ -218,7 +255,15 @@ export function quoteToDevisData(quote: QuoteForDevis): DevisData {
     })),
     remisePct: quote.remisePct,
     livraisonCents: quote.livraisonCents,
-    livraisonLabel: deliveryLabelFromCents(quote.livraisonCents),
+    // Le libellé FIGÉ à l'émission prime. L'écraser par une déduction, comme le
+    // faisait cette ligne, perdait l'information au pire moment : 25 € vaut
+    // aussi bien « au-delà de 35 km » que « forfait Express 24 h », et le repli
+    // ne sait plus trancher entre les deux.
+    livraisonLabel: resolveLivraisonLabel({
+      livraisonCents: quote.livraisonCents,
+      livraisonLabel: quote.livraisonLabel ?? undefined,
+    }),
+    livraisonSurDevis: quote.livraisonSurDevis ?? false,
     notes: quote.notes ?? undefined,
     tvaApplicable: quote.tvaApplicable,
   };

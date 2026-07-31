@@ -64,6 +64,15 @@ const deviceTokenSchema = z.object({
     .pipe(z.enum(["ios", "android", "web"])),
 });
 
+/**
+ * Désinscription d'un appareil. Seul le jeton est demandé : `platform` ne sert
+ * qu'à l'enregistrement, et l'exiger ici ferait échouer une déconnexion pour une
+ * raison qui n'en est pas une.
+ */
+const deviceTokenDeleteSchema = z.object({
+  token: z.string().min(1).max(255),
+});
+
 export default async function notificationRoutes(app: FastifyInstance): Promise<void> {
   const service = new NotificationsService(app.prisma);
 
@@ -158,7 +167,12 @@ export default async function notificationRoutes(app: FastifyInstance): Promise<
           required: ["token", "platform"],
           properties: {
             token: { type: "string" },
-            platform: { type: "string", enum: ["ios", "android", "web"] },
+            // PAS d'`enum` ici : Ajv valide AVANT Zod, donc un « iOS » majuscule
+            // partait en 400 sans jamais atteindre la normalisation de casse
+            // juste en dessous — l'enregistrement du push échoue alors en
+            // silence côté mobile. La liste autorisée est tenue par Zod, seul
+            // endroit qui voit la valeur normalisée.
+            platform: { type: "string", description: "ios | android | web (casse indifférente)" },
           },
         },
       },
@@ -189,6 +203,61 @@ export default async function notificationRoutes(app: FastifyInstance): Promise<
       });
 
       return reply.send({ success: true, data: record });
+    },
+  );
+
+  // ---- DELETE /notifications/device-token (authenticated) ----
+  //
+  // Contrepartie OBLIGATOIRE de l'enregistrement, et pas un confort : sans elle,
+  // se déconnecter laisse le jeton attaché au compte en base. Le téléphone d'un
+  // livreur parti de l'entreprise continue alors de recevoir ses affectations de
+  // tournée — nom du client, adresse, horaires — sur un appareil que plus
+  // personne ne contrôle. `POST /auth/logout` révoque le refresh token, ce qui
+  // ferme l'accès à l'API, mais le push ne passe pas par l'API : il part de nos
+  // serveurs vers Expo, sans jamais consulter la session.
+  //
+  // Idempotent : supprimer un jeton déjà absent renvoie 200 avec `supprime: 0`.
+  // Une déconnexion ne doit pas échouer parce que le nettoyage a déjà eu lieu
+  // (double appel, purge des 90 jours passée par là, réinstallation).
+  app.delete(
+    "/device-token",
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        tags: ["Notifications"],
+        summary: "Désinscrire le jeton push de l'appareil courant",
+        description:
+          "À appeler à la déconnexion, AVANT d'effacer la session locale. Ne supprime que les " +
+          "jetons appartenant à l'utilisateur authentifié.",
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: "object",
+          required: ["token"],
+          properties: { token: { type: "string" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const parsed = deviceTokenDeleteSchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.flatten().fieldErrors as Record<string, string[]>);
+      }
+
+      // Filtrage par `userId` en plus du jeton, et c'est le point de sécurité de
+      // cette route : `token` étant unique GLOBALEMENT, un `deleteMany` sur le
+      // seul jeton permettrait à n'importe quel compte authentifié d'éteindre le
+      // push d'un appareil qui ne lui appartient pas, en devinant ou en rejouant
+      // un jeton — une coupure de notifications silencieuse, donc indétectable.
+      //
+      // Effet de bord voulu : si le jeton a déjà été réattribué à quelqu'un
+      // d'autre (téléphone revendu, réinstallation sous un autre compte), la
+      // clause ne matche pas et le nouveau propriétaire conserve son push. Se
+      // déconnecter ne doit jamais couper les notifications d'un tiers.
+      const { count } = await app.prisma.deviceToken.deleteMany({
+        where: { token: parsed.data.token, userId: request.user.sub },
+      });
+
+      return reply.send({ success: true, data: { supprime: count } });
     },
   );
 }

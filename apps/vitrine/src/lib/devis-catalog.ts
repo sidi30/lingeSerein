@@ -9,7 +9,8 @@
 
 import {
   CATALOG_DEFAULTS,
-  DELIVERY_DEFAULTS,
+  DELIVERY_ZONE_CENTS,
+  DELIVERY_ZONE_LABELS,
   SUBSCRIPTION_DEFAULTS,
   computeDeliveryFee,
   computePackSereniteComparison,
@@ -21,9 +22,15 @@ export interface Item {
   name: string;
   desc?: string;
   priceCents: number;
-  /** Coût interne estimé — sert uniquement au panneau de rentabilité admin. */
-  costCents: number;
 }
+
+// Les coûts de revient ne figurent PLUS dans ce fichier, et ne doivent jamais y
+// revenir : la vitrine est un export statique, donc tout ce qui vit ici est
+// téléchargé par le premier visiteur venu. Les prix de revient étaient lisibles
+// en clair dans le bundle public, ce qui rendait les marges calculables par
+// n'importe qui — un concurrent, un client en négociation. Le calcul de
+// rentabilité appartient à l'admin (admin.lingeserein.fr), derrière
+// authentification.
 
 /** Kits vendus à l'unité, hors Kit Complet (qui est le groupage bain + lit). */
 export const KITS: Item[] = [
@@ -32,14 +39,12 @@ export const KITS: Item[] = [
     name: "Kit Bain",
     desc: "Drap de bain 70×150 + serviette 50×90 + tapis 50×70",
     priceCents: CATALOG_DEFAULTS.KIT_BAIN_CENTS,
-    costCents: 290,
   },
   {
     id: "lit",
     name: "Kit Lit",
     desc: "Housse de couette + drap housse + taies",
     priceCents: CATALOG_DEFAULTS.KIT_LIT_CENTS,
-    costCents: 520,
   },
 ];
 
@@ -49,43 +54,38 @@ export const EXTRAS: Item[] = [
     id: "serviette",
     name: "Serviette 50×90",
     priceCents: CATALOG_DEFAULTS.SERVIETTE_CENTS,
-    costCents: 80,
   },
   {
     id: "drapbain",
     name: "Drap de bain 70×150",
     priceCents: CATALOG_DEFAULTS.DRAP_BAIN_CENTS,
-    costCents: 120,
   },
   {
     id: "tapis",
     name: "Tapis de bain 50×70",
     priceCents: CATALOG_DEFAULTS.TAPIS_BAIN_CENTS,
-    costCents: 90,
   },
   {
     id: "petite",
     name: "Petite serviette 30×50",
     priceCents: CATALOG_DEFAULTS.PETITE_SERVIETTE_CENTS,
-    costCents: 30,
   },
   {
     id: "draphousse",
     name: "Drap housse",
     priceCents: CATALOG_DEFAULTS.DRAP_HOUSSE_CENTS,
-    costCents: 200,
   },
   {
     id: "houssecouette",
     name: "Housse de couette",
     priceCents: CATALOG_DEFAULTS.HOUSSE_COUETTE_CENTS,
-    costCents: 280,
   },
 ];
 
 /**
- * Trois zones seulement : Orange, les villes limitrophes au même tarif, et au-delà
- * aucun tarif public — la course est chiffrée à la main sur le devis officiel.
+ * Quatre paliers desservis, calculés depuis Orange, qui couvrent TOUT le Vaucluse :
+ * chacun a un tarif public. `HORS_ZONE` n'est pas un secteur mais l'extérieur du
+ * département — non desservi, jamais proposé au choix du visiteur.
  */
 export interface ZoneInfo {
   id: DeliveryZone;
@@ -94,38 +94,63 @@ export interface ZoneInfo {
   prix: string;
 }
 
-/** Indexé par zone : garantit un libellé pour chaque valeur du type DeliveryZone. */
+/** Prix affiché d'un palier — 0 € s'écrit « Incluse », jamais « 0 € ». */
+function prixZone(zone: Exclude<DeliveryZone, "HORS_ZONE">): string {
+  const cents = DELIVERY_ZONE_CENTS[zone];
+  return cents === 0 ? "Incluse" : fmtShort(cents);
+}
+
+/**
+ * Indexé par zone : garantit un libellé pour chaque valeur du type DeliveryZone.
+ * `note` reprend tel quel le libellé de @lingengo/shared (bornes kilométriques et
+ * communes repères) — un seul endroit à corriger le jour où le barème bouge.
+ */
 export const ZONE_BY_ID: Record<DeliveryZone, ZoneInfo> = {
   ORANGE: {
     id: "ORANGE",
     name: "Orange",
-    note: `Offerte dès ${DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits`,
-    prix: `${DELIVERY_DEFAULTS.ZONE_ORANGE_CENTS / 100} €`,
+    note: "Orange, commune du siège",
+    prix: prixZone("ORANGE"),
   },
   PROCHE: {
     id: "PROCHE",
-    name: "Villes limitrophes",
-    note: "Jonquières, Courthézon, Camaret, Piolenc, Caderousse, Châteauneuf-du-Pape…",
-    prix: `${DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS / 100} €`,
+    name: "Zone proche",
+    note: DELIVERY_ZONE_LABELS.PROCHE,
+    prix: prixZone("PROCHE"),
+  },
+  INTERMEDIAIRE: {
+    id: "INTERMEDIAIRE",
+    name: "Zone intermédiaire",
+    note: DELIVERY_ZONE_LABELS.INTERMEDIAIRE,
+    prix: prixZone("INTERMEDIAIRE"),
+  },
+  ELOIGNE: {
+    id: "ELOIGNE",
+    name: "Zone éloignée",
+    note: DELIVERY_ZONE_LABELS.ELOIGNE,
+    prix: prixZone("ELOIGNE"),
   },
   HORS_ZONE: {
     id: "HORS_ZONE",
-    name: "Au-delà",
-    note: "Étudié au cas par cas",
-    prix: "Sur devis",
+    name: "Hors Vaucluse",
+    note: DELIVERY_ZONE_LABELS.HORS_ZONE,
+    prix: "Non desservi",
   },
 };
 
-/** Ordre d'affichage, du plus proche au plus lointain. */
-export const ZONES: ZoneInfo[] = [ZONE_BY_ID.ORANGE, ZONE_BY_ID.PROCHE, ZONE_BY_ID.HORS_ZONE];
+/** Ordre d'affichage, du plus proche au plus lointain. Les 4 paliers desservis. */
+export const ZONES: ZoneInfo[] = [
+  ZONE_BY_ID.ORANGE,
+  ZONE_BY_ID.PROCHE,
+  ZONE_BY_ID.INTERMEDIAIRE,
+  ZONE_BY_ID.ELOIGNE,
+];
 
 /** Kit Complet : bain + lit + 2 serviettes 50×90, 4 € de moins que le détail. */
 export const GROUP_DISCOUNT = CATALOG_DEFAULTS.KIT_COMPLET_DISCOUNT_CENTS;
 export const KIT_COMPLET_PRICE = CATALOG_DEFAULTS.KIT_COMPLET_CENTS;
 export const KIT_COMPLET_SERVIETTES = CATALOG_DEFAULTS.KIT_COMPLET_SERVIETTES_INCLUSES;
 export const KIT_COMPLET_LABEL = `Kit Complet (bain + lit + ${KIT_COMPLET_SERVIETTES} serviettes)`;
-/** Coût interne estimé : kit bain + kit lit + les serviettes incluses. */
-export const KIT_COMPLET_COST = 290 + 520 + KIT_COMPLET_SERVIETTES * 80;
 /** Valeur du Kit Complet acheté à l'unité — sert à afficher l'économie réelle. */
 export const KIT_COMPLET_DETAIL_PRICE =
   CATALOG_DEFAULTS.KIT_BAIN_CENTS +
@@ -192,14 +217,12 @@ export function splitGrouped(
 export function computeCart(input: CartInput) {
   const lignes: { name: string; qty: number; total: number }[] = [];
   let sumVente = 0;
-  let sumCout = 0;
 
   // Le prix du Kit Complet porte déjà la remise de groupage : elle n'est jamais
   // retranchée une seconde fois du sous-total.
   const complet = Math.max(0, input.complet);
   if (complet > 0) {
     sumVente += KIT_COMPLET_PRICE * complet;
-    sumCout += KIT_COMPLET_COST * complet;
     lignes.push({ name: KIT_COMPLET_LABEL, qty: complet, total: KIT_COMPLET_PRICE * complet });
   }
 
@@ -210,14 +233,12 @@ export function computeCart(input: CartInput) {
     const qty = seuls[k.id] ?? 0;
     if (qty <= 0) continue;
     sumVente += k.priceCents * qty;
-    sumCout += k.costCents * qty;
     lignes.push({ name: k.name, qty, total: k.priceCents * qty });
   }
   for (const e of EXTRAS) {
     const qty = input.extraQtys[e.id] ?? 0;
     if (qty <= 0) continue;
     sumVente += e.priceCents * qty;
-    sumCout += e.costCents * qty;
     lignes.push({ name: e.name, qty, total: e.priceCents * qty });
   }
 
@@ -237,7 +258,6 @@ export function computeCart(input: CartInput) {
     urgency: input.urgency ?? "STANDARD",
     zone: input.zone,
     montantApresRemiseCents: venteGoods,
-    nbKits,
   });
 
   const venteApresReduc = venteGoods + livraison.cents;
@@ -254,7 +274,6 @@ export function computeCart(input: CartInput) {
     pairs: complet,
     groupDiscount,
     totalVente,
-    sumCout,
     reductionMontant,
     venteGoods,
     livraisonFrais: livraison.cents,

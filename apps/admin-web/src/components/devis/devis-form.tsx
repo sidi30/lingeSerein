@@ -15,12 +15,11 @@ import {
   CATALOG_PRODUCTS,
   computeDeliveryFee,
   computeDevisTotals,
-  countKits,
-  DELIVERY_ZONE_LABELS,
   URGENCY_TIERS,
   urgencyTier,
 } from "@lingengo/shared";
 import type { DeliveryZone, UrgencyLevel } from "@lingengo/shared";
+import { DELIVERY_ZONE_OPTIONS, clientZone, zoneOptionText } from "@/lib/delivery-zones";
 import type { QuoteDTO, UserDTO } from "@/lib/types";
 import { useStockBySlug } from "@/lib/rotations";
 import { AlertTriangle, Plus, Trash2, ChevronUp, ChevronDown, Search } from "lucide-react";
@@ -100,7 +99,14 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
   // déjà enregistré (ni l'urgence ni la zone ne sont persistées) et on ne l'écrase
   // pas tant que l'utilisateur ne touche pas au barème.
   const [urgency, setUrgency] = useState<UrgencyLevel>("STANDARD");
+  // Défaut volontairement PAYANT (12 €) : à ORANGE, le barème rendrait 0 €, le
+  // bouton « Appliquer » disparaîtrait et un devis émis sans regarder la zone
+  // offrirait la livraison sans que personne ne l'ait décidé. À 12 €, l'admin
+  // voit un montant et doit trancher. Le palier réel est présélectionné dès
+  // qu'un client est rattaché (voir `appliquerZoneClient`).
   const [zoneLivraison, setZoneLivraison] = useState<DeliveryZone>("PROCHE");
+  /** D'où vient la zone présélectionnée — vide dès que l'admin la choisit lui-même. */
+  const [zoneHint, setZoneHint] = useState<string | null>(null);
 
   const defaultValues: Partial<FormValues> = initialData
     ? {
@@ -162,6 +168,43 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
   });
   const clientSuggestions = clientsData?.data ?? [];
 
+  /**
+   * Présélectionne le palier de livraison du client rattaché.
+   *
+   * La commune (code INSEE) fait foi ; à défaut, le code postal sert de repli et
+   * la mention affichée dit lequel des deux a parlé. Un code postal à cheval sur
+   * deux paliers — 84100 couvre Orange à 0 € et Uchaux à 12 € — est signalé au
+   * lieu d'être tranché : le devis part chez le client, la zone y devient un prix.
+   */
+  const appliquerZoneClient = useCallback((client: UserDTO) => {
+    const deduite = clientZone(client);
+    if (deduite.source === "inconnu") {
+      setZoneHint(null);
+      return;
+    }
+    setZoneLivraison(deduite.zone);
+    if (deduite.source === "commune") {
+      setZoneHint(
+        deduite.commune
+          ? `Palier de ${deduite.commune.nom}, commune enregistrée sur la fiche du client.`
+          : "La commune de ce client n'est pas dans le Vaucluse : course sur devis.",
+      );
+      return;
+    }
+    const cp = client.postalCode ?? "";
+    if (deduite.ambigu) {
+      setZoneHint(
+        `Le code postal ${cp} couvre plusieurs paliers (${deduite.candidates
+          .map((c) => c.nom)
+          .join(", ")}) — le moins cher est retenu, confirmez la commune sur la fiche client.`,
+      );
+    } else if (deduite.zone === "HORS_ZONE") {
+      setZoneHint(`Le code postal ${cp} n'est pas dans le Vaucluse : course sur devis.`);
+    } else {
+      setZoneHint(`Déduit du code postal ${cp} — commune non confirmée sur la fiche du client.`);
+    }
+  }, []);
+
   // Calcul en temps réel
   const lignes = watch("lignes");
   const remisePct = watch("remisePct");
@@ -178,11 +221,13 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
     }));
     const sousTotal = lines.reduce((s, l) => s + Math.round(l.qty * l.unitCents), 0);
     const remise = Math.round((sousTotal * ((Number(remisePct) || 0) * 100)) / 10000);
+    // Plus de `nbKits` : la gratuité « dès 4 kits à Orange » n'a plus d'objet
+    // depuis qu'Orange est incluse sans condition — le champ est déprécié côté
+    // shared, le passer encore laisserait croire qu'il pèse sur le prix.
     return computeDeliveryFee({
       urgency,
       zone: zoneLivraison,
       montantApresRemiseCents: sousTotal - remise,
-      nbKits: countKits(lines),
     });
   }, [lignes, remisePct, urgency, zoneLivraison]);
 
@@ -206,28 +251,31 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
     [stockItems],
   );
 
-  /** Quantité demandée par référence, CUMULÉE sur toutes les lignes du devis. */
-  const demandBySlug = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const ligne of lignes) {
-      const slug = matchCatalogSlug(ligne.designation);
-      if (!slug) continue;
-      map.set(slug, (map.get(slug) ?? 0) + (Number(ligne.qty) || 0));
-    }
-    return map;
-  }, [lignes]);
+  /**
+   * Quantité demandée par référence, CUMULÉE sur toutes les lignes du devis.
+   *
+   * Calculé À CHAQUE RENDU, sans `useMemo` sur `lignes` : `watch()` renvoie un
+   * tableau dont l'identité ne change pas quand seule une quantité est modifiée.
+   * Mémoïsé dessus, l'avertissement de stock restait figé sur les quantités
+   * initiales — passer une ligne de 1 à 40 sur un parc de 3 n'affichait RIEN,
+   * et le devis partait sans que personne n'ait vu la survente. Le coût est
+   * négligeable : un devis compte quelques lignes.
+   */
+  const demandBySlug = new Map<string, number>();
+  for (const ligne of lignes) {
+    const slug = matchCatalogSlug(ligne.designation);
+    if (!slug) continue;
+    demandBySlug.set(slug, (demandBySlug.get(slug) ?? 0) + (Number(ligne.qty) || 0));
+  }
 
   /** Références dont la demande dépasse le disponible. */
-  const overbooked = useMemo(() => {
-    const out: { slug: string; name: string; demande: number; disponible: number }[] = [];
-    for (const [slug, demande] of demandBySlug) {
-      const item = stockBySlug.get(slug);
-      if (item && demande > item.disponible) {
-        out.push({ slug, name: item.name, demande, disponible: item.disponible });
-      }
+  const overbooked: { slug: string; name: string; demande: number; disponible: number }[] = [];
+  for (const [slug, demande] of demandBySlug) {
+    const item = stockBySlug.get(slug);
+    if (item && demande > item.disponible) {
+      overbooked.push({ slug, name: item.name, demande, disponible: item.disponible });
     }
-    return out;
-  }, [demandBySlug, stockBySlug]);
+  }
 
   const availableCatalog = useMemo(
     () =>
@@ -375,6 +423,7 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
                           setValue("clientNom", c.name);
                           setValue("clientEmail", c.email ?? "");
                           setValue("clientTel", c.phone ?? "");
+                          appliquerZoneClient(c);
                           setClientSearch(c.name);
                           setShowClientSearch(false);
                         }}
@@ -799,14 +848,18 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
                     id="zoneLivraison"
                     className={inputCls}
                     value={zoneLivraison}
-                    onChange={(e) => setZoneLivraison(e.target.value as DeliveryZone)}
+                    onChange={(e) => {
+                      setZoneLivraison(e.target.value as DeliveryZone);
+                      setZoneHint(null);
+                    }}
                   >
-                    {(Object.keys(DELIVERY_ZONE_LABELS) as DeliveryZone[]).map((z) => (
-                      <option key={z} value={z}>
-                        {DELIVERY_ZONE_LABELS[z]}
+                    {DELIVERY_ZONE_OPTIONS.map((option) => (
+                      <option key={option.zone} value={option.zone}>
+                        {zoneOptionText(option)}
                       </option>
                     ))}
                   </select>
+                  {zoneHint && <p className="mt-1 text-[11px] text-gray-500">{zoneHint}</p>}
                 </div>
 
                 {deliveryFee.surDevis ? (

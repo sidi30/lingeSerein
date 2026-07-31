@@ -11,6 +11,7 @@ import {
   countKits,
   printableField,
   resolveLivraisonLabel,
+  resolveLivraisonMontant,
   BLANK_PLACEHOLDER,
   type DevisData,
 } from "./devis.ts";
@@ -118,7 +119,13 @@ describe("resolveLivraisonLabel", () => {
   });
 
   it("déduit le libellé du montant quand il n'est pas connu", () => {
-    assert.match(resolveLivraisonLabel({ livraisonCents: 2500 }), /Express 24 h/);
+    assert.match(resolveLivraisonLabel({ livraisonCents: 3900 }), /Jour même/);
+  });
+
+  it("reste muet sur 25 €, que le barème ne permet plus d'attribuer", () => {
+    // 25 € vaut désormais aussi bien « forfait Express 24 h » que « palier
+    // au-delà de 35 km ». Sans libellé explicite, le devis n'invente rien.
+    assert.equal(resolveLivraisonLabel({ livraisonCents: 2500 }), "Livraison");
   });
 
   it("ignore un libellé vide ou blanc", () => {
@@ -126,6 +133,55 @@ describe("resolveLivraisonLabel", () => {
       resolveLivraisonLabel({ livraisonCents: 0, livraisonLabel: "   " }),
       "Livraison offerte",
     );
+  });
+});
+
+describe("resolveLivraisonMontant — le montant ne doit jamais contredire le libelle", () => {
+  const euros = (cents: number) => `${(cents / 100).toFixed(2)} EUR`;
+
+  it("dit « sur devis » quand la course est a chiffrer, JAMAIS « Offerte »", () => {
+    const montant = resolveLivraisonMontant({ livraisonCents: 0, livraisonSurDevis: true }, euros);
+    assert.equal(montant, "sur devis");
+    assert.doesNotMatch(montant, /[Oo]fferte/);
+  });
+
+  it("distingue deux zeros que rien d'autre ne separe", () => {
+    // Meme montant, sens opposes : l'un est une gratuite accordee, l'autre une
+    // course dont personne n'a publie le prix.
+    assert.equal(resolveLivraisonMontant({ livraisonCents: 0 }, euros), "Offerte");
+    assert.equal(
+      resolveLivraisonMontant({ livraisonCents: 0, livraisonSurDevis: true }, euros),
+      "sur devis",
+    );
+  });
+
+  it("formate normalement un montant du, avec la mise en forme de l'appelant", () => {
+    assert.equal(resolveLivraisonMontant({ livraisonCents: 1500 }, euros), "15.00 EUR");
+  });
+
+  it("laisse « sur devis » l'emporter meme si un montant a ete saisi", () => {
+    // Cas reel : l'operateur chiffre a la main une course hors zone mais le
+    // drapeau n'a pas ete leve. On prefere annoncer « sur devis » que facturer
+    // un montant que le bareme ne justifie pas.
+    assert.equal(
+      resolveLivraisonMontant({ livraisonCents: 3000, livraisonSurDevis: true }, euros),
+      "sur devis",
+    );
+  });
+
+  it("s'accorde avec le libelle sur une course a chiffrer", () => {
+    const donnees = {
+      livraisonCents: 0,
+      livraisonLabel: "Livraison - sur devis (a chiffrer)",
+      livraisonSurDevis: true,
+    };
+    const label = resolveLivraisonLabel(donnees);
+    const montant = resolveLivraisonMontant(donnees, euros);
+    // La phrase imprimee sur le contrat vaut « (label : montant) ». Elle ne doit
+    // pas se contredire d'une moitie a l'autre.
+    assert.match(label, /sur devis/);
+    assert.match(montant, /sur devis/);
+    assert.doesNotMatch(`${label} : ${montant}`, /offerte/i);
   });
 });
 

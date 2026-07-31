@@ -6,7 +6,7 @@ import {
   joursDeRetard,
   normalizeInvoiceLines,
   resolveProductSlug,
-  startOfDay,
+  jourCalendaire,
   type InvoiceMetadata,
 } from "@lingengo/shared";
 import { NotFoundError, ConflictError, UnprocessableEntityError } from "../utils/errors.js";
@@ -147,8 +147,8 @@ export class RotationsService {
     if (from || to) {
       conditions.push({
         dateReprisePrevue: {
-          ...(from ? { gte: startOfDay(new Date(from)) } : {}),
-          ...(to ? { lte: startOfDay(new Date(to)) } : {}),
+          ...(from ? { gte: jourCalendaire(from) } : {}),
+          ...(to ? { lte: jourCalendaire(to) } : {}),
         },
       });
     }
@@ -158,7 +158,7 @@ export class RotationsService {
     // si sa colonne `status` n'a pas encore basculé.
     if (enRetard) {
       conditions.push({
-        dateReprisePrevue: { lt: startOfDay(now) },
+        dateReprisePrevue: { lt: jourCalendaire(now) },
         dateRepriseReelle: null,
         status: { notIn: ["REPRISE", "ANNULEE"] },
       });
@@ -235,10 +235,10 @@ export class RotationsService {
     ipAddress?: string,
     userAgent?: string,
   ): Promise<RotationView> {
-    const dateLivraison = startOfDay(new Date(input.dateLivraison));
+    const dateLivraison = jourCalendaire(input.dateLivraison);
     const dateReprisePrevue = input.dateReprisePrevue
-      ? startOfDay(new Date(input.dateReprisePrevue))
-      : startOfDay(computeDateReprise({ dateLivraison, formule: input.formule }));
+      ? jourCalendaire(input.dateReprisePrevue)
+      : jourCalendaire(computeDateReprise({ dateLivraison, formule: input.formule }));
 
     if (dateReprisePrevue < dateLivraison) {
       throw new UnprocessableEntityError(
@@ -363,10 +363,8 @@ export class RotationsService {
       );
     }
 
-    const dateLivraison = startOfDay(
-      input.dateLivraison ? new Date(input.dateLivraison) : new Date(),
-    );
-    const dateReprisePrevue = startOfDay(
+    const dateLivraison = jourCalendaire(input.dateLivraison ?? new Date());
+    const dateReprisePrevue = jourCalendaire(
       computeDateReprise({ dateLivraison, formule: input.formule }),
     );
 
@@ -532,9 +530,7 @@ export class RotationsService {
       }
     }
 
-    const dateRepriseReelle = startOfDay(
-      input.dateRepriseReelle ? new Date(input.dateRepriseReelle) : new Date(),
-    );
+    const dateRepriseReelle = jourCalendaire(input.dateRepriseReelle ?? new Date());
 
     // Les lignes non transmises sont réputées non revenues (0), pas ignorées :
     // une reprise partielle doit solder la rotation entière, sinon du linge
@@ -651,11 +647,11 @@ export class RotationsService {
    * Une seule requête par compteur, sans charger les lignes.
    */
   async summary(operatorId: string, now: Date = new Date()) {
-    const aujourdhui = startOfDay(now);
-    const demain = new Date(aujourdhui);
-    demain.setDate(demain.getDate() + 1);
-    const apresDemain = new Date(demain);
-    apresDemain.setDate(apresDemain.getDate() + 1);
+    const aujourdhui = jourCalendaire(now);
+    // Journées suivantes par pas de 24 h EXACTES : les dates canoniques sont des
+    // minuits UTC, où le jour dure toujours 24 h (pas de changement d'heure).
+    const demain = new Date(aujourdhui.getTime() + 86_400_000);
+    const apresDemain = new Date(demain.getTime() + 86_400_000);
 
     const enCours: Prisma.RotationWhereInput = {
       operatorId,
@@ -697,7 +693,7 @@ export class RotationsService {
    * @param operatorId Limite à un opérateur. Omis ⇒ TOUS.
    */
   async markOverdue(operatorId?: string, now: Date = new Date()) {
-    const aujourdhui = startOfDay(now);
+    const aujourdhui = jourCalendaire(now);
 
     const echues = await this.prisma.rotation.findMany({
       where: {

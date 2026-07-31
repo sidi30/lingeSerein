@@ -362,6 +362,33 @@ export class UsersService {
     return toUserDto(updated);
   }
 
+  /**
+   * Coupe TOUS les canaux d'un compte que l'admin retire du service.
+   *
+   * Révoquer les refresh tokens ne suffisait pas : cela ferme l'accès à l'API,
+   * mais le push ne passe pas par l'API. Il part de nos serveurs vers Expo à
+   * partir de `device_tokens`, sans jamais consulter la session. Un livreur
+   * désactivé gardait donc ses notifications d'affectation de tournée — nom du
+   * client, adresse, horaires — sur un téléphone que l'entreprise ne contrôle
+   * plus, et rien dans l'interface ne laissait deviner qu'il les recevait encore.
+   *
+   * Les deux suppressions sont ici et non dupliquées dans `deactivate` et
+   * `softDelete` : le jour où un troisième canal apparaîtra (SMS, webhook), il
+   * n'y aura qu'un endroit à modifier, et aucun risque qu'un des deux chemins
+   * soit oublié — c'est exactement ce qui s'est produit avec le push.
+   *
+   * La réactivation ne restaure rien : le mobile réenregistre son jeton à chaque
+   * lancement, l'appareil revient donc de lui-même dès la reconnexion.
+   */
+  private async couperLesCanaux(userId: string): Promise<void> {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    await this.prisma.deviceToken.deleteMany({ where: { userId } });
+  }
+
   // ---- Désactivation ----
 
   async deactivate(
@@ -389,11 +416,8 @@ export class UsersService {
       throw new ForbiddenError("Vous ne pouvez pas désactiver un Super Admin");
     }
 
-    // Révoquer tous les refresh tokens de la cible
-    await this.prisma.refreshToken.updateMany({
-      where: { userId: id, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    // Sessions ET jetons push : voir `couperLesCanaux`.
+    await this.couperLesCanaux(id);
 
     const updated = await this.prisma.user.update({
       where: { id },
@@ -589,11 +613,8 @@ export class UsersService {
       throw new ForbiddenError("Vous ne pouvez pas supprimer un Super Admin");
     }
 
-    // Révoquer tous les refresh tokens de la cible
-    await this.prisma.refreshToken.updateMany({
-      where: { userId: id, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    // Sessions ET jetons push : voir `couperLesCanaux`.
+    await this.couperLesCanaux(id);
 
     // Soft-delete : deletedAt=now + isActive=false
     await this.prisma.user.update({

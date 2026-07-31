@@ -57,10 +57,14 @@ test.describe("UI F12 — Devis contraint par le stock", () => {
     await chip.click();
     await chip.click();
 
-    const quantites = page.getByLabel("Quantité");
+    // Les champs sont désignés par le NOM du champ de formulaire, jamais par
+    // leur rang : quand l'article est encore en parc, le bloc « Ajouter depuis
+    // le stock disponible » insère ses propres champs « Quantité » AVANT les
+    // lignes, et un `nth(1)` remplissait alors le mauvais champ — le scénario
+    // passait à côté de ce qu'il croyait tester.
     // 2 + 2 = 4 > 3 alors qu'aucune ligne seule ne dépasse : c'est le piège.
-    await quantites.nth(1).fill("2");
-    await quantites.nth(2).fill("2");
+    await page.locator('input[name="lignes.1.qty"]').fill("2");
+    await page.locator('input[name="lignes.2.qty"]').fill("2");
 
     await expect(page.getByText(/référence.? au-delà du stock disponible/i)).toBeVisible({
       timeout: 10_000,
@@ -81,7 +85,7 @@ test.describe("UI F12 — Devis contraint par le stock", () => {
       .getByRole("button", { name: new RegExp(`${ARTICLE_NAME}.*·`) })
       .first()
       .click();
-    await page.getByLabel("Quantité").nth(1).fill("2");
+    await page.locator('input[name="lignes.1.qty"]').fill("2");
 
     await expect(page.getByText(/au-delà du stock disponible/i)).toHaveCount(0);
   });
@@ -101,7 +105,7 @@ test.describe("UI F12 — Devis contraint par le stock", () => {
       .getByRole("button", { name: new RegExp(`${ARTICLE_NAME}.*·`) })
       .first()
       .click();
-    await page.getByLabel("Quantité").nth(1).fill("50");
+    await page.locator('input[name="lignes.1.qty"]').fill("50");
 
     await expect(page.getByText(/au-delà du stock disponible/i)).toBeVisible({ timeout: 10_000 });
 

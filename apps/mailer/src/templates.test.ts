@@ -8,6 +8,9 @@ import {
   rotationReminderClientEmail,
   rotationReminderOwnerEmail,
   rotationOverdueEmail,
+  roundAssignedDriverEmail,
+  orderConfirmationClientEmail,
+  orderNotificationOwnerEmail,
 } from "./templates.js";
 
 // Regression: HTML / script injection via les champs du formulaire public.
@@ -218,6 +221,140 @@ test("rotationOverdueEmail échappe le nom et la désignation", () => {
   assert.ok(!html.includes("1 jours"), "pas de pluriel à un jour");
 });
 
+// ─── Tournées ───
+
+test("roundAssignedDriverEmail annonce une AFFECTATION, pas une reprise", () => {
+  const html = roundAssignedDriverEmail({
+    livreurNom: "Karim",
+    datePassage: "2026-08-03",
+    stopsCount: 7,
+    zone: "Vaucluse Nord",
+  });
+
+  // Le contenu doit être propre à l'affectation : un livreur qui reçoit
+  // « reprises prévues demain » pour une tournée lit un email trompeur.
+  assert.ok(html.includes("tournée vous est affectée"), "objet de l'email absent");
+  assert.ok(html.includes("Karim"));
+  assert.ok(html.includes("lundi 3 août 2026"), "date en clair attendue");
+  assert.ok(html.includes("7 arrêts"), "nombre d'arrêts absent");
+  assert.ok(html.includes("Vaucluse Nord"), "secteur absent");
+});
+
+test("roundAssignedDriverEmail accorde le singulier et masque la zone absente", () => {
+  const html = roundAssignedDriverEmail({
+    livreurNom: "Karim",
+    datePassage: "2026-08-03",
+    stopsCount: 1,
+  });
+
+  assert.ok(html.includes("1 arrêt</strong> planifié"), "singulier attendu");
+  assert.ok(!html.includes("Secteur :"), "aucune zone ne doit être inventée");
+});
+
+test("roundAssignedDriverEmail échappe le nom du livreur et la zone", () => {
+  const html = roundAssignedDriverEmail({
+    livreurNom: "<script>alert(1)</script>",
+    datePassage: "2026-08-03",
+    stopsCount: 2,
+    zone: '"><img src=x onerror=alert(1)>',
+  });
+
+  assert.ok(!html.includes("<script>alert(1)</script>"), "nom non échappé");
+  assert.ok(!html.includes("<img src=x onerror"), "zone non échappée");
+  assert.ok(html.includes("&lt;script&gt;"));
+});
+
+// ─── Commandes ───
+
+const COMMANDE_BASE = {
+  clientNom: "Hôtel du Parc",
+  orderNumber: "LNG-2026-ABCDEF",
+  dateLivraison: "2026-08-03",
+  lignes: [{ designation: "Kit Bain", qty: 2 }],
+  sousTotalCents: 1500,
+  livraisonCents: 1200,
+  totalCents: 2700,
+};
+
+test("orderConfirmationClientEmail récapitule articles, date et montants", () => {
+  const html = orderConfirmationClientEmail({ ...COMMANDE_BASE, creneau: "08:00-12:00" });
+
+  assert.ok(html.includes("LNG-2026-ABCDEF"));
+  assert.ok(html.includes("lundi 3 août 2026"));
+  assert.ok(html.includes("08:00-12:00"));
+  assert.ok(html.includes("Kit Bain"));
+  // Montant seul : `formatEuroCents` sépare la valeur du « € » par une espace
+  // INSÉCABLE, un détail de mise en forme dont ce test n'a pas à dépendre.
+  assert.ok(html.includes("12,00"), "frais de livraison absents");
+  assert.ok(html.includes("27,00"), "total absent");
+});
+
+test("orderConfirmationClientEmail ne dit « offerte » que si elle l'est vraiment", () => {
+  const offerte = orderConfirmationClientEmail({
+    ...COMMANDE_BASE,
+    livraisonCents: 0,
+    totalCents: 1500,
+  });
+  assert.ok(offerte.includes("offerte"));
+
+  // Frais sur devis : 0 € ne vaut PAS gratuité. Annoncer « offerte » ici serait
+  // un engagement commercial que personne n'a pris.
+  const surDevis = orderConfirmationClientEmail({
+    ...COMMANDE_BASE,
+    livraisonCents: 0,
+    totalCents: 1500,
+    livraisonSurDevis: true,
+  });
+  assert.ok(!surDevis.includes("offerte"), "gratuité annoncée à tort");
+  assert.ok(surDevis.includes("à confirmer"));
+  assert.ok(surDevis.includes("Total (hors livraison)"), "total non qualifié");
+});
+
+test("orderNotificationOwnerEmail porte les coordonnées et alerte sur les frais à chiffrer", () => {
+  const html = orderNotificationOwnerEmail({
+    ...COMMANDE_BASE,
+    clientEmail: "contact@hotel.test",
+    clientTel: "0490000000",
+    clientAdresse: "1 rue des Lices",
+    livraisonCents: 0,
+    totalCents: 1500,
+    livraisonSurDevis: true,
+    source: "MOBILE",
+  });
+
+  assert.ok(html.includes("contact@hotel.test"));
+  assert.ok(html.includes("0490000000"));
+  assert.ok(html.includes("1 rue des Lices"));
+  assert.ok(html.includes("Application mobile"), "origine non libellée");
+  assert.ok(html.includes("Frais de livraison à chiffrer"), "alerte absente");
+});
+
+test("orderNotificationOwnerEmail masque les coordonnées absentes", () => {
+  const html = orderNotificationOwnerEmail(COMMANDE_BASE);
+
+  // Un client sans email ni téléphone est le cas courant : aucune ligne vide.
+  assert.ok(!html.includes("Téléphone"), "ligne téléphone vide affichée");
+  assert.ok(!html.includes("Adresse"), "ligne adresse vide affichée");
+  assert.ok(html.includes("Hôtel du Parc"));
+});
+
+test("les emails de commande échappent les désignations et le nom du client", () => {
+  const payload = {
+    ...COMMANDE_BASE,
+    clientNom: "<script>alert(1)</script>",
+    lignes: [{ designation: '"><img src=x onerror=alert(1)>', qty: 1 }],
+  };
+
+  for (const html of [
+    orderConfirmationClientEmail(payload),
+    orderNotificationOwnerEmail(payload),
+  ]) {
+    assert.ok(!html.includes("<script>alert(1)</script>"), "nom non échappé");
+    assert.ok(!html.includes("<img src=x onerror"), "désignation non échappée");
+    assert.ok(html.includes("&lt;script&gt;"));
+  }
+});
+
 // Le logo est servi par la vitrine. Ce test verrouille sa présence dans TOUS les
 // emails, avec un alt (repli quand le client bloque les images distantes) et une
 // URL absolue en https — une URL relative ne veut rien dire dans un email.
@@ -242,6 +379,9 @@ test("tous les emails affichent le logo du site avec un alt et une URL absolue",
       joursDeRetard: 4,
       lignes: [],
     }),
+    roundAssignedDriverEmail({ livreurNom: "Karim", datePassage: "2026-08-03", stopsCount: 3 }),
+    orderConfirmationClientEmail(COMMANDE_BASE),
+    orderNotificationOwnerEmail(COMMANDE_BASE),
   ];
 
   for (const html of htmls) {

@@ -1,5 +1,21 @@
 import type { PrismaClient } from "@prisma/client";
 
+/**
+ * Somme d'agrégat Prisma → chiffre d'affaires.
+ *
+ * `total_cents` est le sous-total des ARTICLES : la livraison vit dans sa propre
+ * colonne depuis qu'elle est facturée. Les additionner n'est pas un détail de
+ * présentation — c'est ce que l'exploitation encaisse réellement, et le KPI en
+ * omettait une part croissante à mesure que les courses hors gratuité montaient.
+ *
+ * Les commandes antérieures au sprint portent `delivery_fee_cents = 0` (DEFAULT
+ * de la migration additive) : aucun chiffre passé ne bouge, la courbe des douze
+ * mois reste exactement ce qu'elle était avant cette ligne.
+ */
+function chiffreAffaires(sum: { totalCents: number | null; deliveryFeeCents: number | null }) {
+  return (sum.totalCents ?? 0) + (sum.deliveryFeeCents ?? 0);
+}
+
 export class DashboardService {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -17,7 +33,7 @@ export class DashboardService {
         createdAt: { gte: weekAgo },
         deletedAt: null,
       },
-      _sum: { totalCents: true },
+      _sum: { totalCents: true, deliveryFeeCents: true },
     });
 
     // Revenue previous week for comparison
@@ -27,7 +43,7 @@ export class DashboardService {
         createdAt: { gte: twoWeeksAgo, lt: weekAgo },
         deletedAt: null,
       },
-      _sum: { totalCents: true },
+      _sum: { totalCents: true, deliveryFeeCents: true },
     });
 
     // Deliveries this week
@@ -65,8 +81,8 @@ export class DashboardService {
     const lowStockCount = Number(lowStockClients[0]?.count ?? 0);
 
     return {
-      revenueCents: revenueThisWeek._sum.totalCents ?? 0,
-      revenuePrevWeekCents: revenuePrevWeek._sum.totalCents ?? 0,
+      revenueCents: chiffreAffaires(revenueThisWeek._sum),
+      revenuePrevWeekCents: chiffreAffaires(revenuePrevWeek._sum),
       deliveriesCompleted: deliveriesThisWeek,
       newClients: newClientsThisWeek,
       activeSubscriptions,
@@ -88,12 +104,12 @@ export class DashboardService {
           createdAt: { gte: start, lt: end },
           deletedAt: null,
         },
-        _sum: { totalCents: true },
+        _sum: { totalCents: true, deliveryFeeCents: true },
       });
 
       months.push({
         month: start.toISOString().slice(0, 7), // "YYYY-MM"
-        revenueCents: result._sum.totalCents ?? 0,
+        revenueCents: chiffreAffaires(result._sum),
       });
     }
 
@@ -101,11 +117,23 @@ export class DashboardService {
   }
 
   async getAlerts(_operatorId: string) {
-    const alerts: Array<{ type: string; severity: string; message: string; entityId?: string; createdAt: Date }> = [];
+    const alerts: Array<{
+      type: string;
+      severity: string;
+      message: string;
+      entityId?: string;
+      createdAt: Date;
+    }> = [];
 
     // Low stock alerts
     const lowStockClients = await this.prisma.$queryRaw<
-      Array<{ user_id: string; name: string; clean_sets: number; total_in_circulation: number; product_range: string }>
+      Array<{
+        user_id: string;
+        name: string;
+        clean_sets: number;
+        total_in_circulation: number;
+        product_range: string;
+      }>
     >`
       SELECT cs.user_id, u.name, cs.clean_sets, cs.total_in_circulation, cs.product_range
       FROM client_stocks cs
@@ -171,8 +199,10 @@ export class DashboardService {
 
     return alerts.sort((a, b) => {
       const severityOrder = { error: 0, warning: 1, info: 2 };
-      return (severityOrder[a.severity as keyof typeof severityOrder] ?? 2) -
-        (severityOrder[b.severity as keyof typeof severityOrder] ?? 2);
+      return (
+        (severityOrder[a.severity as keyof typeof severityOrder] ?? 2) -
+        (severityOrder[b.severity as keyof typeof severityOrder] ?? 2)
+      );
     });
   }
 }

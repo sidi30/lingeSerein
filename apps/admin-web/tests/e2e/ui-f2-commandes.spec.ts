@@ -25,8 +25,14 @@ test.describe("UI F2 — Commandes", () => {
 
   test("Sidebar lien Commandes visible", async ({ page }) => {
     await page.goto("/");
+    // Le lien est cherché DANS le menu de bureau : la page rend aussi un tiroir
+    // mobile, plus haut dans le DOM et hors écran. Un `.first()` sur l'ensemble
+    // tombait sur le lien du tiroir, invisible par construction.
     await expect(
-      page.locator('nav a[href*="/commandes"], aside a[href*="/commandes"]').first(),
+      page
+        .getByRole("complementary", { name: "Menu principal" })
+        .locator('a[href*="/commandes"]')
+        .first(),
     ).toBeVisible({ timeout: 8_000 });
   });
 

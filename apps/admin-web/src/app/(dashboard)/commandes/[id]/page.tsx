@@ -17,6 +17,17 @@ import { detailState, invalidateAfter } from "@/lib/query";
 import { Table, Thead, Th, Td, Tr } from "@/components/ui/table";
 import { useToast } from "@/lib/toast";
 import { formatPrice, formatDate, formatDateTime } from "@/lib/format";
+import {
+  formatDeliveryFee,
+  orderAmounts,
+  quoteGenerationBlockedReason,
+  quoteLinks,
+} from "@/lib/order-quote";
+import {
+  QuoteFromOrderPrompt,
+  useQuoteFromOrder,
+  type OrderRef,
+} from "@/components/orders/quote-from-order";
 import { ORDER_TRANSITIONS } from "@lingengo/shared";
 import type { OrderDetailDTO, OrderStatus } from "@/lib/types";
 import { EmailText } from "@/components/ui/email-text";
@@ -30,6 +41,7 @@ import {
   User,
   MapPin,
   FileText,
+  FilePlus2,
 } from "lucide-react";
 
 type BadgeVariant = "default" | "success" | "warning" | "danger" | "info" | "neutral";
@@ -66,6 +78,8 @@ export default function CommandeDetailPage() {
   const [cancelModal, setCancelModal] = useState(false);
   const [cancelRaison, setCancelRaison] = useState("");
   const [cancelError, setCancelError] = useState("");
+  /** Commande dont on propose le devis juste après sa confirmation. */
+  const [quotePrompt, setQuotePrompt] = useState<OrderRef | null>(null);
 
   const orderQuery = useQuery({
     queryKey: ["order", id],
@@ -74,16 +88,27 @@ export default function CommandeDetailPage() {
   const order = orderQuery.data;
   const state = detailState(orderQuery, Boolean(id));
 
+  const quoteMutation = useQuoteFromOrder();
+
   const statusMutation = useMutation({
     mutationFn: ({ status, raison }: { status: OrderStatus; raison?: string }) =>
       api.patch<OrderDetailDTO>(`/orders/${id}/status`, { status, raison }),
-    onSuccess: () => {
+    onSuccess: (updated, variables) => {
       toast("Statut mis à jour");
       // Un changement de statut ne touche pas que la commande : la tournée, le
       // stock, la facture adossée et les KPI bougent avec elle.
       void invalidateAfter(queryClient, "order");
       setCancelModal(false);
       setCancelRaison("");
+      // C'est le moment où le propriétaire attend son devis : on le PROPOSE,
+      // sans rien écrire dans sa section devis avant qu'il ait dit oui. On lit
+      // la commande renvoyée par le PATCH plutôt que celle du cache : elle
+      // porte l'état d'après, et reproposer un devis déjà généré serait un
+      // faux départ. Repli sur le cache si la route ne renvoie pas la commande.
+      const confirmed = updated ?? order;
+      if (variables.status === "CONFIRMED" && confirmed && !quoteLinks(confirmed).generated) {
+        setQuotePrompt({ id: confirmed.id, orderNumber: confirmed.orderNumber });
+      }
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : "Erreur lors du changement de statut";
@@ -117,6 +142,12 @@ export default function CommandeDetailPage() {
   const nextStatuses = ORDER_TRANSITIONS[order.status].filter((s) => s !== "CANCELLED");
   const canCancel = ORDER_TRANSITIONS[order.status].includes("CANCELLED");
   const isTerminal = ORDER_TRANSITIONS[order.status].length === 0;
+  // Deux liens distincts : le devis d'ORIGINE et celui ÉMIS depuis la commande.
+  // Le second remplace le bouton — reproposer la génération d'un devis qui
+  // existe déjà laisse croire qu'il en manque un.
+  const links = quoteLinks(order);
+  const quoteBlockedReason = quoteGenerationBlockedReason(order.status);
+  const amounts = orderAmounts(order);
 
   return (
     <>
@@ -135,6 +166,38 @@ export default function CommandeDetailPage() {
                 {nextActionLabels[s] ?? s}
               </Button>
             ))}
+            {/* Devis existant ⇒ on y renvoie ; sinon on propose de le produire,
+                désactivé AVEC sa raison quand l'état de la commande l'interdit
+                (motif `disabledReason` de DeleteAction). */}
+            {links.generated ? (
+              // Bouton qui navigue, et non `<Link>` enveloppant un `<Button>` :
+              // un `<button>` dans un `<a>` est du contenu interactif imbriqué,
+              // invalide et ambigu au clavier. Le vrai lien (ouvrable dans un
+              // onglet) vit dans le bandeau de statut, juste en dessous.
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => router.push(`/devis/${links.generated?.id}`)}
+              >
+                <FileText className="h-4 w-4" aria-hidden="true" />
+                Voir le devis {links.generated.numero}
+              </Button>
+            ) : (
+              // Le title vit sur le span : un bouton désactivé a
+              // pointer-events:none et n'afficherait jamais son propre tooltip.
+              <span title={quoteBlockedReason ?? "Créer le devis correspondant à cette commande"}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={Boolean(quoteBlockedReason)}
+                  loading={quoteMutation.isPending}
+                  onClick={() => quoteMutation.mutate(order.id)}
+                >
+                  <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+                  Générer le devis
+                </Button>
+              </span>
+            )}
             {canCancel && (
               <Button variant="danger" size="sm" onClick={() => setCancelModal(true)}>
                 <XCircle className="h-4 w-4" aria-hidden="true" />
@@ -175,18 +238,35 @@ export default function CommandeDetailPage() {
               {sourceLabels[order.source] ?? order.source}
             </span>
           </div>
-          {isTerminal && (
-            <span className="ml-auto text-xs text-gray-400">Cette commande a déjà été traitée</span>
-          )}
-          {order.convertedFromQuote && (
-            <Link
-              href={`/devis/${order.convertedFromQuote.id}`}
-              className="ml-auto flex items-center gap-1.5 text-sm text-primary-600 hover:underline"
-            >
-              <FileText className="h-4 w-4" aria-hidden="true" />
-              Voir le devis {order.convertedFromQuote.numero}
-            </Link>
-          )}
+          {/* Groupés dans un seul conteneur poussé à droite : deux `ml-auto`
+              frères se disputaient l'espace restant quand les deux mentions
+              apparaissaient ensemble. */}
+          <div className="ml-auto flex flex-wrap items-center gap-4">
+            {isTerminal && (
+              <span className="text-xs text-gray-400">Cette commande a déjà été traitée</span>
+            )}
+            {/* Les deux sens s'affichent ensemble le cas échéant : une commande
+                née du devis A peut avoir produit le devis B, et masquer l'un
+                des deux reviendrait à effacer une partie de son histoire. */}
+            {links.converted && (
+              <Link
+                href={`/devis/${links.converted.id}`}
+                className="flex items-center gap-1.5 text-sm text-primary-600 hover:underline"
+              >
+                <FileText className="h-4 w-4" aria-hidden="true" />
+                Commande issue du devis {links.converted.numero}
+              </Link>
+            )}
+            {links.generated && (
+              <Link
+                href={`/devis/${links.generated.id}`}
+                className="flex items-center gap-1.5 text-sm text-primary-600 hover:underline"
+              >
+                <FileText className="h-4 w-4" aria-hidden="true" />
+                Devis émis : {links.generated.numero}
+              </Link>
+            )}
+          </div>
         </div>
 
         {order.cancelledReason && (
@@ -244,16 +324,50 @@ export default function CommandeDetailPage() {
             </dl>
           </Card>
 
-          {/* Total */}
+          {/* Total — détaillé : `totalCents` est le sous-total des articles, et
+              l'afficher seul sous le mot « Total » sous-facture la livraison. */}
           <Card title="Total">
-            <div className="text-center">
-              <p className="text-3xl font-bold text-gray-900 tabular-nums">
-                {formatPrice(order.totalCents)}
-              </p>
-              <p className="mt-1 text-xs text-gray-500">
-                {order.items.length} produit{order.items.length > 1 ? "s" : ""}
-              </p>
-            </div>
+            <dl className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <dt className="text-gray-500">
+                  Sous-total ({order.items.length} produit{order.items.length > 1 ? "s" : ""})
+                </dt>
+                <dd className="font-medium tabular-nums">{formatPrice(amounts.subtotalCents)}</dd>
+              </div>
+              {/* `null` = l'API ne renvoie pas encore le champ : on se tait
+                  plutôt que d'annoncer une gratuité qu'on ne connaît pas. */}
+              {amounts.deliveryFeeCents !== null && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Frais de livraison</dt>
+                  <dd
+                    className={
+                      amounts.deliveryFeeSurDevis
+                        ? "font-medium text-warning-600"
+                        : amounts.deliveryFeeCents === 0
+                          ? "font-medium text-success-600"
+                          : "font-medium tabular-nums"
+                    }
+                  >
+                    {formatDeliveryFee(amounts.deliveryFeeCents, amounts.deliveryFeeSurDevis)}
+                  </dd>
+                </div>
+              )}
+              <div className="flex items-center justify-between rounded-lg bg-primary-50 px-3 py-2">
+                <dt className="font-semibold text-primary-900">Total</dt>
+                <dd className="text-2xl font-bold text-primary-700 tabular-nums">
+                  {formatPrice(amounts.totalCents)}
+                </dd>
+              </div>
+              {/* Hors zone tarifée : le total est exact SUR LES ARTICLES, et la
+                  course reste à chiffrer. Le taire ferait passer ce montant
+                  pour le prix final. */}
+              {amounts.deliveryFeeSurDevis && (
+                <p className="text-xs text-warning-700">
+                  Livraison non tarifée sur cette zone : ce total n&apos;inclut pas la course, à
+                  chiffrer sur le devis.
+                </p>
+              )}
+            </dl>
           </Card>
         </div>
 
@@ -390,6 +504,9 @@ export default function CommandeDetailPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Proposition de devis, juste après le passage en « Confirmée » */}
+      <QuoteFromOrderPrompt order={quotePrompt} onClose={() => setQuotePrompt(null)} />
     </>
   );
 }

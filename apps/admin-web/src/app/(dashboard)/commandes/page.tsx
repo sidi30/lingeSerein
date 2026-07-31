@@ -17,10 +17,12 @@ import { Modal } from "@/components/ui/modal";
 import { DeleteAction } from "@/components/ui/delete-action";
 import { DELETE_BLOCKED } from "@/lib/deletion";
 import { OrderForm } from "@/components/orders/order-form";
+import { QuoteFromOrderPrompt, type OrderRef } from "@/components/orders/quote-from-order";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClipboardList, ArrowRight, Plus } from "lucide-react";
 import { invalidateAfter } from "@/lib/query";
+import { formatDeliveryFee, orderAmounts, quoteLinks } from "@/lib/order-quote";
 import { useClampedPage } from "@/lib/use-clamped-page";
 
 interface OrderItem {
@@ -38,12 +40,19 @@ interface Order {
   orderNumber: string;
   status: string;
   isRecurring: boolean;
+  /** SOUS-TOTAL des articles — le total à payer y ajoute la livraison. */
   totalCents: number;
+  /** Optionnel : une API plus ancienne ne le renvoie pas (≠ livraison offerte). */
+  deliveryFeeCents?: number | null;
+  /** Zone sans tarif public : 0 € y signifie « à chiffrer », pas « offerte ». */
+  deliveryFeeSurDevis?: boolean | null;
   deliveryDate: string;
   timeSlot: string;
   specialNotes: string | null;
   items: OrderItem[];
   user: { id: string; name: string; email: string | null };
+  /** Devis déjà émis depuis la commande : sert à ne pas le reproposer. */
+  generatedQuote?: { id: string; numero: string } | null;
 }
 
 interface OrdersResponse {
@@ -99,6 +108,8 @@ export default function CommandesPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  /** Commande dont on propose le devis juste après sa confirmation. */
+  const [quotePrompt, setQuotePrompt] = useState<OrderRef | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["orders", page, statusFilter, search],
@@ -119,11 +130,20 @@ export default function CommandesPage() {
   useClampedPage(page, totalPages, setPage);
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      api.patch(`/orders/${id}/status`, { status }),
-    onSuccess: () => {
+    // On passe la commande entière, pas seulement son id : `onSuccess` a besoin
+    // de son numéro et de son éventuel devis déjà rattaché pour proposer — ou
+    // non — la génération.
+    mutationFn: ({ order, status }: { order: Order; status: string }) =>
+      api.patch(`/orders/${order.id}/status`, { status }),
+    onSuccess: (_data, { order, status }) => {
       toast("Statut mis à jour");
       void invalidateAfter(queryClient, "order");
+      // Même enchaînement que sur la fiche : confirmer est le moment où le
+      // propriétaire veut son devis. On le PROPOSE — rien ne part dans sa
+      // section devis sans qu'il ait dit oui.
+      if (status === "CONFIRMED" && !quoteLinks(order).generated) {
+        setQuotePrompt({ id: order.id, orderNumber: order.orderNumber });
+      }
     },
     onError: () => toast("Erreur lors de la mise à jour", "error"),
   });
@@ -212,6 +232,7 @@ export default function CommandesPage() {
                   const status = statusConfig[order.status as OrderStatus];
                   const nextStatus = nextStatusMap[order.status];
                   const nextLabel = nextStatus ? statusConfig[nextStatus]?.label : null;
+                  const amounts = orderAmounts(order);
 
                   return (
                     <Tr key={order.id}>
@@ -237,9 +258,30 @@ export default function CommandesPage() {
                         </div>
                       </Td>
                       <Td>
-                        <span className="font-semibold text-gray-900">
-                          {formatPrice(order.totalCents)}
-                        </span>
+                        {/* Le total affiché est celui que le client paie ;
+                            `totalCents` seul oublierait la livraison. Le détail
+                            reste lisible sous le montant plutôt que dans une
+                            colonne de plus. */}
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-gray-900 tabular-nums">
+                            {formatPrice(amounts.totalCents)}
+                          </p>
+                          {amounts.deliveryFeeCents !== null && (
+                            <p className="text-xs text-gray-500">
+                              {formatPrice(amounts.subtotalCents)} + livraison{" "}
+                              {amounts.deliveryFeeSurDevis ? (
+                                // 0 € « sur devis » n'est pas une gratuité :
+                                // la course reste à chiffrer, et le total
+                                // affiché ne la comprend donc pas.
+                                <span className="text-warning-700">à chiffrer</span>
+                              ) : amounts.deliveryFeeCents === 0 ? (
+                                <span className="text-success-600">offerte</span>
+                              ) : (
+                                formatDeliveryFee(amounts.deliveryFeeCents)
+                              )}
+                            </p>
+                          )}
+                        </div>
                       </Td>
                       <Td>
                         <span className="text-sm">{formatDate(order.deliveryDate)}</span>
@@ -261,9 +303,7 @@ export default function CommandesPage() {
                               variant="ghost"
                               size="sm"
                               loading={statusMutation.isPending}
-                              onClick={() =>
-                                statusMutation.mutate({ id: order.id, status: nextStatus })
-                              }
+                              onClick={() => statusMutation.mutate({ order, status: nextStatus })}
                             >
                               <ArrowRight className="h-3.5 w-3.5" />
                               {nextLabel}
@@ -317,6 +357,9 @@ export default function CommandesPage() {
           }}
         />
       </Modal>
+
+      {/* Proposition de devis, juste après le passage en « Confirmée » */}
+      <QuoteFromOrderPrompt order={quotePrompt} onClose={() => setQuotePrompt(null)} />
     </>
   );
 }

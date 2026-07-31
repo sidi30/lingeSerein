@@ -16,7 +16,9 @@ import { loginAsAdmin } from "./helpers/auth";
 
 /** Lien de menu vers l'ancien simulateur — doit rester introuvable. */
 function sidebarLink(page: Page) {
-  return page.locator('nav a[href*="/simulateur"], aside a[href*="/simulateur"]');
+  return page
+    .getByRole("complementary", { name: "Menu principal" })
+    .locator('a[href*="/simulateur"]');
 }
 
 const EXISTING_ROUTES = [
@@ -69,7 +71,9 @@ test.describe("Régression — pages existantes", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
-    const sidebar = page.locator("nav, aside").first();
+    // Menu de BUREAU : `nav, aside` attrape d'abord le tiroir mobile, rendu
+    // `aria-hidden` et hors écran depuis la refonte responsive.
+    const sidebar = page.getByRole("complementary", { name: "Menu principal" });
     await expect(sidebar).toBeVisible({ timeout: 8_000 });
 
     // Check new entries are present
