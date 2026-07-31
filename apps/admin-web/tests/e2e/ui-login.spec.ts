@@ -21,8 +21,11 @@ test.describe("UI — Login", () => {
     await loginAsAdmin(page);
     // Should land on dashboard / main page (not /login)
     await expect(page).not.toHaveURL(/\/login/, { timeout: 10_000 });
-    // Sidebar should be visible
-    await expect(page.locator('nav, aside, [data-testid="sidebar"]')).toBeVisible({
+    // Menu latéral affiché. On vise le menu DE BUREAU par son libellé
+    // accessible : depuis la refonte responsive, la page rend aussi un tiroir
+    // mobile (`aria-label="Menu mobile"`, hors écran). Un sélecteur
+    // `nav, aside` attrape les deux et l'assertion devient ambiguë.
+    await expect(page.getByRole("complementary", { name: "Menu principal" })).toBeVisible({
       timeout: 8_000,
     });
   });

@@ -6,7 +6,7 @@ import type {
   Rotation,
   RotationLine,
 } from "@prisma/client";
-import { RETARD_ESCALADE_JOURS, joursDeRetard, startOfDay } from "@lingengo/shared";
+import { RETARD_ESCALADE_JOURS, joursDeRetard, jourCalendaire, startOfDay } from "@lingengo/shared";
 import { QUEUE_NAMES } from "./queue.js";
 import { notify, emailAutorise } from "../utils/notify.js";
 import { sendTransactionalMail, toMailDate } from "../utils/mailer.js";
@@ -162,10 +162,11 @@ async function notifierClientInApp(
  * polluent plus la liste), assez tôt pour que le client prépare son linge le soir.
  */
 async function runReminder(prisma: PrismaClient, now: Date) {
-  const demain = startOfDay(now);
-  demain.setDate(demain.getDate() + 1);
-  const apresDemain = new Date(demain);
-  apresDemain.setDate(apresDemain.getDate() + 1);
+  // Bornes sur des JOURS CANONIQUES (minuit UTC), comme les colonnes
+  // `@db.Date` interrogées : un minuit LOCAL viserait la veille depuis un
+  // serveur en avance sur UTC et le rappel J-1 partirait un jour trop tôt.
+  const demain = new Date(jourCalendaire(now).getTime() + 86_400_000);
+  const apresDemain = new Date(demain.getTime() + 86_400_000);
 
   const rotations = await rotationsAReprendre(prisma, demain, apresDemain);
 
@@ -297,9 +298,8 @@ async function runReminder(prisma: PrismaClient, now: Date) {
 
 /** Rappelle le matin même au client que son passage a lieu aujourd'hui. */
 async function runMorning(prisma: PrismaClient, now: Date) {
-  const aujourdhui = startOfDay(now);
-  const demain = new Date(aujourdhui);
-  demain.setDate(demain.getDate() + 1);
+  const aujourdhui = jourCalendaire(now);
+  const demain = new Date(aujourdhui.getTime() + 86_400_000);
 
   const rotations = await rotationsAReprendre(prisma, aujourdhui, demain);
 
@@ -350,7 +350,7 @@ async function runMorning(prisma: PrismaClient, now: Date) {
  * un compteur qu'on débite.
  */
 async function runOverdue(prisma: PrismaClient, now: Date) {
-  const aujourdhui = startOfDay(now);
+  const aujourdhui = jourCalendaire(now);
 
   // L'ÉTAT est basculé par le service — implémentation unique, partagée avec la
   // route de rattrapage. Ce cron ne garde que ce qui lui est propre : relancer

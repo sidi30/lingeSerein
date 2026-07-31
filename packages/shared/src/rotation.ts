@@ -8,7 +8,7 @@
  */
 
 import { CATALOG_PRODUCTS, SUBSCRIPTION_DEFAULTS, type ProductSlug } from "./constants";
-import { addDays, differenceInCalendarDays } from "./dates";
+import { addDays, jourCalendaire } from "./dates";
 
 // ============================================================================
 // Formules & durées de détention
@@ -128,7 +128,14 @@ export function joursDeRetard(
 ): number {
   if (ROTATION_TERMINAL.includes(rotation.status)) return 0;
   if (rotation.dateRepriseReelle) return 0;
-  return Math.max(0, differenceInCalendarDays(toDate(rotation.dateReprisePrevue), toDate(now)));
+  // Les deux bornes sont ramenées au JOUR CANONIQUE (minuit UTC du jour lu à
+  // Orange) avant d'être soustraites. Comparer une date `@db.Date` — relue à
+  // minuit UTC — à un minuit LOCAL faisait apparaître un jour de retard fantôme
+  // dès que le serveur tournait derrière UTC, et l'escalade « remplacement
+  // facturable » se déclenchait avec un jour d'avance.
+  const echeance = jourCalendaire(toDate(rotation.dateReprisePrevue));
+  const jour = jourCalendaire(toDate(now));
+  return Math.max(0, Math.round((jour.getTime() - echeance.getTime()) / 86_400_000));
 }
 
 /** Vrai si le linge aurait dû être repris et ne l'est pas. */

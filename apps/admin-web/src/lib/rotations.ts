@@ -23,7 +23,18 @@ export interface RotationLigne {
   productSlug: string;
   designation: string;
   qtyLivree: number;
-  qtyReprise: number;
+  /**
+   * `null` tant que RIEN n'a été repris — l'API distingue « pas encore saisi »
+   * de « 0 repris ». Le champ était déclaré `number` : React n'affiche rien
+   * pour `null`, et le compteur du détail sortait « / 4 » au lieu de « 0 / 4 ».
+   * Passer par {@link qtyReprise} pour lire une quantité.
+   */
+  qtyReprise: number | null;
+}
+
+/** Quantité déjà reprise d'une ligne, `null` (jamais saisie) compris comme 0. */
+export function qtyReprise(ligne: Pick<RotationLigne, "qtyReprise">): number {
+  return ligne.qtyReprise ?? 0;
 }
 
 export interface RotationDTO {
@@ -340,5 +351,5 @@ export function groupEventsByDay(events: RotationEvent[]): Map<string, RotationE
 
 /** Reste à reprendre sur une ligne (livré − déjà repris), jamais négatif. */
 export function remainingQty(ligne: RotationLigne): number {
-  return Math.max(ligne.qtyLivree - ligne.qtyReprise, 0);
+  return Math.max(ligne.qtyLivree - qtyReprise(ligne), 0);
 }
