@@ -21,17 +21,27 @@ default_platform(:ios)
 APP_IDENTIFIER = "fr.linge-serein.app"
 TEAM_ID = "4SRJRX4N45"
 
+# Racine du projet mobile, ancrée sur l'emplacement de CE fichier.
+#
+# Indispensable : fastlane exécute la lane depuis son propre dossier `fastlane/`,
+# pas depuis `apps/mobile`. Des chemins relatifs en `ios/...` visaient donc
+# `apps/mobile/fastlane/ios/`, qui n'existe pas — le premier run a échoué là,
+# sur un projet natif pourtant correctement généré.
+MOBILE_ROOT = File.expand_path("..", __dir__)
+
 # Le projet natif est produit par `expo prebuild` : ses noms de fichiers dérivent
 # du `name` d'app.json et changeraient sans prévenir si celui-ci évoluait. On les
 # découvre plutôt que de les figer — un nom en dur ici casserait le build au
 # premier renommage de l'app, avec un message incompréhensible.
 def natif
-  workspace = Dir["ios/*.xcworkspace"].first
-  UI.user_error!("Aucun .xcworkspace : `expo prebuild` n'a pas tourné") if workspace.nil?
+  workspace = Dir[File.join(MOBILE_ROOT, "ios", "*.xcworkspace")].first
+  if workspace.nil?
+    UI.user_error!("Aucun .xcworkspace sous #{MOBILE_ROOT}/ios : `expo prebuild` n'a pas tourné")
+  end
   {
     workspace: workspace,
     scheme: File.basename(workspace, ".xcworkspace"),
-    project: Dir["ios/*.xcodeproj"].first,
+    project: Dir[File.join(MOBILE_ROOT, "ios", "*.xcodeproj")].first,
   }
 end
 
@@ -113,6 +123,9 @@ platform :ios do
       configuration: "Release",
       export_method: "app-store",
       output_name: "LingeSerein.ipa",
+      # Absolu, pour la même raison que MOBILE_ROOT : l'IPA doit atterrir dans
+      # `apps/mobile/`, où le workflow va le chercher, et non sous `fastlane/`.
+      output_directory: MOBILE_ROOT,
       clean: true,
       # Signature manuelle : le profil qu'on vient de régénérer, pas celui que
       # Xcode choisirait tout seul (il prend volontiers un profil de dev).
