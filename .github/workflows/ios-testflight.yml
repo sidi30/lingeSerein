@@ -1,0 +1,127 @@
+name: iOS → TestFlight (sans Expo)
+
+# Chaîne complète sur un runner macOS GitHub, SANS passer par Expo/EAS :
+#
+#   expo prebuild (local, hors ligne)  →  pod install  →  xcodebuild  →  fastlane
+#   →  App Store Connect  →  TestFlight
+#
+# Ce qui disparaît par rapport à `ios-build.yml` : le compte EAS, `EXPO_TOKEN`,
+# le magasin de credentials d'Expo, le quota de builds, et la dépendance à la
+# disponibilité de leurs serveurs. Ce qui reste : `expo prebuild`, un générateur
+# LOCAL qui écrit `apps/mobile/ios/` à partir d'`app.json` — il ne contacte
+# aucun service. Le supprimer voudrait dire versionner `ios/` et maintenir à la
+# main permissions, entitlements et icônes.
+#
+# Secrets utilisés — les trois, obligatoires (aucun repli possible) :
+#   ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8_BASE64
+# La clé App Store Connect fait tout : numéro de build, capability push,
+# régénération du profil de provisionnement, téléversement. Aucun mot de passe
+# Apple, donc aucune 2FA, donc rien d'interactif.
+#
+# Déclenchement MANUEL. Une minute de runner macOS est facturée 10× une minute
+# Linux : un build par commit coûterait cher pour rien.
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: "Envoyer sur TestFlight après la compilation"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ios-testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Épinglé, non `macos-latest` : le passage d'une image à la suivante change de
+    # version de Xcode du jour au lendemain, et un build iOS qui marchait se met
+    # à échouer sans qu'aucun commit ne l'explique.
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Xcode
+        run: xcodebuild -version
+
+      - name: Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # `npm ci` à la RACINE : le dépôt est un monorepo npm workspaces, installer
+      # depuis apps/mobile ignorerait les dépendances hissées et Metro échouerait
+      # à résoudre @lingengo/shared.
+      - name: Dépendances
+        working-directory: .
+        run: npm ci
+
+      # `@lingengo/shared` est consommé par le mobile via son `dist` compilé.
+      - name: Compiler les paquets partagés
+        working-directory: .
+        run: npm run build --workspace packages/shared --if-present
+
+      # Génère apps/mobile/ios/ depuis app.json. `--clean` garantit qu'aucun
+      # résidu d'un run précédent ne survit, et pose les entitlements des plugins
+      # (dont `aps-environment` d'expo-notifications).
+      - name: Générer le projet natif iOS
+        env:
+          EXPO_NO_TELEMETRY: "1"
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Vérifier le projet généré
+        run: |
+          ls -1 ios/*.xcworkspace ios/*.xcodeproj
+          echo "--- entitlements ---"
+          find ios -name "*.entitlements" -exec sh -c 'echo "== $1"; cat "$1"' _ {} \;
+
+      - name: Build + TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          # Sans cela, fastlane écrit ses journaux en ASCII et tronque les
+          # messages d'erreur accentués d'Apple.
+          LC_ALL: en_US.UTF-8
+          LANG: en_US.UTF-8
+        run: fastlane ios beta submit:${{ inputs.submit }}
+
+      - name: Publier l'IPA en artéfact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa-sans-expo
+          path: apps/mobile/*.ipa
+          if-no-files-found: warn
+          retention-days: 7
+
+      # Les journaux xcodebuild sont la SEULE façon de comprendre un échec de
+      # signature : le message de fastlane se limite souvent à « exit status 65 ».
+      - name: Publier les journaux en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-logs
+          path: |
+            ~/Library/Logs/gym
+            apps/mobile/fastlane/report.xml
+          if-no-files-found: ignore
+          retention-days: 7

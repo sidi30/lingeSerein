@@ -59,3 +59,15 @@ memory/playwright-html/
 
 # Devis PDF generes (artefacts)
 apps/Devis_*.pdf
+
+# Projets natifs GÉNÉRÉS par `expo prebuild` — jamais versionnés : app.json reste
+# la source de vérité des permissions, entitlements et icônes. Les committer
+# ferait diverger silencieusement le natif de sa configuration.
+apps/mobile/ios/
+apps/mobile/android/
+*.ipa
+
+# Fastlane (artefacts de run)
+apps/mobile/fastlane/report.xml
+apps/mobile/fastlane/README.md
+apps/mobile/fastlane/test_output/

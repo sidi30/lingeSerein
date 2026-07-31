@@ -1,0 +1,138 @@
+# Chaîne iOS SANS Expo côté service : ni compte EAS, ni EXPO_TOKEN, ni quota de
+# builds, ni magasin de credentials chez un tiers. Xcode compile, fastlane signe
+# avec NOTRE clé App Store Connect, et l'API d'Apple reçoit le binaire.
+#
+# Le seul Expo qui subsiste ici est l'outil LOCAL `expo prebuild`, qui génère le
+# projet natif `ios/` à partir d'`app.json` (le dépôt n'en versionne aucun). Il ne
+# contacte aucun serveur Expo. Pour supprimer jusqu'à cette dépendance, il
+# faudrait committer `ios/` et le maintenir à la main — les permissions, l'icône
+# et les entitlements cesseraient alors d'être décrits par `app.json`.
+#
+# Secrets attendus (déjà posés sur le dépôt) :
+#   ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8_BASE64
+#
+# La clé App Store Connect sert TROIS fois, ce qui est la raison d'être de ce
+# fichier : lire le dernier numéro de build TestFlight, réparer la signature
+# (capability + profil), puis téléverser. Aucun mot de passe Apple, aucune 2FA,
+# donc aucune étape interactive.
+
+default_platform(:ios)
+
+APP_IDENTIFIER = "fr.linge-serein.app"
+TEAM_ID = "4SRJRX4N45"
+
+# Le projet natif est produit par `expo prebuild` : ses noms de fichiers dérivent
+# du `name` d'app.json et changeraient sans prévenir si celui-ci évoluait. On les
+# découvre plutôt que de les figer — un nom en dur ici casserait le build au
+# premier renommage de l'app, avec un message incompréhensible.
+def natif
+  workspace = Dir["ios/*.xcworkspace"].first
+  UI.user_error!("Aucun .xcworkspace : `expo prebuild` n'a pas tourné") if workspace.nil?
+  {
+    workspace: workspace,
+    scheme: File.basename(workspace, ".xcworkspace"),
+    project: Dir["ios/*.xcodeproj"].first,
+  }
+end
+
+platform :ios do
+  desc "Compile l'IPA et l'envoie sur TestFlight"
+  lane :beta do |options|
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_content: ENV.fetch("ASC_KEY_P8_BASE64"),
+      is_key_content_base64: true,
+      in_house: false,
+    )
+
+    # Trousseau temporaire, détruit avec le runner. Sans lui, l'import du
+    # certificat échoue sur un trousseau verrouillé et le build s'arrête après
+    # dix minutes de compilation.
+    setup_ci if ENV["CI"]
+
+    app = natif
+
+    # ---- Numéro de build : c'est TestFlight qui fait foi ----
+    #
+    # `eas.json` déléguait ce compteur aux serveurs d'EAS (`appVersionSource:
+    # remote`). En sortant d'Expo, la seule source de vérité restante est Apple
+    # lui-même : on prend le dernier numéro connu et on l'incrémente. Repartir de
+    # `app.json` produirait un doublon, qu'App Store Connect refuse.
+    dernier = latest_testflight_build_number(
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+      initial_build_number: 0,
+    )
+    increment_build_number(build_number: dernier + 1, xcodeproj: app[:project])
+    UI.message("Numéro de build : #{dernier + 1} (dernier sur TestFlight : #{dernier})")
+
+    # ---- Capability Push Notifications sur l'App ID ----
+    #
+    # C'est le point qui a fait échouer les builds cloud 13, 14 et 15 : l'App ID
+    # n'a jamais eu la capability, donc aucun profil ne porte `aps-environment`,
+    # donc Xcode refuse de signer une app qui embarque `expo-notifications`.
+    # `produce` l'active de façon idempotente. Toléré en échec : sur un compte où
+    # elle est déjà active, certaines versions de fastlane répondent une erreur
+    # plutôt qu'un succès, et ce serait absurde d'arrêter le build pour ça.
+    begin
+      produce(
+        api_key: api_key,
+        app_identifier: APP_IDENTIFIER,
+        team_id: TEAM_ID,
+        skip_itc: true,
+        enable_services: { push_notification: "on" },
+      )
+    rescue => e
+      UI.important("Activation de la capability push ignorée : #{e.message}")
+    end
+
+    # ---- Signature ----
+    #
+    # `cert` réutilise un certificat de distribution dont la clé privée est déjà
+    # dans le trousseau, sinon il en crée un. Apple en limite le nombre à 3 par
+    # compte : si la création échoue pour cette raison, il faut en révoquer un
+    # dans le portail (ceux détenus par EAS ne sont pas réutilisables ici, leur
+    # clé privée ne quitte pas les serveurs d'Expo).
+    cert(api_key: api_key, team_id: TEAM_ID)
+
+    # `force: true` : on REGÉNÈRE le profil à chaque build plutôt que de réutiliser
+    # celui du portail. C'est ce qui fait entrer la capability activée juste avant
+    # dans le profil — un profil existant ne se met jamais à jour tout seul, et
+    # c'est exactement le piège qui a coûté trois builds.
+    sigh(
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+      team_id: TEAM_ID,
+      force: true,
+    )
+
+    build_app(
+      workspace: app[:workspace],
+      scheme: app[:scheme],
+      configuration: "Release",
+      export_method: "app-store",
+      output_name: "LingeSerein.ipa",
+      clean: true,
+      # Signature manuelle : le profil qu'on vient de régénérer, pas celui que
+      # Xcode choisirait tout seul (il prend volontiers un profil de dev).
+      export_options: {
+        signingStyle: "manual",
+        provisioningProfiles: {
+          APP_IDENTIFIER => lane_context[SharedValues::SIGH_NAME],
+        },
+      },
+    )
+
+    next if options[:submit] == false
+
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+      # On n'attend pas les 5 à 10 minutes de traitement d'Apple : le runner
+      # coûte 10× le prix d'un runner Linux à la minute, et l'état final se lit
+      # dans App Store Connect.
+      skip_waiting_for_build_processing: true,
+    )
+  end
+end
