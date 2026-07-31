@@ -207,7 +207,13 @@ describe("quoteDeliveryLabel", () => {
     // API plus ancienne : ni libellé ni drapeau. Le comportement d'avant est
     // conservé — un 0 € y reste une gratuité commerciale.
     assert.equal(quoteDeliveryLabel({ livraisonCents: 0 }), "Livraison offerte");
-    assert.match(quoteDeliveryLabel({ livraisonCents: 2500 }), /Express 24 h/);
+    // 25 € reste VOLONTAIREMENT anonyme : depuis le barème Vaucluse, c'est à la
+    // fois le forfait Express 24 h et le palier « au-delà de 35 km » (Cavaillon,
+    // Apt, Pertuis). Deviner « Express 24 h » sur le montant facturerait au
+    // client une urgence qu'il n'a jamais demandée. Le libellé exact vient du
+    // serveur (`livraisonLabel`), figé à l'émission.
+    assert.equal(quoteDeliveryLabel({ livraisonCents: 2500 }), "Livraison");
+    assert.doesNotMatch(quoteDeliveryLabel({ livraisonCents: 2500 }), /Express/i);
   });
 
   it("ignore un libellé serveur vide plutôt que d'afficher une ligne muette", () => {

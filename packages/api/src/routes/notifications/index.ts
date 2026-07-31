@@ -167,7 +167,12 @@ export default async function notificationRoutes(app: FastifyInstance): Promise<
           required: ["token", "platform"],
           properties: {
             token: { type: "string" },
-            platform: { type: "string", enum: ["ios", "android", "web"] },
+            // PAS d'`enum` ici : Ajv valide AVANT Zod, donc un « iOS » majuscule
+            // partait en 400 sans jamais atteindre la normalisation de casse
+            // juste en dessous — l'enregistrement du push échoue alors en
+            // silence côté mobile. La liste autorisée est tenue par Zod, seul
+            // endroit qui voit la valeur normalisée.
+            platform: { type: "string", description: "ios | android | web (casse indifférente)" },
           },
         },
       },

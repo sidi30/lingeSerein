@@ -160,6 +160,18 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 }
 
+/**
+ * Clé du dernier jeton push enregistré côté serveur.
+ *
+ * Il est conservé localement pour une seule raison : à la déconnexion, il faut
+ * pouvoir DÉSINSCRIRE ce jeton précis, et `getExpoPushTokenAsync` n'est pas
+ * joignable à ce moment-là (module natif absent, permission révoquée, mode
+ * avion). Sans cette trace, le téléphone d'un livreur déconnecté continuerait
+ * de recevoir les affectations de tournée du compte précédent — le push part de
+ * nos serveurs vers Expo sans jamais consulter la session.
+ */
+const PUSH_TOKEN_KEY = "push.deviceToken";
+
 /** Envoie le token à l'API. Silencieux si la route n'existe pas encore (404). */
 async function pushTokenToApi(token: string): Promise<void> {
   try {
@@ -167,8 +179,33 @@ async function pushTokenToApi(token: string): Promise<void> {
       method: "POST",
       body: JSON.stringify({ token, platform: Platform.OS }),
     });
+    await secureStorage.setItem(PUSH_TOKEN_KEY, token);
   } catch {
     // Contrat pas encore livré côté serveur — on n'alerte pas l'utilisateur.
+  }
+}
+
+/**
+ * Désinscrit le jeton de cet appareil. À appeler à la déconnexion, AVANT
+ * d'effacer la session : la route exige le jeton d'accès.
+ *
+ * Best-effort et idempotent — une déconnexion ne doit jamais échouer parce que
+ * le nettoyage a raté. La trace locale est effacée dans tous les cas : garder un
+ * jeton qu'on n'a pas pu supprimer ne sert à rien, et le prochain login en
+ * réenregistrera un.
+ */
+export async function unregisterPushToken(): Promise<void> {
+  try {
+    const token = await secureStorage.getItem(PUSH_TOKEN_KEY);
+    if (!token) return;
+    await apiFetch("/notifications/device-token", {
+      method: "DELETE",
+      body: JSON.stringify({ token }),
+    });
+  } catch {
+    // Réseau, route absente, session déjà expirée : on continue.
+  } finally {
+    await secureStorage.removeItem(PUSH_TOKEN_KEY).catch(() => undefined);
   }
 }
 

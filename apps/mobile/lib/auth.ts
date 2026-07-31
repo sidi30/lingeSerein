@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import type { RegisterInput } from "@lingengo/shared";
 import { apiFetch } from "./api";
+import { unregisterPushToken } from "./notifications";
 import { useAuthStore } from "./store";
 
 interface LoginPayload {
@@ -90,6 +91,9 @@ export function useLogout() {
   return useMutation({
     mutationFn: async () => {
       const refreshToken = useAuthStore.getState().refreshToken;
+      // AVANT de révoquer la session : la désinscription du push exige le jeton
+      // d'accès. Après, elle partirait en 401 et le téléphone resterait abonné.
+      await unregisterPushToken();
       try {
         // Révoque le refresh token côté serveur (best-effort).
         await apiFetch("/auth/logout", {
