@@ -791,27 +791,90 @@ export class QuotesService {
     throw new ConflictError("Impossible de générer un numéro de devis unique");
   }
 
-  // ---- Suppression (soft-delete, BROUILLON uniquement) ----
+  // ---- Suppression (soft-delete) ----
 
+  /**
+   * @param force Confirme la suppression d'un devis qui n'est plus un brouillon.
+   *
+   * Ne contourne JAMAIS les obstacles réels (facture émise, commande, rotation
+   * en cours) : ceux-là refusent la suppression quoi qu'il arrive. `force` ne
+   * lève que la protection de statut, qui existe pour éviter l'effacement
+   * distrait d'une pièce commerciale envoyée au client.
+   */
   async softDelete(
     id: string,
     operatorId: string,
     adminId: string,
     ipAddress?: string,
     userAgent?: string,
+    force = false,
   ) {
     const quote = await this.prisma.quote.findFirst({
       where: { id, operatorId, deletedAt: null },
+      include: {
+        // Ce qui a pu NAÎTRE de ce devis : c'est cela qui décide s'il est encore
+        // effaçable. Une pièce comptable ou du linge dehors rendent la
+        // suppression fausse, pas seulement risquée.
+        invoices: {
+          where: { deletedAt: null, status: { not: "CANCELLED" } },
+          select: { id: true, invoiceNumber: true },
+        },
+        order: { select: { id: true, orderNumber: true, deletedAt: true } },
+        rotations: {
+          where: { deletedAt: null },
+          select: { id: true, status: true },
+        },
+      },
     });
 
     if (!quote) {
       throw new NotFoundError("Devis", id);
     }
 
-    if (quote.status !== "BROUILLON") {
+    // ---- Ce qui INTERDIT la suppression ----
+    //
+    // Règle métier : on ne supprime pas une pièce dont dépend une pièce plus
+    // engageante. Une facture est une obligation comptable ; une rotation en
+    // cours est du textile physiquement chez un client. Les effacer par
+    // ricochet ferait disparaître la trace de l'un ou de l'autre.
+    const obstacles: string[] = [];
+
+    if (quote.invoices.length > 0) {
+      obstacles.push(
+        `facture ${quote.invoices.map((f) => f.invoiceNumber).join(", ")} émise depuis ce devis`,
+      );
+    }
+    if (quote.order && !quote.order.deletedAt) {
+      obstacles.push(`commande ${quote.order.orderNumber} issue de ce devis`);
+    }
+    const rotationsEnCours = quote.rotations.filter(
+      (r) => r.status !== "REPRISE" && r.status !== "ANNULEE",
+    );
+    if (rotationsEnCours.length > 0) {
+      obstacles.push(
+        `${rotationsEnCours.length} rotation(s) en cours — du linge est encore chez le client`,
+      );
+    }
+
+    if (obstacles.length > 0) {
+      throw new ConflictError(
+        `Ce devis ne peut pas être supprimé : ${obstacles.join(" ; ")}. ` +
+          `Supprimez ou annulez d'abord ${obstacles.length > 1 ? "ces éléments" : "cet élément"}.`,
+      );
+    }
+
+    // ---- Ce qui exige une CONFIRMATION ----
+    //
+    // Un brouillon n'a jamais rien engagé : il part sans cérémonie. Un devis
+    // envoyé, accepté ou refusé est une trace commerciale — le supprimer reste
+    // permis puisque rien n'en dépend, mais l'intention doit être explicite.
+    // L'ancien code refusait tout net, ce qui laissait en base des devis de test
+    // impossibles à effacer.
+    if (quote.status !== "BROUILLON" && !force) {
       throw new UnprocessableEntityError(
-        "Seul un devis en brouillon peut être supprimé",
-        "QUOTE_NOT_DELETABLE",
+        `Ce devis est au statut ${quote.status} et n'est plus un brouillon. ` +
+          `Rien n'en dépend : confirmez la suppression pour l'effacer.`,
+        "QUOTE_NOT_DRAFT",
       );
     }
 
@@ -826,7 +889,9 @@ export class QuotesService {
       action: "DELETE",
       entity: "Quote",
       entityId: id,
-      changes: {},
+      // Le statut est tracé : supprimer un ACCEPTE n'a pas le même sens que
+      // jeter un brouillon, et c'est la seule trace qu'il en restera.
+      changes: { numero: quote.numero, status: quote.status, ...(force ? { force: true } : {}) },
       ipAddress,
       userAgent,
     });

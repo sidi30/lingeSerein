@@ -403,14 +403,27 @@ export default async function quoteRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // ---- DELETE /quotes/:id (soft-delete) ----
-  app.delete<{ Params: { id: string } }>(
+  app.delete<{ Params: { id: string }; Querystring: { force?: string } }>(
     "/:id",
     {
       preHandler: adminMiddleware,
       schema: {
         tags: ["Devis"],
-        summary: "Supprimer un devis (soft-delete, BROUILLON uniquement)",
+        summary: "Supprimer un devis",
+        description:
+          "Refusé tant qu'une facture, une commande ou une rotation en cours dépend du devis — " +
+          "`force` n'y change rien. Un brouillon part sans confirmation ; un devis envoyé, " +
+          "accepté ou refusé dont rien ne dépend exige `force=1`.",
         security: [{ bearerAuth: [] }],
+        querystring: {
+          type: "object",
+          properties: {
+            force: {
+              type: "string",
+              description: "« 1 » ou « true » : confirme la suppression d'un devis non brouillon.",
+            },
+          },
+        },
       },
     },
     async (request, reply) => {
@@ -422,12 +435,14 @@ export default async function quoteRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const operatorId = await getOperatorId(request.user.sub);
+      const force = request.query.force === "1" || request.query.force === "true";
       const result = await service.softDelete(
         paramsParsed.data.id,
         operatorId,
         request.user.sub,
         request.ip,
         request.headers["user-agent"],
+        force,
       );
 
       return reply.send({ success: true, data: result });

@@ -226,21 +226,23 @@ export default function DevisListPage() {
                         </span>
                       </Td>
                       <Td className="text-right">
-                        {/* L'API n'autorise la suppression qu'en BROUILLON
-                            (quotes.service.ts, 422 QUOTE_NOT_DELETABLE) : au-delà
-                            le bouton est désactivé avec sa raison, jamais
-                            cliquable pour rien. */}
+                        {/* Hors brouillon, `force=1` : ce qui protège un devis,
+                            ce n'est pas son statut mais ce qui en DÉPEND. L'API
+                            refuse dès qu'une facture, une commande ou une
+                            rotation en cours s'y appuie, en nommant l'obstacle
+                            (quotes.service.ts). Un devis de test envoyé et sans
+                            suite restait sinon en base pour toujours. */}
                         <DeleteAction
-                          endpoint={`/quotes/${quote.id}`}
+                          endpoint={`/quotes/${quote.id}${quote.status === "BROUILLON" ? "" : "?force=1"}`}
                           itemLabel={`le devis ${quote.numero}`}
                           title="Supprimer ce devis ?"
-                          description={`Le devis ${quote.numero} (${quote.clientNom}) sera retiré de vos listes. Cette action n'est pas réversible depuis l'admin.`}
-                          successMessage="Devis supprimé"
-                          disabledReason={
+                          description={
                             quote.status === "BROUILLON"
-                              ? null
-                              : "Seul un devis en brouillon peut être supprimé — un devis envoyé garde une trace de ce qui a été proposé au client."
+                              ? `Le devis ${quote.numero} (${quote.clientNom}) sera retiré de vos listes. Cette action n'est pas réversible depuis l'admin.`
+                              : `Le devis ${quote.numero} (${quote.clientNom}) n'est plus un brouillon : il garde la trace de ce qui a été proposé au client. ` +
+                                `La suppression sera refusée si une facture, une commande ou une rotation en cours en dépend.`
                           }
+                          successMessage="Devis supprimé"
                           scopes={["quote"]}
                         />
                       </Td>

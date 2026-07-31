@@ -349,14 +349,28 @@ export default async function rotationRoutes(app: FastifyInstance): Promise<void
   );
 
   // ---- DELETE /rotations/:id (soft-delete) ----
-  app.delete<{ Params: { id: string } }>(
+  app.delete<{ Params: { id: string }; Querystring: { force?: string } }>(
     "/:id",
     {
       preHandler: adminMiddleware,
       schema: {
         tags: ["Rotations"],
-        summary: "Supprimer une rotation (soft-delete, reprise ou annulée uniquement)",
+        summary: "Supprimer une rotation",
+        description:
+          "Sans `force`, seule une rotation reprise ou annulée peut être supprimée : effacer " +
+          "une rotation dont le linge est dehors ferait disparaître la trace de ce qu'il faut " +
+          "récupérer. Avec `force=1`, la rotation est ANNULÉE d'abord — le linge revient alors " +
+          "en stock — puis supprimée, dans la même transaction.",
         security: [{ bearerAuth: [] }],
+        querystring: {
+          type: "object",
+          properties: {
+            force: {
+              type: "string",
+              description: "« 1 » ou « true » : annuler la rotation avant de la supprimer.",
+            },
+          },
+        },
       },
     },
     async (request, reply) => {
@@ -368,12 +382,17 @@ export default async function rotationRoutes(app: FastifyInstance): Promise<void
       }
 
       const operatorId = await getOperatorId(request.user.sub);
+      // Le drapeau vient d'une chaîne de requête : « 1 » et « true » sont
+      // acceptés, tout le reste vaut non. Une annulation de stock ne doit pas
+      // dépendre d'une coquille dans l'URL.
+      const force = request.query.force === "1" || request.query.force === "true";
       const result = await service.softDelete(
         paramsParsed.data.id,
         operatorId,
         request.user.sub,
         request.ip,
         request.headers["user-agent"],
+        force,
       );
 
       return reply.send({ success: true, data: result });

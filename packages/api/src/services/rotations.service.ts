@@ -881,12 +881,27 @@ export class RotationsService {
 
   // ---- Soft-delete ----
 
+  /**
+   * @param force Supprime AUSSI une rotation en cours, en l'annulant d'abord.
+   *
+   * Sans ce drapeau, une rotation PLANIFIEE ou LIVREE est indéléguable : l'écran
+   * offrait un bouton Supprimer qui répondait toujours « Seule une rotation
+   * reprise ou annulée peut être supprimée », sans jamais dire quoi faire — un
+   * cul-de-sac constaté en production sur la rotation « hotel me ».
+   *
+   * Le refus avait pourtant une bonne raison : effacer une rotation dont le
+   * linge est dehors fait disparaître la seule trace de ce qu'il faut aller
+   * récupérer, ET laisse ce linge compté en circulation à vie. `force` ne
+   * contourne donc pas la règle, il exécute la sortie légitime : annuler
+   * (ce qui REND le linge au stock quand il en était sorti), puis supprimer.
+   */
   async softDelete(
     id: string,
     operatorId: string,
     adminId: string,
     ipAddress?: string,
     userAgent?: string,
+    force = false,
   ) {
     const rotation = await this.prisma.rotation.findFirst({
       where: { id, operatorId, deletedAt: null },
@@ -897,18 +912,27 @@ export class RotationsService {
       throw new NotFoundError("Rotation", id);
     }
 
-    // Supprimer une rotation dont le linge est encore dehors ferait disparaître
-    // la seule trace de ce qu'il faut aller récupérer.
-    if (rotation.status !== "ANNULEE" && rotation.status !== "REPRISE") {
+    const enCours = rotation.status !== "ANNULEE" && rotation.status !== "REPRISE";
+
+    if (enCours && !force) {
       throw new UnprocessableEntityError(
-        "Seule une rotation reprise ou annulée peut être supprimée",
+        "Cette rotation suit du linge encore dehors. Annulez-la d'abord " +
+          "(le linge revient alors en stock), ou supprimez-la en confirmant l'annulation.",
         "ROTATION_NOT_DELETABLE",
       );
     }
 
-    await this.prisma.rotation.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    // Une seule transaction : une rotation effacée dont le stock n'a pas été
+    // rendu est irrattrapable sans inventaire manuel.
+    await this.prisma.$transaction(async (tx) => {
+      if (enCours) {
+        if (rotation.sortieStockAt) {
+          await StockItemsService.recordAnnulation(tx, operatorId, rotation.lignes);
+        }
+        await tx.rotation.update({ where: { id }, data: { status: "ANNULEE" } });
+      }
+
+      await tx.rotation.update({ where: { id }, data: { deletedAt: new Date() } });
     });
 
     await createAuditLog({
@@ -917,12 +941,23 @@ export class RotationsService {
       action: "DELETE",
       entity: "Rotation",
       entityId: id,
-      changes: { status: rotation.status },
+      changes: {
+        status: rotation.status,
+        ...(enCours
+          ? {
+              annuleeAvantSuppression: true,
+              // Tracé explicitement : c'est la seule trace du mouvement de parc
+              // qu'a provoqué une suppression.
+              stockRendu: Boolean(rotation.sortieStockAt),
+              articles: rotation.lignes.reduce((n, l) => n + l.qtyLivree, 0),
+            }
+          : {}),
+      },
       ipAddress,
       userAgent,
     });
 
-    return { id, deleted: true };
+    return { id, deleted: true, annulee: enCours };
   }
 
   // ---- Récapitulatif d'exploitation ----

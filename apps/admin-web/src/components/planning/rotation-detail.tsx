@@ -37,6 +37,14 @@ export function RotationDetail({ rotation, onClose }: RotationDetailProps) {
 
   const lateDays = rotation ? lateDaysOf(rotation) : 0;
 
+  // « En cours » = du linge est encore dehors au sens du suivi. C'est ce qui
+  // décide du ton de la suppression : simple effacement d'une rotation soldée,
+  // ou annulation avec retour de stock.
+  const enCours = Boolean(
+    rotation && rotation.status !== "REPRISE" && rotation.status !== "ANNULEE",
+  );
+  const articlesDehors = (rotation?.lignes ?? []).reduce((n, l) => n + remainingQty(l), 0);
+
   // À l'ouverture d'une rotation, on pré-remplit avec ce qu'il reste à
   // récupérer : le cas courant est « tout est revenu », l'admin valide sans
   // rien saisir et ne corrige que les manquants.
@@ -176,23 +184,37 @@ export function RotationDetail({ rotation, onClose }: RotationDetailProps) {
         {/* Saisie de la reprise */}
         {!repriseOpen ? (
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {/* Supprimer une rotation dont le linge est encore dehors ferait
-                disparaître la seule trace de ce qu'il faut aller récupérer :
-                l'API ne l'autorise qu'une fois reprise ou annulée. */}
+            {/* Une rotation en cours suit du linge encore dehors : l'effacer
+                sèchement ferait disparaître la trace de ce qu'il faut récupérer
+                ET laisserait ce linge compté en circulation à vie. Le bouton
+                était donc simplement désactivé — cul-de-sac constaté en
+                production, l'utilisateur n'avait aucun moyen de s'en sortir.
+                On propose maintenant la sortie légitime : l'API annule la
+                rotation (ce qui REND le linge au stock) avant de la supprimer,
+                et la modale dit exactement ce que ça déplace. */}
             <span className="mr-auto">
               <DeleteAction
-                endpoint={`/rotations/${rotation.id}`}
+                endpoint={`/rotations/${rotation.id}${enCours ? "?force=1" : ""}`}
                 itemLabel={`la rotation de ${rotation.clientNom}`}
                 label="Supprimer"
-                title="Supprimer cette rotation ?"
-                description={`La rotation de ${rotation.clientNom} et ses lignes seront supprimées. Les mouvements de stock déjà enregistrés ne sont pas annulés.`}
-                successMessage="Rotation supprimée"
-                disabledReason={
-                  rotation.status === "REPRISE" || rotation.status === "ANNULEE"
-                    ? null
-                    : "Le linge de cette rotation est encore chez le client : elle ne peut être supprimée qu'une fois reprise ou annulée."
+                title={
+                  enCours ? "Annuler et supprimer cette rotation ?" : "Supprimer cette rotation ?"
                 }
-                scopes={["rotation"]}
+                description={
+                  enCours
+                    ? `La rotation de ${rotation.clientNom} sera d'abord ANNULÉE, puis supprimée. ` +
+                      `Les ${articlesDehors} article(s) qu'elle suit sont considérés comme jamais sortis ` +
+                      `et reviennent en stock. À ne faire que si ce linge est bien en réserve : ` +
+                      `s'il est réellement chez le client, enregistrez plutôt la reprise.`
+                    : `La rotation de ${rotation.clientNom} et ses lignes seront supprimées. ` +
+                      `Les mouvements de stock déjà enregistrés ne sont pas rejoués.`
+                }
+                successMessage={enCours ? "Rotation annulée et supprimée" : "Rotation supprimée"}
+                confirmLabel={enCours ? "Annuler et supprimer" : "Supprimer"}
+                // Le stock bouge : on invalide aussi cette famille, sinon l'écran
+                // Stock continue d'afficher du linge en circulation qui vient de
+                // rentrer.
+                scopes={["rotation", "stock"]}
                 onDeleted={onClose}
               />
             </span>

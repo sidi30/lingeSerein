@@ -315,22 +315,24 @@ export default function DevisDetailPage() {
                 Convertir en commande
               </Button>
             )}
-            {/* Désactivé plutôt que masqué hors brouillon : la règle (« un devis
-                envoyé garde la trace de ce qui a été proposé ») est utile à
-                lire, l'absence de bouton ne l'enseigne pas. */}
+            {/* Hors brouillon, la suppression reste possible mais demande une
+                confirmation explicite (`force=1`) : ce qui protège vraiment,
+                c'est la dépendance, pas le statut. L'API refuse de toute façon
+                dès qu'une facture, une commande ou une rotation en cours
+                s'appuie sur ce devis — et le dit en nommant l'obstacle. */}
             <DeleteAction
-              endpoint={`/quotes/${quote.id}`}
+              endpoint={`/quotes/${quote.id}${canDelete ? "" : "?force=1"}`}
               itemLabel={`le devis ${quote.numero}`}
               label="Supprimer"
               variant="danger"
               title="Supprimer le devis ?"
-              description={`Le devis ${quote.numero} (${quote.clientNom}) sera supprimé définitivement. Cette action est irréversible.`}
-              successMessage="Devis supprimé"
-              disabledReason={
+              description={
                 canDelete
-                  ? null
-                  : "Seul un devis en brouillon peut être supprimé — un devis envoyé garde une trace de ce qui a été proposé au client."
+                  ? `Le devis ${quote.numero} (${quote.clientNom}) sera supprimé définitivement. Cette action est irréversible.`
+                  : `Le devis ${quote.numero} (${quote.clientNom}) n'est plus un brouillon : il garde la trace de ce qui a été proposé au client. ` +
+                    `La suppression sera refusée si une facture, une commande ou une rotation en cours en dépend.`
               }
+              successMessage="Devis supprimé"
               scopes={["quote"]}
               removeKeys={[["quote", id]]}
               onDeleted={() => router.push("/devis")}
