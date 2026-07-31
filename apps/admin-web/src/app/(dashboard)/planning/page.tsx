@@ -190,6 +190,7 @@ export default function PlanningPage() {
               <>
                 <RotationCalendar
                   events={events}
+                  rotations={filtered}
                   mode={mode}
                   onModeChange={setMode}
                   month={month}

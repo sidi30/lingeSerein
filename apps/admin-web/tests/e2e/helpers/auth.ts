@@ -15,14 +15,31 @@ import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./fixtures";
  * le formulaire pour de vrai.
  */
 export async function loginAsAdmin(page: Page): Promise<void> {
-  const token = await getAdminToken();
-  await page.addInitScript(
-    ([cle, valeur]) => window.localStorage.setItem(cle as string, valeur as string),
-    ["linge_serein_token", token],
-  );
+  const poser = async (token: string) => {
+    await page.addInitScript(
+      ([cle, valeur]) => window.localStorage.setItem(cle as string, valeur as string),
+      ["linge_serein_token", token],
+    );
+    await page.goto("/");
+    try {
+      await page.waitForURL((url) => !url.pathname.includes("/login"), { timeout: 10_000 });
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
-  await page.goto("/");
-  await page.waitForURL((url) => !url.pathname.includes("/login"), { timeout: 10_000 });
+  if (await poser(await getAdminToken())) return;
+
+  // Retombé sur /login : le jeton mis en cache n'était plus accepté (expiration
+  // en cours de suite, redémarrage de l'API). On en redemande un NEUF plutôt
+  // que de laisser un scénario correct échouer sur une session périmée — c'est
+  // exactement ce qu'un humain ferait, et ça ne masque aucun défaut applicatif :
+  // un vrai refus d'authentification échouerait aussi à la seconde tentative.
+  const neuf = await getAdminToken({ force: true });
+  if (!(await poser(neuf))) {
+    throw new Error("loginAsAdmin : session refusée même avec un jeton neuf");
+  }
 }
 
 /** Connexion par le VRAI formulaire — réservée aux scénarios qui testent le login. */
@@ -51,9 +68,9 @@ let _tokenExpiry = 0;
  * Get a JWT token via direct API call (faster, no UI overhead).
  * Caches the token for 10 minutes to avoid rate limits.
  */
-export async function getAdminToken(): Promise<string> {
+export async function getAdminToken(options: { force?: boolean } = {}): Promise<string> {
   const now = Date.now();
-  if (_cachedToken && now < _tokenExpiry) {
+  if (!options.force && _cachedToken && now < _tokenExpiry) {
     return _cachedToken;
   }
 
@@ -78,7 +95,7 @@ export async function getAdminToken(): Promise<string> {
     const token = json?.data?.accessToken;
     if (!token) throw new Error(`No accessToken in response: ${JSON.stringify(json)}`);
     _cachedToken = token;
-    _tokenExpiry = now + 10 * 60 * 1000; // cache 10 min
+    _tokenExpiry = now + 5 * 60 * 1000; // cache 5 min — bien en deçà des 15 min du jeton
     return token;
   }
   throw new Error("Failed to get token after retries (rate limited)");

@@ -41,6 +41,13 @@ export interface RotationDTO {
   id: string;
   clientNom: string;
   clientAdresse: string | null;
+  /**
+   * Compte client rattaché, `null` sur une rotation saisie à la main (le modèle
+   * est un instantané : tous les clients n'ont pas de compte). Sert de clé
+   * d'identité stable pour la couleur du planning — le nom, lui, peut être
+   * corrigé.
+   */
+  userId?: string | null;
   formule: RotationFormule;
   status: RotationStatus;
   dateLivraison: string;
