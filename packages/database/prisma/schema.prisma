@@ -141,6 +141,10 @@ enum NotificationType {
   ROTATION_TODAY
   ROTATION_OVERDUE
   ROTATION_PICKED_UP
+  /// Sollicitation « nous passons dans votre commune » — c'est une proposition
+  /// COMMERCIALE, pas un rappel de contrat : elle se désactive séparément des
+  /// notifications de rotation, et le plafond anti-harcèlement s'applique.
+  PASSAGE_OPPORTUNITY
   DELIVERY_REMINDER
   DELIVERY_CONFIRMED
   DELIVERY_CANCELLED
@@ -210,15 +214,16 @@ model Operator {
   updatedAt     DateTime  @updatedAt @map("updated_at")
   deletedAt     DateTime? @map("deleted_at")
 
-  zones              DeliveryZone[]
-  users              User[]
-  products           Product[]
-  deliveryRounds     DeliveryRound[]
-  invoices           Invoice[]
-  quotes             Quote[]
-  rotations          Rotation[]
-  stockItems         StockItem[]
-  subscriptionConfig SubscriptionConfig? // V2 — config Pack Sérénité (ADR-V2-002)
+  zones                DeliveryZone[]
+  users                User[]
+  products             Product[]
+  deliveryRounds       DeliveryRound[]
+  invoices             Invoice[]
+  quotes               Quote[]
+  rotations            Rotation[]
+  stockItems           StockItem[]
+  subscriptionConfig   SubscriptionConfig? // V2 — config Pack Sérénité (ADR-V2-002)
+  passageOpportunities PassageOpportunity[]
 
   @@map("operators")
 }
@@ -301,6 +306,7 @@ model User {
   deliveryStops        DeliveryStop[]        @relation("ClientStops")
   deliveredStops       DeliveryStop[]        @relation("DriverStops")
   deliveryRounds       DeliveryRound[]       @relation("DriverRounds")
+  passageResponses     PassageResponse[]
   invoices             Invoice[]
   auditLogs            AuditLog[]
   quotesAsClient       Quote[]               @relation("QuoteClient")
@@ -652,10 +658,11 @@ model DeliveryRound {
   createdAt   DateTime            @default(now()) @map("created_at")
   updatedAt   DateTime            @updatedAt @map("updated_at")
 
-  operator Operator       @relation(fields: [operatorId], references: [id])
-  zone     DeliveryZone?  @relation(fields: [zoneId], references: [id])
-  driver   User           @relation("DriverRounds", fields: [driverId], references: [id])
-  stops    DeliveryStop[]
+  operator      Operator             @relation(fields: [operatorId], references: [id])
+  zone          DeliveryZone?        @relation(fields: [zoneId], references: [id])
+  driver        User                 @relation("DriverRounds", fields: [driverId], references: [id])
+  stops         DeliveryStop[]
+  opportunities PassageOpportunity[]
 
   @@index([date])
   @@index([driverId])
@@ -1093,4 +1100,88 @@ model DeliverySchedule {
   @@unique([zoneId, dayOfWeek])
   @@index([zoneId])
   @@map("delivery_schedules")
+}
+
+// ============================================================================
+// Passage groupé — « nous passons déjà dans votre commune »
+// ============================================================================
+
+/// Ce que le client répond à la proposition.
+enum PassageResponseKind {
+  /// Il veut du linge propre : livraison au palier de sa commune, remisée de 50 %.
+  LIVRAISON
+  /// Il veut seulement rendre son linge sale : gratuit, le camion repart plein.
+  REPRISE
+  /// Les deux à la fois — cas le plus fréquent d'une rotation.
+  LIVRAISON_ET_REPRISE
+  /// Il décline. Enregistré volontairement : sans « non », impossible de
+  /// distinguer un client qui refuse d'un client qu'on n'a pas su joindre.
+  AUCUN
+}
+
+/// Par où la réponse est arrivée. Le téléphone reste le canal réel de beaucoup
+/// d'hôteliers : l'admin la saisit à leur place, et on garde la trace du canal.
+enum PassageResponseSource {
+  MOBILE
+  TELEPHONE
+  ADMIN
+}
+
+/// Créneau de passage déjà planifié dans une commune, ouvert aux autres clients
+/// de cette commune.
+///
+/// Créé par le cron de la veille à partir des tournées PLANIFIÉES : une
+/// opportunité n'existe JAMAIS sans passage réellement prévu, sinon la remise de
+/// 50 % deviendrait un tarif permanent déguisé.
+model PassageOpportunity {
+  id           String   @id @default(uuid()) @db.Uuid
+  operatorId   String   @map("operator_id") @db.Uuid
+  roundId      String   @map("round_id") @db.Uuid
+  /// Commune concernée — code INSEE, la même clé que `User.communeInsee`.
+  communeInsee String   @map("commune_insee") @db.VarChar(5)
+  /// Nom lisible figé à la création : le référentiel peut évoluer, le message
+  /// envoyé au client, lui, ne doit pas changer de sens après coup.
+  communeNom   String   @map("commune_nom") @db.VarChar(120)
+  /// Jour du passage.
+  date         DateTime @db.Date
+  /// Au-delà, la proposition n'est plus recevable (le camion est parti).
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  operator  Operator          @relation(fields: [operatorId], references: [id])
+  round     DeliveryRound     @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  responses PassageResponse[]
+
+  /// Idempotence du cron : une seule opportunité par (tournée, commune), même si
+  /// le cron est rejoué à la main ou retenté par BullMQ.
+  @@unique([roundId, communeInsee])
+  @@index([date])
+  @@index([communeInsee, date])
+  @@map("passage_opportunities")
+}
+
+/// Réponse d'un client à une proposition de passage groupé.
+model PassageResponse {
+  id            String                @id @default(uuid()) @db.Uuid
+  opportunityId String                @map("opportunity_id") @db.Uuid
+  userId        String                @map("user_id") @db.Uuid
+  kind          PassageResponseKind
+  source        PassageResponseSource @default(MOBILE)
+  /// Ce que le client précise (« 4 kits bain », « après 14 h ») — texte libre,
+  /// c'est souvent là que se trouve l'information utile au livreur.
+  message       String?               @db.Text
+  /// Commande passée dans la foulée, quand il y en a une.
+  orderId       String?               @map("order_id") @db.Uuid
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+
+  opportunity PassageOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Un client, une réponse par créneau : répondre à nouveau CORRIGE la réponse
+  /// au lieu d'en empiler une seconde, qui laisserait le livreur arbitrer entre
+  /// deux intentions contradictoires.
+  @@unique([opportunityId, userId])
+  @@index([userId])
+  @@map("passage_responses")
 }

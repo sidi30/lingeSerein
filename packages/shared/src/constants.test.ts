@@ -12,6 +12,9 @@ import {
   DELIVERY_DEFAULTS,
   SUBSCRIPTION_DEFAULTS,
   computeDeliveryFee,
+  PASSAGE_GROUPE,
+  PASSAGE_GROUPE_TEXT,
+  passageGroupeFeeCents,
   computePackSereniteComparison,
   deliveryLabelFromCents,
   urgencyFromDelaiJours,
@@ -265,5 +268,78 @@ describe("cohérence de la dotation d'abonnement", () => {
       CATALOG_DEFAULTS.KIT_COMPLET_DISCOUNT_CENTS;
     assert.equal(CATALOG_DEFAULTS.KIT_COMPLET_CENTS, attendu);
     assert.equal(CATALOG_DEFAULTS.KIT_COMPLET_CENTS, 2900);
+  });
+});
+
+describe("passage groupé — la SEULE remise sur la livraison", () => {
+  it("facture la moitié du palier de la commune", () => {
+    const fee = computeDeliveryFee({
+      zone: "INTERMEDIAIRE",
+      montantApresRemiseCents: 5000,
+      passageGroupe: true,
+    });
+    // Avignon : 15 € plein tarif, 7,50 € quand le camion y passe déjà.
+    assert.equal(fee.cents, 750);
+    assert.equal(fee.passageGroupe, true);
+    assert.match(fee.label, /passage déjà prévu/i);
+  });
+
+  it("remise chaque palier payant, arrondi au centime supérieur", () => {
+    assert.equal(passageGroupeFeeCents("PROCHE"), 600);
+    assert.equal(passageGroupeFeeCents("INTERMEDIAIRE"), 750);
+    assert.equal(passageGroupeFeeCents("ELOIGNE"), 1250);
+  });
+
+  it("ne facture toujours rien à Orange : il n'y avait rien à remiser", () => {
+    assert.equal(passageGroupeFeeCents("ORANGE"), 0);
+    const fee = computeDeliveryFee({
+      zone: "ORANGE",
+      montantApresRemiseCents: 5000,
+      passageGroupe: true,
+    });
+    assert.equal(fee.cents, 0);
+  });
+
+  it("NE remise PAS un forfait d'urgence — le déplacement y reste dédié", () => {
+    for (const urgency of ["EXPRESS_24H", "JOUR_MEME"] as const) {
+      const fee = computeDeliveryFee({
+        zone: "PROCHE",
+        montantApresRemiseCents: 5000,
+        urgency,
+        passageGroupe: true,
+      });
+      assert.equal(fee.cents, urgencyTier(urgency).feeCents, urgency);
+      assert.notEqual(fee.passageGroupe, true, urgency);
+    }
+  });
+
+  it("laisse le hors zone sur devis : il n'existe aucun tarif à diviser", () => {
+    const fee = computeDeliveryFee({
+      zone: "HORS_ZONE",
+      montantApresRemiseCents: 5000,
+      passageGroupe: true,
+    });
+    assert.equal(fee.surDevis, true);
+    assert.equal(fee.cents, 0);
+  });
+
+  it("ne réintroduit aucun frais quand la livraison est déjà offerte au seuil", () => {
+    const fee = computeDeliveryFee({
+      zone: "ELOIGNE",
+      montantApresRemiseCents: DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS,
+      passageGroupe: true,
+    });
+    assert.equal(fee.cents, 0);
+    assert.equal(fee.offerte, true);
+  });
+
+  it("rend la reprise du linge sale gratuite", () => {
+    assert.equal(PASSAGE_GROUPE.REPRISE_CENTS, 0);
+  });
+
+  it("annonce la remise dans les mêmes termes partout", () => {
+    assert.match(PASSAGE_GROUPE_TEXT, /50 % moins cher/);
+    assert.match(PASSAGE_GROUPE_TEXT, /reprise .* gratuite/i);
+    assert.match(PASSAGE_GROUPE_TEXT, /ne s'applique pas aux forfaits d'urgence/i);
   });
 });

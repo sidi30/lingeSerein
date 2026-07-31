@@ -5,12 +5,15 @@ import { CalendarDays, Search } from "lucide-react";
 import { SUBSCRIPTION_DEFAULTS } from "@lingengo/shared";
 import { Header } from "@/components/header";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ModuleUnavailable } from "@/components/ui/module-unavailable";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RotationCalendar, type CalendarMode } from "@/components/planning/rotation-calendar";
 import { RotationDetail } from "@/components/planning/rotation-detail";
 import { RoundsTab } from "@/components/planning/rounds-tab";
+import { PassagesPanel } from "@/components/planning/passages-panel";
+import { RotationCreateModal } from "@/components/planning/rotation-create-modal";
 import { addDays, dayKey, monthGrid, nextSevenDays } from "@/lib/calendar";
 import {
   ROTATION_STATUSES,
@@ -32,6 +35,7 @@ export default function PlanningPage() {
   const [status, setStatus] = useState<RotationStatus | "">("");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<RotationDTO | null>(null);
+  const [creation, setCreation] = useState(false);
 
   /**
    * Fenêtre demandée à l'API.
@@ -111,7 +115,12 @@ export default function PlanningPage() {
         </div>
 
         {tab === "tournees" ? (
-          <RoundsTab />
+          <div className="space-y-6">
+            {/* Ce que les clients ont répondu aux passages annoncés : c'est ici
+                qu'on décide d'ajouter un arrêt à la tournée du lendemain. */}
+            <PassagesPanel />
+            <RoundsTab />
+          </div>
         ) : (
           <div className="space-y-4">
             {/* Filtres */}
@@ -205,7 +214,15 @@ export default function PlanningPage() {
                     description={
                       search
                         ? "Aucun client ne correspond à cette recherche."
-                        : "Les livraisons et reprises apparaîtront ici dès qu'une commande sera livrée."
+                        : "Une rotation naît d'un dépôt de linge : créez-la ici, ou depuis une facture. " +
+                          "Sans rotation, le calendrier reste vide et aucun rappel de reprise ne part."
+                    }
+                    // Un état vide qui n'offre aucune action est un cul-de-sac :
+                    // le planning restait vide sans jamais dire comment le remplir.
+                    action={
+                      search ? undefined : (
+                        <Button onClick={() => setCreation(true)}>Créer une rotation</Button>
+                      )
                     }
                   />
                 )}
@@ -216,6 +233,7 @@ export default function PlanningPage() {
       </div>
 
       <RotationDetail rotation={selected} onClose={() => setSelected(null)} />
+      {creation && <RotationCreateModal onClose={() => setCreation(false)} />}
     </>
   );
 }

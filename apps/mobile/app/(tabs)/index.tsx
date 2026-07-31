@@ -23,9 +23,11 @@ import {
   useDashboardKpis,
   useDashboardAlerts,
   useTodayRound,
+  usePassagesMine,
+  useRepondrePassage,
   formatCents,
 } from "@/lib/api";
-import type { Order, DashboardAlert, DeliveryStop } from "@/lib/api";
+import type { Order, DashboardAlert, DeliveryStop, PassageOpportunite } from "@/lib/api";
 import { buildClientStockView } from "@/lib/stock-summary";
 import { orderTotals } from "@/lib/order-total";
 import { colors, font, spacing, radius } from "@/lib/theme";
@@ -89,6 +91,7 @@ function ClientHome() {
   const subConfig = useSubscriptionConfig();
   const orders = useOrders();
   const rotations = useMyRotations();
+  const passages = usePassagesMine();
 
   const isLoading = profile.isLoading || stock.isLoading || sub.isLoading || orders.isLoading;
   const refreshing =
@@ -100,6 +103,7 @@ function ClientHome() {
     void subConfig.refetch();
     void orders.refetch();
     void rotations.refetch();
+    void passages.refetch();
   };
 
   if (isLoading && !profile.data) {
@@ -160,6 +164,11 @@ function ClientHome() {
           </View>
         )}
       </LinearGradient>
+
+      {/* Passage déjà prévu dans la commune — la seule remise de livraison */}
+      {(passages.data ?? []).map((p) => (
+        <PassageCard key={p.id} passage={p} />
+      ))}
 
       {/* Mini stock donut */}
       <Pressable
@@ -755,6 +764,97 @@ function DriverHome() {
 
 // ─── Router ──────────────────────────────────────────────────────
 
+/**
+ * « Nous passons à Avignon demain ».
+ *
+ * Deux gestes seulement, parce que le client répond depuis son téléphone entre
+ * deux chambres : je veux du linge (livraison remisée) ou je rends le sale
+ * (gratuit). Le troisième bouton fait les deux, cas le plus fréquent d'une
+ * rotation. Le prix barré est affiché : sans lui, la remise ne se voit pas.
+ */
+function PassageCard({ passage }: { passage: PassageOpportunite }) {
+  const repondre = useRepondrePassage();
+  const dejaRepondu = passage.reponse?.kind ?? null;
+
+  const jour = parseYmd(passage.date).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+
+  const choisir = (kind: "LIVRAISON" | "REPRISE" | "LIVRAISON_ET_REPRISE") =>
+    repondre.mutate({ id: passage.id, kind });
+
+  return (
+    <Animated.View entering={FadeInDown.duration(300)}>
+      <Card style={styles.passageCard}>
+        <View style={styles.passageHeader}>
+          <Ionicons name="navigate-circle" size={22} color={colors.primary} />
+          <Text style={styles.passageTitle}>Nous passons à {passage.communeNom}</Text>
+        </View>
+        <Text style={styles.passageDate}>{jour}</Text>
+
+        <Text style={styles.passageOffre}>
+          Livraison{" "}
+          <Text style={styles.passagePrixBarre}>
+            {formatCents(passage.livraisonPleinTarifCents)}
+          </Text>{" "}
+          <Text style={styles.passagePrix}>{formatCents(passage.livraisonCents)}</Text> · reprise de
+          votre linge sale gratuite
+        </Text>
+
+        {dejaRepondu && dejaRepondu !== "AUCUN" ? (
+          <View style={styles.passageConfirme}>
+            <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+            <Text style={styles.passageConfirmeText}>
+              {dejaRepondu === "REPRISE"
+                ? "C'est noté : nous récupérons votre linge sale."
+                : dejaRepondu === "LIVRAISON"
+                  ? "C'est noté : nous vous apportons du linge propre."
+                  : "C'est noté : reprise du sale et livraison de propre."}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.passageActions}>
+            <Pressable
+              style={[styles.passageBtn, styles.passageBtnPrimary]}
+              onPress={() => choisir("LIVRAISON_ET_REPRISE")}
+              disabled={repondre.isPending}
+              accessibilityRole="button"
+              accessibilityLabel="Je rends mon linge sale et je veux du propre"
+            >
+              <Text style={styles.passageBtnPrimaryText}>Les deux</Text>
+            </Pressable>
+            <Pressable
+              style={styles.passageBtn}
+              onPress={() => choisir("LIVRAISON")}
+              disabled={repondre.isPending}
+              accessibilityRole="button"
+              accessibilityLabel="Je veux du linge propre"
+            >
+              <Text style={styles.passageBtnText}>Du linge propre</Text>
+            </Pressable>
+            <Pressable
+              style={styles.passageBtn}
+              onPress={() => choisir("REPRISE")}
+              disabled={repondre.isPending}
+              accessibilityRole="button"
+              accessibilityLabel="Je rends mon linge sale, gratuitement"
+            >
+              <Text style={styles.passageBtnText}>Je rends mon sale</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* Le téléphone reste ouvert : tout le monde ne répond pas dans l'app. */}
+        <Text style={styles.passageHint}>
+          Vous pouvez aussi nous appeler — nous notons votre passage.
+        </Text>
+      </Card>
+    </Animated.View>
+  );
+}
+
 export default function HomeScreen() {
   const role = useAuthStore((s) => s.user?.role);
   if (role === "ROLE_ADMIN" || role === "ROLE_SUPER_ADMIN") return <AdminHome />;
@@ -794,6 +894,86 @@ const styles = StyleSheet.create({
     fontWeight: font.weights.semibold,
     color: colors.textInverse,
     marginTop: spacing.xs,
+  },
+  // Passage groupé
+  passageCard: {
+    marginBottom: spacing.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
+  },
+  passageHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  passageTitle: {
+    fontSize: font.sizes.lg,
+    fontWeight: font.weights.bold,
+    color: colors.textPrimary,
+    flexShrink: 1,
+  },
+  passageDate: {
+    fontSize: font.sizes.sm,
+    color: colors.textSecondary,
+    textTransform: "capitalize",
+    marginTop: 2,
+  },
+  passageOffre: {
+    fontSize: font.sizes.sm,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
+  },
+  passagePrixBarre: {
+    textDecorationLine: "line-through",
+    color: colors.textTertiary,
+  },
+  passagePrix: {
+    fontWeight: font.weights.bold,
+    color: colors.textPrimary,
+  },
+  passageActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  passageBtn: {
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  passageBtnText: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.semibold,
+    color: colors.textPrimary,
+  },
+  passageBtnPrimary: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  passageBtnPrimaryText: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.bold,
+    color: colors.textInverse,
+  },
+  passageConfirme: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  passageConfirmeText: {
+    fontSize: font.sizes.sm,
+    color: colors.textSecondary,
+    flexShrink: 1,
+  },
+  passageHint: {
+    fontSize: font.sizes.xs,
+    color: colors.textTertiary,
+    marginTop: spacing.sm,
   },
   // Stock mini
   stockCard: {},

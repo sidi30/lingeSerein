@@ -22,6 +22,7 @@ import dashboardRoutes from "./routes/dashboard/index.js";
 import quoteRoutes from "./routes/quotes/index.js";
 import invoiceRoutes from "./routes/invoices/index.js";
 import rotationRoutes from "./routes/rotations/index.js";
+import passageRoutes from "./routes/passages/index.js";
 import publicQuoteRoutes from "./routes/quotes/public.js";
 import userRoutes from "./routes/users/index.js";
 import settingsRoutes from "./routes/settings/index.js";
@@ -210,6 +211,7 @@ export async function buildApp() {
   await app.register(quoteRoutes, { prefix: "/api/v1/quotes" });
   await app.register(invoiceRoutes, { prefix: "/api/v1/invoices" });
   await app.register(rotationRoutes, { prefix: "/api/v1/rotations" });
+  await app.register(passageRoutes, { prefix: "/api/v1/passages" });
   // Route interne serveur-à-serveur (mailer → API) : POST /api/v1/quotes/public.
   // Protégée par secret partagé (x-internal-secret), non par JWT.
   await app.register(publicQuoteRoutes, { prefix: "/api/v1/quotes" });

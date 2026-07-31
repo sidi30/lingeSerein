@@ -11,9 +11,10 @@ import { QUEUE_NAMES } from "./queue.js";
 import { notify, emailAutorise } from "../utils/notify.js";
 import { sendTransactionalMail, toMailDate } from "../utils/mailer.js";
 import { RotationsService } from "../services/rotations.service.js";
+import { PassagesService } from "../services/passages.service.js";
 
 /** Les trois rendez-vous quotidiens du calendrier de rotations. */
-export type RotationJobKind = "reminder" | "morning" | "overdue";
+export type RotationJobKind = "reminder" | "morning" | "overdue" | "passages";
 
 export interface RotationJobData {
   kind: RotationJobKind;
@@ -470,6 +471,28 @@ async function runOverdue(prisma: PrismaClient, now: Date) {
 }
 
 // ============================================================================
+// 18:00 — passages groupés du lendemain
+// ============================================================================
+
+/**
+ * Ouvre les propositions « nous passons dans votre commune » pour les tournées
+ * du lendemain, et prévient les clients concernés.
+ *
+ * Posé sur la MÊME file que les rappels de rotation, et à la même heure : le
+ * client reçoit ses messages du soir en une fois plutôt qu'égrenés dans la
+ * journée. L'idempotence tient à la contrainte unique (tournée, commune) et au
+ * plafond d'une sollicitation par semaine et par client.
+ */
+async function runPassages(prisma: PrismaClient, now: Date) {
+  const bilan = await new PassagesService(prisma).ouvrirPourLendemain(now);
+  console.log(
+    `[passages] ${bilan.tournees} tournée(s) demain, ${bilan.opportunites} commune(s) ouverte(s), ` +
+      `${bilan.notifies} client(s) prévenu(s)`,
+  );
+  return bilan;
+}
+
+// ============================================================================
 // Worker
 // ============================================================================
 
@@ -501,6 +524,8 @@ export function createRotationWorker(
           return runMorning(prisma, now);
         case "overdue":
           return runOverdue(prisma, now);
+        case "passages":
+          return runPassages(prisma, now);
         default:
           throw new Error(`Type de job rotation inconnu : ${String(job.data.kind)}`);
       }
@@ -523,4 +548,4 @@ export function createRotationWorker(
  * Exporté pour les tests : ce sont exactement les fonctions câblées aux crons,
  * pas des copies — un test qui passerait sur une réimplémentation ne prouverait rien.
  */
-export const __rotationCrons = { runReminder, runMorning, runOverdue };
+export const __rotationCrons = { runReminder, runMorning, runOverdue, runPassages };
