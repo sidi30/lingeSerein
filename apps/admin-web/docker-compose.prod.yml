@@ -8,18 +8,25 @@ services:
       dockerfile: apps/admin-web/Dockerfile
     image: lingeserein-admin:latest
     container_name: ls-admin
+    # Durcissement 2026-07-30 : privileges minimaux + plafond memoire.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    pids_limit: 512
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traefik-public"
+      - "traefik.docker.network=edge-lingeserein"
       - "traefik.http.routers.lsadmin.rule=Host(`admin.lingeserein.fr`)"
       - "traefik.http.routers.lsadmin.entrypoints=https"
       - "traefik.http.routers.lsadmin.tls=true"
       - "traefik.http.routers.lsadmin.tls.certresolver=letsencrypt-dns"
       - "traefik.http.services.lsadmin.loadbalancer.server.port=3000"
     networks:
-      - traefik-public
+      - edge-lingeserein
 
 networks:
-  traefik-public:
+  edge-lingeserein:
     external: true

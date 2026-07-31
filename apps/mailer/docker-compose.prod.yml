@@ -2,15 +2,21 @@ services:
   mailer:
     build: .
     container_name: lingeserein-mailer
+    # Durcissement 2026-07-30 : privileges minimaux + plafond memoire.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 512
     restart: unless-stopped
     env_file:
       - .env
     volumes:
-      # Persistance des demandes de devis (JSONL) hors du conteneur.
       - mailer_data:/data
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traefik-public"
+      - "traefik.docker.network=edge-lingeserein"
       - "traefik.http.routers.mailer.rule=Host(`api.lingeserein.fr`)"
       - "traefik.http.routers.mailer.entrypoints=https"
       - "traefik.http.routers.mailer.tls=true"
@@ -22,11 +28,11 @@ services:
       - "traefik.http.middlewares.mailer-redirect.redirectscheme.permanent=true"
       - "traefik.http.services.mailer.loadbalancer.server.port=3010"
     networks:
-      - traefik-public
+      - edge-lingeserein
 
 volumes:
   mailer_data:
 
 networks:
-  traefik-public:
+  edge-lingeserein:
     external: true

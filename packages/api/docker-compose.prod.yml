@@ -7,6 +7,19 @@ services:
   ls-postgres:
     image: postgres:16-alpine
     container_name: ls-postgres
+    # Durcissement 2026-07-30 : privileges minimaux + plafond memoire.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    mem_limit: 512m
+    pids_limit: 512
     restart: unless-stopped
     environment:
       POSTGRES_USER: lingeserein
@@ -25,6 +38,16 @@ services:
   ls-redis:
     image: redis:7-alpine
     container_name: ls-redis
+    # Durcissement 2026-07-30 : privileges minimaux + plafond memoire.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    mem_limit: 256m
+    pids_limit: 512
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
     healthcheck:
@@ -41,6 +64,13 @@ services:
       dockerfile: packages/api/Dockerfile
     image: lingeserein-api:latest
     container_name: ls-api
+    # Durcissement 2026-07-30 : privileges minimaux + plafond memoire.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 768m
+    pids_limit: 512
     restart: unless-stopped
     env_file:
       - .env
@@ -51,7 +81,7 @@ services:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traefik-public"
+      - "traefik.docker.network=edge-lingeserein"
       - "traefik.http.routers.lsapi.rule=Host(`api.lingeserein.fr`) && (PathPrefix(`/api/v1`) || PathPrefix(`/api/docs`))"
       - "traefik.http.routers.lsapi.entrypoints=https"
       - "traefik.http.routers.lsapi.tls=true"
@@ -61,12 +91,12 @@ services:
       - "traefik.http.services.lsapi.loadbalancer.server.port=3001"
     networks:
       - ls-internal
-      - traefik-public
+      - edge-lingeserein
 
 volumes:
   ls_pgdata:
 
 networks:
   ls-internal:
-  traefik-public:
+  edge-lingeserein:
     external: true
