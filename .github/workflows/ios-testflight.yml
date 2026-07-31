@@ -52,8 +52,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Xcode
-        run: xcodebuild -version
+      # Sélection EXPLICITE du Xcode le plus récent installé (hors beta).
+      #
+      # Sans ça, le runner reste sur son Xcode par défaut — 16.4 sur l'image
+      # macos-15 — dont le compilateur Swift ne comprend pas ce qu'écrit
+      # `expo-modules-core` du SDK 55 : « unknown attribute 'MainActor' » et une
+      # cinquantaine d'erreurs d'isolation d'acteur, dans du code tiers qu'on ne
+      # peut pas corriger. C'est ce qui a fait échouer le run 30668466961.
+      - name: Sélectionner le Xcode le plus récent
+        working-directory: .
+        run: |
+          XC=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -vi beta | sort -V | tail -1)
+          echo "Xcode retenu : $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
 
       - name: Node
         uses: actions/setup-node@v5
