@@ -101,6 +101,19 @@ export default fp(async (app: FastifyInstance) => {
   );
 
   // Rappel du jour J — tous les jours à 07:00
+  // 18:05 — propositions de passage groupé pour les tournées du lendemain.
+  // Cinq minutes APRÈS le rappel de rotation : le client reçoit d'abord ce qui
+  // l'engage (son linge à rendre), ensuite ce qui lui est proposé.
+  await rotationsQueue.upsertJobScheduler(
+    "passage-opportunites-cron",
+    { pattern: "5 18 * * *", tz: "Europe/Paris" },
+    {
+      name: "passage-opportunites",
+      data: { kind: "passages" },
+      opts: { removeOnComplete: 50, removeOnFail: 100, attempts: 3 },
+    },
+  );
+
   await rotationsQueue.upsertJobScheduler(
     "rotation-morning-cron",
     { pattern: "0 7 * * *", tz: "Europe/Paris" },

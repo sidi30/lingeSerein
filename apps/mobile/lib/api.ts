@@ -1399,3 +1399,62 @@ export function formatDateShort(iso: string | null | undefined): string {
     month: "short",
   });
 }
+
+// ─── Passage groupé ──────────────────────────────────────────────
+
+export interface PassageOpportunite {
+  id: string;
+  communeInsee: string;
+  communeNom: string;
+  /** Jour du passage, `AAAA-MM-JJ`. */
+  date: string;
+  expiresAt: string;
+  livraisonCents: number;
+  livraisonPleinTarifCents: number;
+  repriseCents: number;
+  reponse: { kind: PassageReponseKind; message: string | null } | null;
+}
+
+export type PassageReponseKind = "LIVRAISON" | "REPRISE" | "LIVRAISON_ET_REPRISE" | "AUCUN";
+
+/**
+ * Passages déjà prévus dans la commune du client.
+ *
+ * Le 404 est avalé et rendu comme « aucune proposition » : la route est récente,
+ * et un binaire installé avant sa mise en ligne ne doit pas afficher une erreur
+ * là où il n'y a simplement rien à proposer. Les autres codes remontent.
+ */
+export function usePassagesMine() {
+  const token = useAuthStore((s) => s.accessToken);
+  const isClient = useIsClient();
+  return useQuery<PassageOpportunite[]>({
+    queryKey: ["passages-me"],
+    queryFn: async () => {
+      try {
+        const res = await apiFetch<ApiListRes<PassageOpportunite>>("/passages/mine");
+        return res.data;
+      } catch (e) {
+        if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return [];
+        throw e;
+      }
+    },
+    enabled: !!token && isClient,
+  });
+}
+
+/** Répond à une proposition de passage. Une seconde réponse CORRIGE la première. */
+export function useRepondrePassage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string; kind: PassageReponseKind; message?: string }) => {
+      const res = await apiFetch<ApiRes<{ id: string }>>(`/passages/${input.id}/reponse`, {
+        method: "POST",
+        body: JSON.stringify({ kind: input.kind, message: input.message ?? null }),
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["passages-me"] });
+    },
+  });
+}

@@ -3,6 +3,9 @@ import { randomBytes } from "node:crypto";
 import { NotFoundError, AppError, UnprocessableEntityError } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
 import { NotificationsService } from "./notifications.service.js";
+// `passages.service` importe `zoneTarifaire` d'ici : le cycle est assumé et sans
+// danger (les deux exports sont résolus au premier appel, pas au chargement).
+import { PassagesService } from "./passages.service.js";
 import {
   ORDER_TRANSITIONS,
   communeParInsee,
@@ -432,12 +435,26 @@ export class OrdersService {
     // Le nombre de kits n'est plus compté : la gratuité « dès 4 kits à Orange »
     // a disparu le jour où Orange est devenue gratuite sans condition. Le champ
     // reste accepté par le barème (déprécié), le lui passer ne changerait rien.
+    // Passage groupé : la remise de 50 % ne s'applique QUE si trois faits sont
+    // vrais en même temps — une tournée est planifiée ce jour-là dans la commune
+    // du client, et le client a répondu qu'il voulait du linge. Sans réponse
+    // enregistrée, aucune remise : sinon toute commande passée un jour de
+    // tournée serait remisée à l'insu de l'exploitant.
+    const passage = await new PassagesService(this.prisma)
+      .remiseApplicable(ownerId, deliveryDate)
+      // Une remise est un CONFORT ; une commande est le métier. Si l'évaluation
+      // échoue (table absente sur un environnement en retard de migration, base
+      // momentanément indisponible), on facture le plein tarif et la commande
+      // passe — l'inverse ferait perdre une vente pour une réduction.
+      .catch(() => ({ applicable: false, opportunityId: null }));
+
     const fee = computeDeliveryFee({
       zone: client ? zoneTarifaire(client) : "HORS_ZONE",
       delaiJours: differenceInCalendarDays(new Date(), deliveryDate),
       // Aucune remise sur une commande : le sous-total des articles EST le
       // montant après remise attendu par le barème.
       montantApresRemiseCents: totalCents,
+      passageGroupe: passage.applicable,
     });
 
     // `surDevis` ⇒ 0 en base et le drapeau qui l'explique. Enregistrer le

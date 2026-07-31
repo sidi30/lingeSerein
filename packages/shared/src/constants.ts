@@ -356,6 +356,13 @@ export interface DeliveryFeeInput {
   /** Montant des articles APRÈS remise, en centimes (seuil de gratuité). */
   montantApresRemiseCents: number;
   /**
+   * Une tournée est DÉJÀ prévue dans la commune du client à cette date : la
+   * course est mutualisée, la livraison passe à {@link PASSAGE_GROUPE}.DISCOUNT_PCT %.
+   * Ne JAMAIS activer sur une simple proximité géographique — seulement quand un
+   * passage est réellement planifié, sinon c'est une remise permanente déguisée.
+   */
+  passageGroupe?: boolean;
+  /**
    * @deprecated N'entre plus dans le calcul. La gratuité « dès 4 kits à Orange »
    * a disparu le jour où Orange est devenue gratuite sans condition. Le champ
    * reste accepté pour ne pas casser les appels existants, et sera retiré.
@@ -376,6 +383,8 @@ export interface DeliveryFee {
   offerte: boolean;
   /** Aucun tarif public : montant à saisir manuellement (hors zone ou Flash < 3 h). */
   surDevis: boolean;
+  /** Remise « passage déjà prévu dans la commune » appliquée (voir {@link PASSAGE_GROUPE}). */
+  passageGroupe?: boolean;
 }
 
 /** Déduit le niveau d'urgence d'un délai en jours (compat anciens appels). */
@@ -385,6 +394,51 @@ export function urgencyFromDelaiJours(delaiJours: number | undefined): UrgencyLe
   if (delaiJours === 1) return "EXPRESS_24H";
   return "STANDARD";
 }
+
+/**
+ * Passage groupé — le SEUL cas où la livraison est remisée.
+ *
+ * Le tarif de livraison ne bouge pas. Mais quand le camion passe déjà dans la
+ * commune un jour donné (une reprise, une autre livraison), le kilométrage est
+ * déjà payé : proposer ce créneau aux autres clients de la commune remplit la
+ * tournée sans course supplémentaire, et le client y gagne.
+ *
+ * Deux gestes, deux traitements :
+ *  - il veut du linge PROPRE → livraison au palier de sa commune, remisée de
+ *    {@link PASSAGE_GROUPE.DISCOUNT_PCT} % ;
+ *  - il veut seulement rendre son linge SALE → GRATUIT. Le linge revient de
+ *    toute façon dans le camion, et faire payer une reprise découragerait
+ *    exactement ce qu'on cherche à provoquer : que le linge rentre vite.
+ *
+ * La remise ne s'applique jamais à un forfait d'urgence : Express 24 h et Jour
+ * même paient un déplacement DÉDIÉ, que le passage du lendemain ne mutualise pas.
+ */
+export const PASSAGE_GROUPE = {
+  /** Remise sur le palier de zone, en pourcentage. */
+  DISCOUNT_PCT: 50,
+  /** Reprise seule du linge sale lors d'un passage déjà prévu. */
+  REPRISE_CENTS: 0,
+  /** Heure (Europe/Paris) à laquelle les clients de la commune sont prévenus, la veille. */
+  NOTIFY_HOUR: 18,
+  /** Un même client n'est pas sollicité plus d'une fois par cette fenêtre. */
+  MIN_JOURS_ENTRE_SOLLICITATIONS: 7,
+} as const;
+
+/** Tarif de livraison lors d'un passage déjà prévu dans la commune. */
+export function passageGroupeFeeCents(zone: Exclude<DeliveryZone, "HORS_ZONE">): number {
+  const plein = DELIVERY_ZONE_CENTS[zone];
+  // Arrondi au centime SUPÉRIEUR : sur un palier impair, mieux vaut un centime
+  // de plus pour l'entreprise qu'un centime jamais facturé — et le client voit
+  // un montant exact, pas un arrondi flottant.
+  return Math.ceil((plein * (100 - PASSAGE_GROUPE.DISCOUNT_PCT)) / 100);
+}
+
+/** Clause imprimable — la remise doit être dite dans les mêmes termes partout. */
+export const PASSAGE_GROUPE_TEXT =
+  `Passage déjà prévu dans votre commune : la livraison vous est facturée ` +
+  `${PASSAGE_GROUPE.DISCOUNT_PCT} % moins cher, et la reprise de votre linge sale est ` +
+  `gratuite. Cette offre ne vaut que pour la date du passage annoncé et ne s'applique ` +
+  `pas aux forfaits d'urgence (Express 24 h, Jour même), qui paient un déplacement dédié.`;
 
 /**
  * Frais de livraison — SOURCE DE VÉRITÉ unique (devis, contrat, admin, vitrine).
@@ -462,6 +516,22 @@ export function computeDeliveryFee(input: DeliveryFeeInput): DeliveryFee {
       urgent: false,
       offerte: true,
       surDevis: false,
+    };
+  }
+
+  // Passage déjà prévu dans la commune : la course est mutualisée, le client en
+  // profite. La remise ne s'applique QU'ICI — jamais sur un forfait d'urgence
+  // (le déplacement dédié reste dédié), jamais hors zone (rien à remiser), et
+  // elle n'a aucun effet quand la livraison est déjà offerte ou incluse.
+  if (input.passageGroupe) {
+    return {
+      cents: passageGroupeFeeCents(zone),
+      label: `Livraison — passage déjà prévu (${PASSAGE_GROUPE.DISCOUNT_PCT} % de remise), ${DELIVERY_ZONE_LABELS[zone]}`,
+      urgencyLevel: level,
+      urgent: false,
+      offerte: false,
+      surDevis: false,
+      passageGroupe: true,
     };
   }
 
