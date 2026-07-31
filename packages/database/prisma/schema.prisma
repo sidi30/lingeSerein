@@ -536,6 +536,8 @@ model Order {
   user           User          @relation(fields: [userId], references: [id])
   items          OrderItem[]
   deliveryStop   DeliveryStop?
+  /// Rotation créée automatiquement pour cette commande (linge sorti → à reprendre).
+  rotation       Rotation?
   quote          Quote?        @relation("QuoteOrder")
   /// Devis ÉMIS À PARTIR de cette commande (POST /quotes/from-order/:orderId).
   /// Relation distincte de `quote` : celle-ci dit « ce devis a produit cette
@@ -858,6 +860,12 @@ model Rotation {
   clientAdresse          String?         @map("client_adresse") @db.Text
   quoteId                String?         @map("quote_id") @db.Uuid
   invoiceId              String?         @map("invoice_id") @db.Uuid
+  /// Commande d'origine quand la rotation a été créée AUTOMATIQUEMENT.
+  /// UNIQUE : c'est la base qui garantit « une seule rotation par commande ».
+  /// Deux crons concurrents, un rejeu de job ou un double changement de statut
+  /// ne peuvent donc pas sortir deux fois le même linge — une vérification
+  /// applicative seule laisserait passer la course.
+  orderId                String?         @unique @map("order_id") @db.Uuid
   deliveryStopId         String?         @map("delivery_stop_id") @db.Uuid // arrêt de tournée qui a livré
   formule                RotationFormule @default(PONCTUEL)
   status                 RotationStatus  @default(PLANIFIEE)
@@ -877,6 +885,14 @@ model Rotation {
   reminderSentAt         DateTime?       @map("reminder_sent_at")
   /// Idem pour l'email de relance de retard.
   overdueNotifiedAt      DateTime?       @map("overdue_notified_at")
+  /// Instant où le linge a été RÉELLEMENT retiré du parc (`inCirculation`).
+  ///
+  /// Une rotation créée d'avance depuis une commande est PLANIFIEE : le linge
+  /// n'est pas encore sorti, le stock ne doit pas bouger. Il ne sort qu'à la
+  /// livraison. Ce champ est la garde d'idempotence de ce mouvement : sans lui,
+  /// une bascule LIVREE rejouée (cron, double clic, reprise de job) décrémentait
+  /// le parc autant de fois qu'elle était appelée.
+  sortieStockAt          DateTime?       @map("sortie_stock_at")
   notes                  String?         @db.Text
   createdAt              DateTime        @default(now()) @map("created_at")
   updatedAt              DateTime        @updatedAt @map("updated_at")
@@ -889,6 +905,10 @@ model Rotation {
   user         User?          @relation("RotationClient", fields: [userId], references: [id], onDelete: SetNull)
   quote        Quote?         @relation(fields: [quoteId], references: [id], onDelete: SetNull)
   invoice      Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  // SetNull comme les autres pièces : le linge dehors survit à la disparition de
+  // la commande qui l'a fait sortir, sinon il n'y aurait plus trace de ce qu'il
+  // faut aller reprendre.
+  order        Order?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
   deliveryStop DeliveryStop?  @relation(fields: [deliveryStopId], references: [id], onDelete: SetNull)
   lignes       RotationLine[]
 
@@ -898,6 +918,7 @@ model Rotation {
   @@index([userId])
   @@index([invoiceId])
   @@index([deliveryStopId])
+  @@index([operatorId, dateLivraison])
   @@map("rotations")
 }
 

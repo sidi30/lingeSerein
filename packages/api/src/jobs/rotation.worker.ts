@@ -14,7 +14,7 @@ import { RotationsService } from "../services/rotations.service.js";
 import { PassagesService } from "../services/passages.service.js";
 
 /** Les trois rendez-vous quotidiens du calendrier de rotations. */
-export type RotationJobKind = "reminder" | "morning" | "overdue" | "passages";
+export type RotationJobKind = "reminder" | "morning" | "overdue" | "passages" | "backfill";
 
 export interface RotationJobData {
   kind: RotationJobKind;
@@ -493,6 +493,34 @@ async function runPassages(prisma: PrismaClient, now: Date) {
 }
 
 // ============================================================================
+// 06:30 — rattrapage des rotations manquantes
+// ============================================================================
+
+/**
+ * Crée les rotations des commandes qui n'en ont pas encore.
+ *
+ * Les créations au fil de l'eau (changement de statut, arrêt de tournée validé)
+ * sont volontairement « best effort » : elles ne doivent jamais faire échouer
+ * une commande ni une livraison. Ce balayage est le filet qui les rattrape, et
+ * c'est aussi lui qui a repris l'historique — les commandes antérieures à
+ * l'automatisme n'avaient aucune rotation, donc aucune date de reprise.
+ *
+ * Placé AVANT le rappel de 07:00 : une rotation créée ici est prise en compte
+ * dans la foulée par les rappels du jour.
+ */
+async function runBackfill(prisma: PrismaClient) {
+  const bilan = await new RotationsService(prisma).backfillFromOrders();
+
+  console.log(
+    `[rotation-backfill] ${bilan.examinees} commande(s) examinée(s) — ` +
+      `${bilan.creees} rotation(s) créée(s), ${bilan.livrees} livrée(s), ` +
+      `${bilan.restantes} en attente du prochain passage`,
+  );
+
+  return bilan;
+}
+
+// ============================================================================
 // Worker
 // ============================================================================
 
@@ -526,6 +554,8 @@ export function createRotationWorker(
           return runOverdue(prisma, now);
         case "passages":
           return runPassages(prisma, now);
+        case "backfill":
+          return runBackfill(prisma);
         default:
           throw new Error(`Type de job rotation inconnu : ${String(job.data.kind)}`);
       }

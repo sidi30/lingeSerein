@@ -114,6 +114,23 @@ export default fp(async (app: FastifyInstance) => {
     },
   );
 
+  // Rattrapage des rotations manquantes — 06:30, AVANT le rappel du matin.
+  //
+  // Les rotations naissent normalement au fil de l'eau (commande confirmée,
+  // arrêt de tournée validé). Ces appels-là ne peuvent pas faire échouer une
+  // commande, donc ils peuvent échouer eux-mêmes en silence : ce balayage est le
+  // filet. Il tourne avant 07:00 pour qu'une rotation rattrapée soit reprise dès
+  // les rappels du jour, et non 24 h plus tard.
+  await rotationsQueue.upsertJobScheduler(
+    "rotation-backfill-cron",
+    { pattern: "30 6 * * *", tz: "Europe/Paris" },
+    {
+      name: "rotation-backfill",
+      data: { kind: "backfill" },
+      opts: { removeOnComplete: true, removeOnFail: { count: 100 } },
+    },
+  );
+
   await rotationsQueue.upsertJobScheduler(
     "rotation-morning-cron",
     { pattern: "0 7 * * *", tz: "Europe/Paris" },

@@ -109,6 +109,27 @@ export default async function rotationRoutes(app: FastifyInstance): Promise<void
     },
   );
 
+  // ---- POST /rotations/backfill ----
+  app.post(
+    "/backfill",
+    {
+      preHandler: adminMiddleware,
+      schema: {
+        tags: ["Rotations"],
+        summary: "Créer les rotations manquantes des commandes existantes",
+        description:
+          "Même traitement que le cron de 06:30. Sert à rattraper sans attendre : " +
+          "toute commande confirmée, en livraison ou livrée qui n'a pas encore de rotation " +
+          "en reçoit une, avec sa date de reprise. Idempotent — relancer ne crée pas de doublon.",
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (_request, reply) => {
+      const data = await service.backfillFromOrders();
+      return reply.send({ success: true, data });
+    },
+  );
+
   // ---- POST /rotations (création manuelle) ----
   app.post(
     "/",

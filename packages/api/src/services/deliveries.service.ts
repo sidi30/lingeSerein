@@ -6,6 +6,7 @@ import {
   UnprocessableEntityError,
 } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
+import { RotationsService } from "./rotations.service.js";
 import { notify, emailAutorise } from "../utils/notify.js";
 import {
   sendTransactionalMail,
@@ -648,7 +649,66 @@ export class DeliveriesService {
       dirtyPickedUp: data.dirtyPickedUp,
     });
 
+    // Un arrêt validé EST la livraison : la commande la reflète, et sa rotation
+    // sort alors le linge du parc avec la bonne date de départ.
+    await this.cloturerCommandeLivree(stop.orderId, driverId);
+
     return updated;
+  }
+
+  /**
+   * Passe la commande d'un arrêt validé en DELIVERED, puis aligne sa rotation.
+   *
+   * Le maillon manquait : le livreur validait son arrêt et la commande restait
+   * CONFIRMED ou IN_DELIVERY pour toujours. Personne ne s'en apercevait côté
+   * client — l'arrêt, lui, affichait bien « livré » — mais rien ne déclenchait la
+   * sortie de stock ni le compte à rebours de reprise.
+   *
+   * L'écriture est directe et ne passe pas par `ORDER_TRANSITIONS` : cette table
+   * garde les changements de statut décidés à la main dans l'admin. Ici le fait
+   * physique a déjà eu lieu — refuser de l'enregistrer parce que la commande
+   * était restée en CONFIRMED laisserait la base en désaccord avec le terrain.
+   * Une commande ANNULÉE reste annulée : livrée par erreur, c'est un incident
+   * d'exploitation qui se règle à la main, pas en écrasant l'annulation.
+   *
+   * **Ne lève jamais** : l'arrêt est déjà validé en base quand on arrive ici.
+   */
+  private async cloturerCommandeLivree(orderId: string | null, driverId: string): Promise<void> {
+    if (!orderId) return;
+
+    try {
+      const order = await this.prisma.order.findFirst({
+        where: { id: orderId, deletedAt: null },
+        select: { id: true, status: true },
+      });
+
+      if (!order || order.status === "CANCELLED") return;
+
+      if (order.status !== "DELIVERED") {
+        await this.prisma.order.update({
+          where: { id: orderId },
+          data: { status: "DELIVERED" },
+        });
+
+        await createAuditLog({
+          prisma: this.prisma,
+          userId: driverId,
+          action: "UPDATE",
+          entity: "Order",
+          entityId: orderId,
+          changes: {
+            previousStatus: order.status,
+            newStatus: "DELIVERED",
+            parArretDeTournee: true,
+          },
+        });
+      }
+
+      await new RotationsService(this.prisma).syncFromOrder(orderId, { adminId: driverId });
+    } catch (err) {
+      const raison = err instanceof Error ? err.message : String(err);
+      console.error(`[deliveries] Clôture de la commande ${orderId} échouée : ${raison}`);
+    }
   }
 
   /**

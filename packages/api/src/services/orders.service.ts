@@ -6,6 +6,7 @@ import { NotificationsService } from "./notifications.service.js";
 // `passages.service` importe `zoneTarifaire` d'ici : le cycle est assumé et sans
 // danger (les deux exports sont résolus au premier appel, pas au chargement).
 import { PassagesService } from "./passages.service.js";
+import { RotationsService } from "./rotations.service.js";
 import {
   ORDER_TRANSITIONS,
   communeParInsee,
@@ -801,6 +802,11 @@ export class OrdersService {
       userAgent,
     });
 
+    // Annulation par le client : si une rotation avait déjà été ouverte, elle
+    // est annulée avec la commande — et le linge ne revient en stock que s'il en
+    // était réellement sorti.
+    await new RotationsService(this.prisma).syncFromOrder(id, { adminId: userId });
+
     // La MÊME forme que `GET /orders/:id`. La ligne Prisma nue renvoyée
     // auparavant n'avait pas `items` : un écran qui écrasait son cache avec
     // cette réponse plantait au rendu suivant sur `order.items.map()`.
@@ -880,6 +886,13 @@ export class OrdersService {
         // Notification non bloquante — ignorer silencieusement
       }
     }
+
+    // Le linge suit la commande : confirmée, elle entre au calendrier des
+    // rotations (livraison + échéance de reprise) ; livrée, elle sort le linge
+    // du parc ; annulée, elle le rend. `syncFromOrder` n'échoue jamais et le
+    // cron de rattrapage repasse derrière — le statut vient d'être écrit, il ne
+    // doit pas dépendre de la réussite de cet effet de bord.
+    await new RotationsService(this.prisma).syncFromOrder(id, { adminId });
 
     // Même forme que `GET /orders/:id` — cf. `cancel()`.
     return this.getById(id);

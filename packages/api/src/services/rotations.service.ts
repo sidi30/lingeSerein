@@ -271,6 +271,12 @@ export class RotationsService {
           dateReprisePrevue,
           passage: input.passage ?? null,
           notes: input.notes ?? null,
+          // Saisie manuelle : l'admin enregistre un linge DÉJÀ sorti (ce qu'il
+          // vient de déposer). Le stock bouge donc immédiatement, et on horodate
+          // ce mouvement pour qu'une bascule LIVREE ultérieure ne le rejoue pas.
+          // Les rotations créées d'avance depuis une commande, elles, laissent ce
+          // champ NULL jusqu'à la livraison réelle.
+          sortieStockAt: new Date(),
           lignes: { create: lignes },
         },
         include: { lignes: true },
@@ -386,6 +392,9 @@ export class RotationsService {
           dateReprisePrevue,
           passage: input.passage ?? null,
           notes: input.notes ?? null,
+          // Émettre la facture, c'est constater que le linge est parti : le
+          // mouvement de stock est immédiat, donc horodaté (cf. `create`).
+          sortieStockAt: new Date(),
           lignes: { create: lignes },
         },
         include: { lignes: true },
@@ -414,6 +423,269 @@ export class RotationsService {
     });
 
     return toRotationView(rotation);
+  }
+
+  // ---- Création AUTOMATIQUE depuis une commande ----
+
+  /**
+   * Aligne la rotation d'une commande sur l'état de cette commande.
+   *
+   * C'est le seul automatisme du cycle du linge, et il existe parce que
+   * l'inverse a été constaté en production : trois commandes portant chacune une
+   * date de livraison, et un calendrier vide. Une rotation ne naissait que d'un
+   * geste manuel, donc le linge partait sans que rien ne dise quand il revient —
+   * ni échéance, ni rappel J-1, ni relance de retard.
+   *
+   * La commande est la SEULE source de dates fiable : le devis n'en porte
+   * aucune (regardé le modèle `Quote`), elles sont saisies à la conversion
+   * devis → commande, ou par le client sur le mobile.
+   *
+   * Correspondance des états, volontairement stricte :
+   *   PENDING              → rien. Une commande non validée n'engage aucun linge.
+   *   CONFIRMED/IN_DELIVERY→ rotation PLANIFIEE, **sans mouvement de stock** : le
+   *                          calendrier montre la livraison et l'échéance de
+   *                          reprise à venir, le parc ne bouge qu'au départ réel.
+   *   DELIVERED            → rotation LIVREE + sortie de stock (une seule fois).
+   *   CANCELLED            → rotation ANNULEE, et retour en stock UNIQUEMENT si
+   *                          le linge en était réellement sorti.
+   *
+   * **Ne lève jamais** : une commande enregistrée est un engagement pris, la
+   * refuser parce que sa rotation n'a pas pu être créée serait le pire échange.
+   * L'échec laisse une ligne de log et le cron de rattrapage repassera.
+   *
+   * Idempotente : la contrainte unique sur `order_id` fait foi, et une course
+   * entre deux appels (cron + changement de statut) se solde par un P2002
+   * silencieux, pas par un doublon.
+   *
+   * @returns ce qui a été fait, pour que le cron puisse en rendre compte.
+   */
+  async syncFromOrder(
+    orderId: string,
+    opts: { adminId?: string } = {},
+  ): Promise<{ created: boolean; livree: boolean; annulee: boolean; rotationId: string | null }> {
+    const rien = { created: false, livree: false, annulee: false, rotationId: null };
+
+    try {
+      const order = await this.prisma.order.findFirst({
+        where: { id: orderId, deletedAt: null },
+        include: {
+          items: { include: { product: { select: { slug: true, name: true } } } },
+          user: {
+            select: {
+              id: true,
+              name: true,
+              companyName: true,
+              email: true,
+              address: true,
+              operatorId: true,
+              subscription: { select: { status: true } },
+            },
+          },
+          deliveryStop: { select: { id: true, completedAt: true } },
+          // Devis d'origine : la rotation le porte pour que la fiche client
+          // remonte à la pièce commerciale signée.
+          quote: { select: { id: true } },
+          rotation: { include: { lignes: true } },
+        },
+      });
+
+      if (!order || !order.user) return rien;
+
+      const existante = order.rotation;
+
+      // ---- Commande annulée ----
+      if (order.status === "CANCELLED") {
+        if (!existante || existante.status === "ANNULEE" || existante.status === "REPRISE") {
+          return { ...rien, rotationId: existante?.id ?? null };
+        }
+        await this.updateStatus(
+          existante.id,
+          order.user.operatorId,
+          { status: "ANNULEE" },
+          opts.adminId ?? order.user.id,
+        );
+        return { created: false, livree: false, annulee: true, rotationId: existante.id };
+      }
+
+      // Une commande encore à valider n'a pas à peupler le calendrier : elle
+      // n'engage rien et son linge n'est pas réservé.
+      if (order.status === "PENDING") {
+        return { ...rien, rotationId: existante?.id ?? null };
+      }
+
+      const lignes = order.items
+        .map((item, index) => ({
+          // Le slug du catalogue d'abord : c'est lui qui fait bouger le stock.
+          // `resolveProductSlug` n'intervient qu'en repli sur un produit legacy
+          // sans slug — il devine à partir du libellé, et une mauvaise devinette
+          // imputerait le mouvement au mauvais article.
+          productSlug: item.product?.slug ?? resolveProductSlug(item.product?.name ?? ""),
+          designation: item.product?.name ?? "Article",
+          qtyLivree: item.quantity,
+          position: index,
+        }))
+        .filter((l) => l.qtyLivree > 0);
+
+      if (lignes.length === 0) return { ...rien, rotationId: existante?.id ?? null };
+
+      // Abonnement (14 j de détention) contre location ponctuelle (7 j, seuil du
+      // renouvellement hebdomadaire para-hôtelier — cf. ADR, ne pas « simplifier »).
+      const formule =
+        order.isRecurring || order.user.subscription?.status === "ACTIVE"
+          ? "ABONNEMENT"
+          : "PONCTUEL";
+
+      let rotation = existante;
+      let created = false;
+
+      if (!rotation) {
+        const dateLivraison = jourCalendaire(order.deliveryDate);
+        const dateReprisePrevue = jourCalendaire(computeDateReprise({ dateLivraison, formule }));
+
+        try {
+          rotation = await this.prisma.rotation.create({
+            data: {
+              operatorId: order.user.operatorId,
+              userId: order.user.id,
+              orderId: order.id,
+              // Snapshot au même titre que sur une facture : la plupart des
+              // clients changent d'adresse ou de raison sociale sans que le
+              // linge déjà dehors doive changer de destination.
+              clientNom: order.user.companyName ?? order.user.name,
+              clientEmail: order.user.email,
+              clientAdresse: order.user.address,
+              quoteId: order.quote?.id ?? null,
+              deliveryStopId: order.deliveryStop?.id ?? null,
+              formule,
+              status: "PLANIFIEE",
+              dateLivraison,
+              dateReprisePrevue,
+              notes: `Créée automatiquement depuis la commande ${order.orderNumber}`,
+              lignes: { create: lignes },
+            },
+            include: { lignes: true },
+          });
+          created = true;
+        } catch (err) {
+          // P2002 : une autre exécution (cron, second changement de statut) a
+          // gagné la course. C'est le résultat voulu, pas un incident.
+          if ((err as { code?: string }).code !== "P2002") throw err;
+          rotation = await this.prisma.rotation.findFirst({
+            where: { orderId: order.id },
+            include: { lignes: true },
+          });
+          if (!rotation) return rien;
+        }
+
+        await createAuditLog({
+          prisma: this.prisma,
+          userId: opts.adminId ?? order.user.id,
+          action: "CREATE",
+          entity: "Rotation",
+          entityId: rotation.id,
+          changes: {
+            automatique: true,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            formule,
+            dateLivraison: toDateOnly(rotation.dateLivraison),
+            dateReprisePrevue: toDateOnly(rotation.dateReprisePrevue),
+            lignes: lignes.length,
+          },
+        });
+      }
+
+      // ---- Livraison réelle : le linge sort du parc ----
+      if (order.status === "DELIVERED" && rotation.status === "PLANIFIEE") {
+        // Date RÉELLE quand l'arrêt de tournée en donne une : c'est elle qui
+        // fait courir le délai de détention. Sans arrêt (commande passée en
+        // livrée à la main), la date prévue reste la meilleure approximation.
+        const reel = order.deliveryStop?.completedAt
+          ? jourCalendaire(order.deliveryStop.completedAt)
+          : null;
+
+        if (reel && reel.getTime() !== rotation.dateLivraison.getTime()) {
+          await this.prisma.rotation.update({
+            where: { id: rotation.id },
+            data: {
+              dateLivraison: reel,
+              dateReprisePrevue: jourCalendaire(
+                computeDateReprise({ dateLivraison: reel, formule }),
+              ),
+              ...(order.deliveryStop ? { deliveryStopId: order.deliveryStop.id } : {}),
+            },
+          });
+        }
+
+        await this.updateStatus(
+          rotation.id,
+          order.user.operatorId,
+          { status: "LIVREE" },
+          opts.adminId ?? order.user.id,
+        );
+        return { created, livree: true, annulee: false, rotationId: rotation.id };
+      }
+
+      return { created, livree: false, annulee: false, rotationId: rotation.id };
+    } catch (err) {
+      const raison = err instanceof Error ? err.message : String(err);
+      console.error(`[rotations] Synchronisation de la commande ${orderId} échouée : ${raison}`);
+      return rien;
+    }
+  }
+
+  /**
+   * Rattrapage : toutes les commandes dont la rotation manque ou a pris du retard.
+   *
+   * Les appels au fil des changements de statut sont « best effort » — ils ne
+   * doivent jamais faire échouer une commande. Ce balayage est le filet qui
+   * garantit qu'un mailer indisponible, un redémarrage au mauvais moment ou une
+   * commande antérieure à cette fonctionnalité finit quand même par apparaître
+   * au calendrier, avec ses rappels.
+   *
+   * Borné à `limit` commandes par passage : un rattrapage initial sur un
+   * historique volumineux ne doit pas monopoliser la base. Le reste passe au
+   * lendemain, et le compteur retourné le dit.
+   */
+  async backfillFromOrders(
+    limit = 200,
+  ): Promise<{ examinees: number; creees: number; livrees: number; restantes: number }> {
+    const where: Prisma.OrderWhereInput = {
+      deletedAt: null,
+      status: { in: ["CONFIRMED", "IN_DELIVERY", "DELIVERED"] },
+      OR: [
+        { rotation: { is: null } },
+        // Livrée mais rotation encore prévisionnelle : la sortie de stock et le
+        // décompte de détention n'ont pas encore démarré.
+        { status: "DELIVERED", rotation: { is: { status: "PLANIFIEE" } } },
+      ],
+    };
+
+    const [commandes, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        select: { id: true },
+        orderBy: { deliveryDate: "asc" },
+        take: limit,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    let creees = 0;
+    let livrees = 0;
+
+    for (const commande of commandes) {
+      const bilan = await this.syncFromOrder(commande.id);
+      if (bilan.created) creees++;
+      if (bilan.livree) livrees++;
+    }
+
+    return {
+      examinees: commandes.length,
+      creees,
+      livrees,
+      restantes: Math.max(0, total - commandes.length),
+    };
   }
 
   // ---- Transition de statut ----
@@ -458,13 +730,26 @@ export class RotationsService {
     const updated = await this.prisma.$transaction(async (tx) => {
       // Annuler une rotation en cours remet en stock le linge qu'on croyait
       // sorti : sans cela, une erreur de saisie immobiliserait le parc.
-      if (to === "ANNULEE") {
+      //
+      // `sortieStockAt` conditionne le retour : une rotation PLANIFIEE créée
+      // d'avance depuis une commande n'a JAMAIS décrémenté le parc. La créditer
+      // à l'annulation inventerait du linge — le stock disponible grossirait à
+      // chaque commande annulée avant livraison.
+      if (to === "ANNULEE" && rotation.sortieStockAt) {
         await StockItemsService.recordAnnulation(tx, operatorId, rotation.lignes);
+      }
+
+      // La livraison est le moment où le linge quitte réellement le parc. Une
+      // rotation prévisionnelle attend ici sa sortie de stock ; celles déjà
+      // sorties (saisie manuelle, facture) ne la rejouent pas.
+      const sortie = to === "LIVREE" && !rotation.sortieStockAt;
+      if (sortie) {
+        await StockItemsService.recordSortie(tx, operatorId, rotation.lignes);
       }
 
       return tx.rotation.update({
         where: { id },
-        data: { status: to },
+        data: { status: to, ...(sortie ? { sortieStockAt: new Date() } : {}) },
         include: { lignes: true },
       });
     });
