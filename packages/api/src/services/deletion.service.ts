@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { NotFoundError, ForbiddenError, UnprocessableEntityError } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
+import { StockItemsService } from "./stock-items.service.js";
 import { ROLES } from "@lingengo/shared";
 
 /**
@@ -294,6 +295,40 @@ export class DeletionService {
           where: { userId, deletedAt: null },
           data: { deletedAt: now },
         });
+
+        // ─── Rotations : rendre le linge AVANT d'effacer leur trace ──────────
+        //
+        // Un `updateMany` sec effaçait les rotations en laissant leur linge
+        // compté en circulation POUR TOUJOURS. Constaté en production : la
+        // suppression d'un client a emporté trois rotations (deux LIVREE) et le
+        // parc a gardé quatre articles dehors que plus aucune ligne ne
+        // justifiait — invisible, et irrattrapable sans inventaire manuel.
+        //
+        // La rotation est donc d'abord ANNULÉE — annuler, c'est dire « ce linge
+        // n'est jamais sorti », ce qui le remet en réserve sans le compter en
+        // perte — puis supprimée. Seules les rotations dont le linge était
+        // réellement sorti (`sortieStockAt`) déclenchent un mouvement : créditer
+        // une rotation prévisionnelle inventerait du textile.
+        const rotationsAnnuler = await tx.rotation.findMany({
+          where: {
+            userId,
+            deletedAt: null,
+            status: { notIn: [...ROTATION_CLOSED] },
+            sortieStockAt: { not: null },
+          },
+          include: { lignes: true },
+        });
+
+        for (const rotation of rotationsAnnuler) {
+          await StockItemsService.recordAnnulation(tx, rotation.operatorId, rotation.lignes);
+        }
+
+        if (rotationsAnnuler.length > 0) {
+          await tx.rotation.updateMany({
+            where: { id: { in: rotationsAnnuler.map((r) => r.id) } },
+            data: { status: "ANNULEE" },
+          });
+        }
 
         const rotations = await tx.rotation.updateMany({
           where: { userId, deletedAt: null },
@@ -661,6 +696,32 @@ export class DeletionService {
       let rotations = 0;
 
       if (cascade) {
+        // Même règle que la suppression de client : on rend le linge AVANT
+        // d'effacer la rotation qui le suivait. Sans ce passage par
+        // l'annulation, résilier un abonnement laissait son textile compté en
+        // circulation sans qu'aucune ligne ne le justifie plus.
+        const aAnnuler = await tx.rotation.findMany({
+          where: {
+            userId,
+            deletedAt: null,
+            formule: "ABONNEMENT",
+            status: { notIn: [...ROTATION_CLOSED] },
+            sortieStockAt: { not: null },
+          },
+          include: { lignes: true },
+        });
+
+        for (const rotation of aAnnuler) {
+          await StockItemsService.recordAnnulation(tx, rotation.operatorId, rotation.lignes);
+        }
+
+        if (aAnnuler.length > 0) {
+          await tx.rotation.updateMany({
+            where: { id: { in: aAnnuler.map((r) => r.id) } },
+            data: { status: "ANNULEE" },
+          });
+        }
+
         const result = await tx.rotation.updateMany({
           where: { userId, deletedAt: null, formule: "ABONNEMENT" },
           data: { deletedAt: now },

@@ -261,4 +261,78 @@ export class StockItemsService {
       });
     }
   }
+
+  /**
+   * Recale `inCirculation` sur ce que disent RÉELLEMENT les rotations.
+   *
+   * `inCirculation` est un compteur incrémental : chaque sortie l'augmente,
+   * chaque reprise ou annulation le diminue. Un seul mouvement manqué le fausse
+   * définitivement, sans que rien ne le signale — c'est arrivé en production
+   * quand la suppression d'un client a effacé ses rotations sans rendre leur
+   * linge, laissant quatre articles comptés dehors que plus aucune ligne ne
+   * justifiait.
+   *
+   * La vérité est reconstructible : le linge dehors, c'est la somme de ce qui
+   * reste à reprendre sur les rotations VIVANTES (ni supprimées, ni reprises,
+   * ni annulées) dont le linge est réellement sorti. On recalcule donc plutôt
+   * que de corriger à la main.
+   *
+   * `dirtyPending` et `retired` ne sont PAS recalculés : ce sont des piles
+   * physiques cumulatives (le sale en attente de lavage, le linge perdu), sans
+   * source reconstructible. `totalOwned` est un inventaire déclaré.
+   */
+  async reconcileInCirculation(
+    operatorId: string,
+  ): Promise<{ productSlug: string; avant: number; apres: number }[]> {
+    const rotations = await this.prisma.rotation.findMany({
+      where: {
+        operatorId,
+        deletedAt: null,
+        status: { notIn: ["REPRISE", "ANNULEE"] },
+        sortieStockAt: { not: null },
+      },
+      select: { lignes: { select: { productSlug: true, qtyLivree: true, qtyReprise: true } } },
+    });
+
+    const attendu = new Map<string, number>();
+    for (const rotation of rotations) {
+      for (const ligne of rotation.lignes) {
+        if (!ligne.productSlug) continue;
+        // Ce qui reste à reprendre, pas ce qui a été livré : une reprise
+        // partielle a déjà fait rentrer une partie du linge.
+        const dehors = Math.max(0, ligne.qtyLivree - (ligne.qtyReprise ?? 0));
+        attendu.set(ligne.productSlug, (attendu.get(ligne.productSlug) ?? 0) + dehors);
+      }
+    }
+
+    const items = await this.prisma.stockItem.findMany({
+      where: { operatorId },
+      select: { productSlug: true, inCirculation: true },
+    });
+
+    const corrections: { productSlug: string; avant: number; apres: number }[] = [];
+
+    for (const item of items) {
+      const cible = attendu.get(item.productSlug) ?? 0;
+      if (cible === item.inCirculation) continue;
+      corrections.push({ productSlug: item.productSlug, avant: item.inCirculation, apres: cible });
+      await this.prisma.stockItem.update({
+        where: { operatorId_productSlug: { operatorId, productSlug: item.productSlug } },
+        data: { inCirculation: cible },
+      });
+    }
+
+    // Un slug attendu sans ligne de stock : la rotation existe, l'inventaire non.
+    for (const [productSlug, cible] of attendu) {
+      if (cible === 0 || items.some((i) => i.productSlug === productSlug)) continue;
+      corrections.push({ productSlug, avant: 0, apres: cible });
+      await this.prisma.stockItem.upsert({
+        where: { operatorId_productSlug: { operatorId, productSlug } },
+        create: { operatorId, productSlug, inCirculation: cible },
+        update: { inCirculation: cible },
+      });
+    }
+
+    return corrections;
+  }
 }

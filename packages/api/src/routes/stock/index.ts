@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { StockService } from "../../services/stock.service.js";
 import { StockItemsService } from "../../services/stock-items.service.js";
 import { ValidationError, NotFoundError } from "../../utils/errors.js";
+import { createAuditLog } from "../../utils/audit.js";
 import { requireRole } from "../../middleware/rbac.js";
 import {
   stockAdjustmentSchema,
@@ -111,6 +112,44 @@ export default async function stockRoutes(app: FastifyInstance): Promise<void> {
       const operatorId = await getOperatorId(request.user.sub);
       const data = await itemsService.list(operatorId);
       return reply.send({ success: true, data });
+    },
+  );
+
+  // ---- POST /stock/reconcile ----
+  app.post(
+    "/reconcile",
+    {
+      preHandler: adminMiddleware,
+      schema: {
+        tags: ["Stock"],
+        summary: "Recaler le linge en circulation sur les rotations réelles",
+        description:
+          "`inCirculation` est un compteur incrémental : un seul mouvement manqué le fausse " +
+          "définitivement et rien ne le signale. Cette route le reconstruit depuis la seule " +
+          "source vérifiable — ce qui reste à reprendre sur les rotations vivantes. " +
+          "`dirtyPending`, `retired` et `totalOwned` ne sont pas touchés : ce sont des piles " +
+          "physiques ou un inventaire déclaré, sans source reconstructible. " +
+          "Renvoie la liste des écarts corrigés, vide si le parc était juste.",
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      const operatorId = await getOperatorId(request.user.sub);
+      const corrections = await itemsService.reconcileInCirculation(operatorId);
+
+      if (corrections.length > 0) {
+        await createAuditLog({
+          prisma: app.prisma,
+          userId: request.user.sub,
+          action: "UPDATE",
+          entity: "StockItem",
+          changes: { reconciliation: true, corrections },
+          ipAddress: request.ip,
+          userAgent: request.headers["user-agent"],
+        });
+      }
+
+      return reply.send({ success: true, data: { corrections } });
     },
   );
 

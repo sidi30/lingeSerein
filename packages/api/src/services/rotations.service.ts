@@ -595,6 +595,48 @@ export class RotationsService {
         });
       }
 
+      // ---- La rotation SUIT sa commande tant que rien n'est parti ----
+      //
+      // Une date de livraison repoussée doit décaler l'échéance de reprise :
+      // c'est elle qui fait courir le délai de détention, et c'est elle qui
+      // déclenche les rappels. Sans ce recalage, déplacer une livraison laissait
+      // une reprise réclamée à l'ancienne date — le client recevait un rappel
+      // pour du linge qu'il n'avait pas encore reçu.
+      //
+      // Uniquement tant que la rotation est PLANIFIEE : une fois le linge parti,
+      // c'est la date RÉELLE de départ qui fait foi et la commande n'a plus voix
+      // au chapitre. Une reprise déjà enregistrée, elle, ne se rouvre jamais.
+      if (rotation.status === "PLANIFIEE" && order.status !== "DELIVERED") {
+        const attendue = jourCalendaire(order.deliveryDate);
+        const formuleAChange = rotation.formule !== formule;
+
+        if (attendue.getTime() !== rotation.dateLivraison.getTime() || formuleAChange) {
+          const dateReprisePrevue = jourCalendaire(
+            computeDateReprise({ dateLivraison: attendue, formule }),
+          );
+
+          rotation = await this.prisma.rotation.update({
+            where: { id: rotation.id },
+            data: { dateLivraison: attendue, dateReprisePrevue, formule },
+            include: { lignes: true },
+          });
+
+          await createAuditLog({
+            prisma: this.prisma,
+            userId: opts.adminId ?? order.user.id,
+            action: "UPDATE",
+            entity: "Rotation",
+            entityId: rotation.id,
+            changes: {
+              recaleSurLaCommande: order.orderNumber,
+              dateLivraison: toDateOnly(attendue),
+              dateReprisePrevue: toDateOnly(dateReprisePrevue),
+              ...(formuleAChange ? { formule } : {}),
+            },
+          });
+        }
+      }
+
       // ---- Livraison réelle : le linge sort du parc ----
       if (order.status === "DELIVERED" && rotation.status === "PLANIFIEE") {
         // Date RÉELLE quand l'arrêt de tournée en donne une : c'est elle qui
@@ -658,6 +700,12 @@ export class RotationsService {
         // Livrée mais rotation encore prévisionnelle : la sortie de stock et le
         // décompte de détention n'ont pas encore démarré.
         { status: "DELIVERED", rotation: { is: { status: "PLANIFIEE" } } },
+        // Rotation encore prévisionnelle : on la repasse à `syncFromOrder`, qui
+        // la recale si la date de livraison de la commande a bougé depuis. Le
+        // comparateur ne peut pas vivre ici — Prisma ne compare pas deux
+        // colonnes de tables différentes dans un `where` — et l'appel ne coûte
+        // rien quand tout concorde, il ne réécrit alors aucune ligne.
+        { rotation: { is: { status: "PLANIFIEE" } } },
       ],
     };
 
