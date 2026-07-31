@@ -98,6 +98,11 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          # Certificat de distribution dont NOUS détenons la clé privée. Généré
+          # une fois hors CI : créer un certificat par run épuiserait le quota
+          # Apple en laissant des certificats sans clé privée derrière lui.
+          IOS_DIST_P12_BASE64: ${{ secrets.IOS_DIST_P12_BASE64 }}
+          IOS_DIST_P12_PASSWORD: ${{ secrets.IOS_DIST_P12_PASSWORD }}
           # Sans cela, fastlane écrit ses journaux en ASCII et tronque les
           # messages d'erreur accentués d'Apple.
           LC_ALL: en_US.UTF-8

@@ -16,10 +16,19 @@
 # (capability + profil), puis téléverser. Aucun mot de passe Apple, aucune 2FA,
 # donc aucune étape interactive.
 
+require "base64"
+require "tmpdir"
+
 default_platform(:ios)
 
 APP_IDENTIFIER = "fr.linge-serein.app"
 TEAM_ID = "4SRJRX4N45"
+
+# Certificat de distribution dédié à cette CI — le seul du compte dont la clé
+# privée nous appartient (les autres vivent chez EAS). Un identifiant de
+# certificat n'est pas un secret : il ne sert à rien sans la clé privée, elle-même
+# dans le secret `IOS_DIST_P12_BASE64`.
+CERT_ID = ENV["IOS_DIST_CERT_ID"] || "442CB4GWDC"
 
 # Racine du projet mobile, ancrée sur l'emplacement de CE fichier.
 #
@@ -99,12 +108,25 @@ platform :ios do
 
     # ---- Signature ----
     #
-    # `cert` réutilise un certificat de distribution dont la clé privée est déjà
-    # dans le trousseau, sinon il en crée un. Apple en limite le nombre à 3 par
-    # compte : si la création échoue pour cette raison, il faut en révoquer un
-    # dans le portail (ceux détenus par EAS ne sont pas réutilisables ici, leur
-    # clé privée ne quitte pas les serveurs d'Expo).
-    cert(api_key: api_key, team_id: TEAM_ID)
+    # Le certificat de distribution est IMPORTÉ, jamais créé ici.
+    #
+    # `cert` a été essayé et écarté : il crée bien un certificat sur le portail
+    # mais échoue à l'installer dans le trousseau temporaire de la CI
+    # (« Could not find the newly generated certificate installed »). Chaque
+    # tentative laissait derrière elle un certificat dont la clé privée mourait
+    # avec le runner — inutilisable à jamais, et occupant un des rares slots
+    # qu'Apple accorde. Le certificat utilisé ici a donc été généré une fois pour
+    # toutes hors CI (clé privée + CSR en local, création via l'API), puis déposé
+    # en secret. Sa clé privée est archivée dans le magasin local de l'auteur.
+    p12 = File.join(Dir.tmpdir, "ios-dist.p12")
+    File.binwrite(p12, Base64.decode64(ENV.fetch("IOS_DIST_P12_BASE64")))
+    import_certificate(
+      certificate_path: p12,
+      certificate_password: ENV.fetch("IOS_DIST_P12_PASSWORD"),
+      keychain_name: ENV["MATCH_KEYCHAIN_NAME"] || "fastlane_tmp_keychain",
+      keychain_password: ENV["MATCH_KEYCHAIN_PASSWORD"] || "",
+    )
+    File.delete(p12) if File.exist?(p12)
 
     # `force: true` : on REGÉNÈRE le profil à chaque build plutôt que de réutiliser
     # celui du portail. C'est ce qui fait entrer la capability activée juste avant
@@ -115,6 +137,11 @@ platform :ios do
       app_identifier: APP_IDENTIFIER,
       team_id: TEAM_ID,
       force: true,
+      # Certificat EXPLICITE : le compte en porte plusieurs, tous détenus par EAS
+      # sauf celui-ci. Laisser fastlane choisir produirait un profil adossé à un
+      # certificat dont la clé privée n'est pas sur le runner — la compilation
+      # irait jusqu'au bout avant d'échouer à l'export, 25 minutes plus tard.
+      cert_id: CERT_ID,
     )
 
     build_app(
