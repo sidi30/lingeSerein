@@ -5,7 +5,7 @@
  * - Jour même → forfait 39 € applicable au champ « frais de livraison »
  * - Express 24 h → forfait 25 €
  * - Flash < 3 h → « sur devis », bouton « Appliquer » masqué (aucun tarif public)
- * - Zones : Orange / limitrophes / hors zone, plus aucune « zone élargie »
+ * - Zones : les 4 paliers du barème Vaucluse + hors zone, plus aucune « zone élargie »
  * - Catalogue : le Kit Complet est proposé à 29 € (valeur du catalogue partagé)
  */
 
@@ -75,26 +75,36 @@ test.describe("UI F7 — Jauge d'urgence (devis)", () => {
     await expect(page.getByRole("button", { name: /^appliquer$/i })).toHaveCount(0);
   });
 
-  test("Le sélecteur de zone ne propose plus la zone élargie", async ({ page }) => {
+  test("Le sélecteur propose les 4 paliers du Vaucluse, sans zone élargie", async ({ page }) => {
     const zone = page.locator("#zoneLivraison");
     await expect(zone).toBeVisible({ timeout: 8_000 });
 
+    // Barème Vaucluse : les paliers se comptent depuis Orange, et le hors-Vaucluse
+    // n'a aucun tarif public. « ELARGIE » appartenait au barème précédent.
     const values = await zone
       .locator("option")
       .evaluateAll((opts) => opts.map((o) => (o as HTMLOptionElement).value));
-    expect(values).toEqual(["ORANGE", "PROCHE", "HORS_ZONE"]);
+    expect(values).toEqual(["ORANGE", "PROCHE", "INTERMEDIAIRE", "ELOIGNE", "HORS_ZONE"]);
     await expect(zone).not.toContainText(/élargie/i);
   });
 
-  test("Standard à Orange sous les seuils → 12 €", async ({ page }) => {
-    await page.locator("#zoneLivraison").selectOption("ORANGE");
-    await page
-      .getByRole("group", { name: /urgence/i })
-      .getByRole("button", { name: /standard/i })
-      .click();
+  test("Standard : Orange est offerte, le palier PROCHE vaut 12 €", async ({ page }) => {
+    const urgence = page.getByRole("group", { name: /urgence/i });
+    const appliquer = page.getByRole("button", { name: /^appliquer$/i });
+    await urgence.getByRole("button", { name: /standard/i }).click();
 
-    await page.getByRole("button", { name: /^appliquer$/i }).click();
+    // Premier palier payant : jusqu'à 15 km d'Orange.
+    await page.locator("#zoneLivraison").selectOption("PROCHE");
+    await appliquer.click();
     await expect(page.locator("#livraisonEuros")).toHaveValue("12");
+
+    // Orange = commune du siège : la course est incluse. « Appliquer » disparaît
+    // dès que le champ porte déjà le tarif du barème — ici 0 — donc on ne clique
+    // que s'il est encore proposé, sinon le montant est déjà bon.
+    await page.locator("#zoneLivraison").selectOption("ORANGE");
+    await expect(page.getByText(/offerte/i).first()).toBeVisible({ timeout: 8_000 });
+    if (await appliquer.isVisible().catch(() => false)) await appliquer.click();
+    await expect(page.locator("#livraisonEuros")).toHaveValue("0");
   });
 
   test("Catalogue : Kit Complet proposé à 29 € (catalogue partagé)", async ({ page }) => {

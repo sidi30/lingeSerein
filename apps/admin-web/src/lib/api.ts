@@ -58,8 +58,13 @@ async function rawFetch(endpoint: string, options: RequestOptions = {}): Promise
     if (qs) url += `?${qs}`;
   }
 
+  // `Content-Type: application/json` UNIQUEMENT s'il y a un corps. Fastify
+  // refuse en 400 (`FST_ERR_CTP_EMPTY_JSON_BODY`) une requête qui annonce du
+  // JSON sans en envoyer : posé systématiquement, cet en-tête cassait TOUTES
+  // les suppressions de l'admin (devis, facture, zone, utilisateur…). Le bouton
+  // affichait l'erreur de l'API et la fiche restait en place.
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
     ...(customHeaders as Record<string, string>),
   };
 

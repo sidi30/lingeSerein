@@ -104,14 +104,17 @@ export function DeleteAction({
       for (const key of removeKeys) {
         queryClient.removeQueries({ queryKey: key });
       }
-      // Attendre : `onDeleted` navigue le plus souvent, et la page d'arrivée
-      // doit trouver une liste déjà rechargée plutôt que l'ancienne, ligne
-      // supprimée comprise.
+      // Naviguer D'ABORD, invalider ensuite. `invalidateQueries` attend les
+      // requêtes ACTIVES : tant que la fiche supprimée est encore montée, elle
+      // relance un GET voué au 404, react-query le retente, et l'attente durait
+      // plusieurs secondes pendant lesquelles l'écran restait sur un objet qui
+      // n'existe plus. La liste d'arrivée est quand même à jour : elle se monte
+      // sur des requêtes invalidées, donc rechargées.
+      onDeleted?.();
       await Promise.all([
         invalidateAfter(queryClient, ...scopes),
         ...invalidateKeys.map((key) => queryClient.invalidateQueries({ queryKey: key })),
       ]);
-      onDeleted?.();
     },
     onError: (err: unknown) => {
       // Un 404 sur une suppression, ce n'est pas « introuvable » côté écran :

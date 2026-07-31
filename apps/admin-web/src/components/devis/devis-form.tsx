@@ -251,28 +251,31 @@ export function DevisForm({ mode, initialData, onSuccess, onCancel }: DevisFormP
     [stockItems],
   );
 
-  /** Quantité demandée par référence, CUMULÉE sur toutes les lignes du devis. */
-  const demandBySlug = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const ligne of lignes) {
-      const slug = matchCatalogSlug(ligne.designation);
-      if (!slug) continue;
-      map.set(slug, (map.get(slug) ?? 0) + (Number(ligne.qty) || 0));
-    }
-    return map;
-  }, [lignes]);
+  /**
+   * Quantité demandée par référence, CUMULÉE sur toutes les lignes du devis.
+   *
+   * Calculé À CHAQUE RENDU, sans `useMemo` sur `lignes` : `watch()` renvoie un
+   * tableau dont l'identité ne change pas quand seule une quantité est modifiée.
+   * Mémoïsé dessus, l'avertissement de stock restait figé sur les quantités
+   * initiales — passer une ligne de 1 à 40 sur un parc de 3 n'affichait RIEN,
+   * et le devis partait sans que personne n'ait vu la survente. Le coût est
+   * négligeable : un devis compte quelques lignes.
+   */
+  const demandBySlug = new Map<string, number>();
+  for (const ligne of lignes) {
+    const slug = matchCatalogSlug(ligne.designation);
+    if (!slug) continue;
+    demandBySlug.set(slug, (demandBySlug.get(slug) ?? 0) + (Number(ligne.qty) || 0));
+  }
 
   /** Références dont la demande dépasse le disponible. */
-  const overbooked = useMemo(() => {
-    const out: { slug: string; name: string; demande: number; disponible: number }[] = [];
-    for (const [slug, demande] of demandBySlug) {
-      const item = stockBySlug.get(slug);
-      if (item && demande > item.disponible) {
-        out.push({ slug, name: item.name, demande, disponible: item.disponible });
-      }
+  const overbooked: { slug: string; name: string; demande: number; disponible: number }[] = [];
+  for (const [slug, demande] of demandBySlug) {
+    const item = stockBySlug.get(slug);
+    if (item && demande > item.disponible) {
+      overbooked.push({ slug, name: item.name, demande, disponible: item.disponible });
     }
-    return out;
-  }, [demandBySlug, stockBySlug]);
+  }
 
   const availableCatalog = useMemo(
     () =>

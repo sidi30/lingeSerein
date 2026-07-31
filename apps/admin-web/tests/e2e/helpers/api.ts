@@ -2,28 +2,46 @@ import { getAdminToken } from "./auth";
 
 const API = "http://localhost:3001/api/v1";
 
+/**
+ * Appel authentifié à l'API, avec attente sur 429.
+ *
+ * Le limiteur de débit de l'API est un comportement VOULU, pas un défaut : une
+ * suite qui crée un utilisateur par test le déclenche forcément. Sans cette
+ * attente, des scénarios verts échouaient au hasard selon leur position dans la
+ * série — un faux rouge qui masque les vrais. On respecte le `retry-after`
+ * annoncé par le serveur plutôt qu'un délai deviné.
+ */
 export async function apiRequest(
   method: string,
   path: string,
   body?: unknown,
 ): Promise<{ status: number; json: unknown }> {
-  const token = await getAdminToken();
   const hasBody = body !== undefined;
-  const resp = await fetch(`${API}${path}`, {
-    method,
-    headers: {
-      ...(hasBody ? { "Content-Type": "application/json" } : {}),
-      Authorization: `Bearer ${token}`,
-    },
-    body: hasBody ? JSON.stringify(body) : undefined,
-  });
-  let json: unknown;
-  try {
-    json = await resp.json();
-  } catch {
-    json = null;
+
+  for (let tentative = 0; ; tentative++) {
+    const token = await getAdminToken();
+    const resp = await fetch(`${API}${path}`, {
+      method,
+      headers: {
+        ...(hasBody ? { "Content-Type": "application/json" } : {}),
+        Authorization: `Bearer ${token}`,
+      },
+      body: hasBody ? JSON.stringify(body) : undefined,
+    });
+
+    let json: unknown;
+    try {
+      json = await resp.json();
+    } catch {
+      json = null;
+    }
+
+    if (resp.status !== 429 || tentative >= 3) return { status: resp.status, json };
+
+    const annonce = Number(resp.headers.get("retry-after"));
+    const attenteMs = (Number.isFinite(annonce) && annonce > 0 ? annonce : 5) * 1000 + 500;
+    await new Promise((r) => setTimeout(r, attenteMs));
   }
-  return { status: resp.status, json };
 }
 
 export async function createQuote(

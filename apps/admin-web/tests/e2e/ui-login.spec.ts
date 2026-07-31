@@ -4,7 +4,7 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { loginAsAdmin } from "./helpers/auth";
+import { loginViaFormulaire } from "./helpers/auth";
 
 test.describe("UI — Login", () => {
   test("Accès /login affiche le formulaire", async ({ page }) => {
@@ -18,7 +18,7 @@ test.describe("UI — Login", () => {
   });
 
   test("Login admin réussi → redirection vers dashboard", async ({ page }) => {
-    await loginAsAdmin(page);
+    await loginViaFormulaire(page);
     // Should land on dashboard / main page (not /login)
     await expect(page).not.toHaveURL(/\/login/, { timeout: 10_000 });
     // Menu latéral affiché. On vise le menu DE BUREAU par son libellé

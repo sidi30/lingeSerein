@@ -14,8 +14,11 @@ const IBAN_VALIDE = "FR76 3000 6000 0112 3456 7890 189";
 
 async function ouvrirOngletOperateur(page: import("@playwright/test").Page) {
   await page.goto("/reglages");
+  // Les sections des réglages sont des `role="tab"` : un rôle explicite prime
+  // sur la balise, donc `getByRole("button")` ne les voit pas et l'attente
+  // partait au bout de 30 s.
   await page
-    .getByRole("button", { name: /informations opérateur|opérateur/i })
+    .getByRole("tab", { name: /informations opérateur|opérateur/i })
     .first()
     .click();
   await expect(page.locator("#op-iban")).toBeVisible({ timeout: 10_000 });
@@ -77,7 +80,7 @@ test.describe("UI F8 — Réglages : coordonnées bancaires", () => {
   test("Pack Sérénité : dotation annoncée en 2 passages par mois", async ({ page }) => {
     await page.goto("/reglages");
     await page
-      .getByRole("button", { name: /pack sérénité/i })
+      .getByRole("tab", { name: /pack sérénité/i })
       .first()
       .click();
 

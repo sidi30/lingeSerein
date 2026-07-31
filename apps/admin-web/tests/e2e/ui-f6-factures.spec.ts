@@ -55,7 +55,10 @@ test.describe("UI F6 — Factures", () => {
   test("Sidebar contient le lien Factures", async ({ page }) => {
     await page.goto("/");
     await expect(
-      page.locator('nav a[href*="/factures"], aside a[href*="/factures"]').first(),
+      page
+        .getByRole("complementary", { name: "Menu principal" })
+        .locator('a[href*="/factures"]')
+        .first(),
     ).toBeVisible({ timeout: 8_000 });
   });
 
@@ -68,8 +71,11 @@ test.describe("UI F6 — Factures", () => {
     expect(response?.status()).toBeLessThan(400);
     await expect(page.locator("body")).not.toContainText("Internal Server Error");
 
+    // Une facture naît BROUILLON, et la page sépare « Émises » de « Brouillons » —
+    // l'onglet par défaut ne montre que les émises. Chercher le numéro sans
+    // changer d'onglet reviendrait à tester la mauvaise liste.
+    await page.getByRole("tab", { name: /brouillons/i }).click();
     await expect(page.locator("body")).toContainText(invoice.invoiceNumber, { timeout: 10_000 });
-    // Statut initial : brouillon.
     await expect(page.getByText("Brouillon").first()).toBeVisible({ timeout: 8_000 });
   });
 
@@ -79,6 +85,7 @@ test.describe("UI F6 — Factures", () => {
     const invoice = (created.json as { data: { invoiceNumber: string } }).data;
 
     await page.goto("/factures");
+    await page.getByRole("tab", { name: /brouillons/i }).click();
     await page.getByText(invoice.invoiceNumber).first().click();
 
     await page.waitForURL(/\/factures\/[0-9a-f-]{36}$/i, { timeout: 10_000 });

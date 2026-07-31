@@ -68,8 +68,15 @@ export async function buildApp() {
     secret: process.env["JWT_REFRESH_SECRET"],
   });
 
+  // Plafond réglable par l'environnement, valeur de production par défaut.
+  // Sert au banc d'essai e2e, qui rejoue en quelques minutes ce qu'un humain
+  // ferait en une journée : sans cette soupape, des scénarios corrects échouent
+  // sur un 429 et masquent les vraies régressions. À ne JAMAIS relever en prod —
+  // le plafond est ce qui protège /auth du bourrage d'identifiants.
+  const plafondRequetes = Number(process.env["RATE_LIMIT_MAX"] ?? 100);
+
   await app.register(rateLimit, {
-    max: 100,
+    max: Number.isFinite(plafondRequetes) && plafondRequetes > 0 ? plafondRequetes : 100,
     timeWindow: 60_000,
     keyGenerator: (request) => {
       return request.user?.sub ?? request.ip;
