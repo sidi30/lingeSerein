@@ -86,25 +86,17 @@ platform :ios do
     increment_build_number(build_number: dernier + 1, xcodeproj: app[:project])
     UI.message("Numéro de build : #{dernier + 1} (dernier sur TestFlight : #{dernier})")
 
-    # ---- Capability Push Notifications sur l'App ID ----
+    # ---- Capability Push Notifications ----
     #
-    # C'est le point qui a fait échouer les builds cloud 13, 14 et 15 : l'App ID
-    # n'a jamais eu la capability, donc aucun profil ne porte `aps-environment`,
-    # donc Xcode refuse de signer une app qui embarque `expo-notifications`.
-    # `produce` l'active de façon idempotente. Toléré en échec : sur un compte où
-    # elle est déjà active, certaines versions de fastlane répondent une erreur
-    # plutôt qu'un succès, et ce serait absurde d'arrêter le build pour ça.
-    begin
-      produce(
-        api_key: api_key,
-        app_identifier: APP_IDENTIFIER,
-        team_id: TEAM_ID,
-        skip_itc: true,
-        enable_services: { push_notification: "on" },
-      )
-    rescue => e
-      UI.important("Activation de la capability push ignorée : #{e.message}")
-    end
+    # Rien à faire ici, et c'est vérifié : l'App ID `fr.linge-serein.app`
+    # (`9FQ368JZFN`) porte déjà `PUSH_NOTIFICATIONS` et `IN_APP_PURCHASE`.
+    # `produce` avait été essayé pour l'activer, mais il n'accepte PAS de clé API
+    # (« Could not find option 'api_key' ») : il exige un identifiant Apple et
+    # donc une 2FA, incompatible avec un runner. Si la capability venait à
+    # manquer sur une future app, l'activer par l'API plutôt que par fastlane :
+    # POST /v1/bundleIdCapabilities {capabilityType: "PUSH_NOTIFICATIONS"}.
+    # Le `sigh(force: true)` plus bas suffit ensuite à faire entrer la capability
+    # dans le profil.
 
     # ---- Signature ----
     #
@@ -148,6 +140,18 @@ platform :ios do
       workspace: app[:workspace],
       scheme: app[:scheme],
       configuration: "Release",
+      # `expo prebuild` laisse DEVELOPMENT_TEAM VIDE — c'est EAS qui l'injectait
+      # au moment du build. Sans ces réglages, xcodebuild s'arrête sur « Signing
+      # for "LingeSerein" requires a development team », après avoir pourtant
+      # compilé les pods. La signature est explicitement manuelle et adossée au
+      # profil que `sigh` vient de régénérer : en automatique, Xcode choisirait
+      # volontiers un profil de développement, impubliable sur TestFlight.
+      xcargs: [
+        "DEVELOPMENT_TEAM=#{TEAM_ID}",
+        "CODE_SIGN_STYLE=Manual",
+        "CODE_SIGN_IDENTITY='Apple Distribution'",
+        "PROVISIONING_PROFILE_SPECIFIER='#{lane_context[SharedValues::SIGH_NAME]}'",
+      ].join(" "),
       export_method: "app-store",
       output_name: "LingeSerein.ipa",
       # Absolu, pour la même raison que MOBILE_ROOT : l'IPA doit atterrir dans
