@@ -98,14 +98,21 @@ log "vérification du site en ligne…"
 # alors que le site répond parfaitement. Vérifier en local revenait à déclencher un
 # retour arrière sur une fausse panne — c'est exactement ce qui s'est produit au
 # premier essai de ce script.
+# /contrat est ATTENDU en 401 : le générateur de contrat est protégé par auth_basic
+# côté nginx depuis le durcissement du 2026-07-30. Exiger 200 déclenchait un retour
+# arrière alors que la protection fonctionnait — la vérification doit contrôler ce
+# qu'on veut aujourd'hui, pas ce qu'on voulait avant.
 verifier_distant() {
   ssh -o BatchMode=yes "$VPS" \
     "ko=''; \
-     for p in / /tarifs /contrat /zone-de-livraison; do \
+     for p in / /tarifs /zone-de-livraison; do \
        c=\$(curl -s -o /dev/null -w '%{http_code}' '$SITE'\$p || echo 000); \
        echo \"  \$p -> \$c\" >&2; \
        [ \"\$c\" = 200 ] || ko=\"\$ko \$p(\$c)\"; \
      done; \
+     c=\$(curl -s -o /dev/null -w '%{http_code}' '$SITE/contrat' || echo 000); \
+     echo \"  /contrat -> \$c (401 attendu : auth_basic)\" >&2; \
+     [ \"\$c\" = 401 ] || ko=\"\$ko /contrat(\$c-au-lieu-de-401)\"; \
      curl -s '$SITE/' | grep -q 'Linge Serein' || ko=\"\$ko contenu-accueil\"; \
      printf '%s' \"\$ko\""
 }
