@@ -192,6 +192,18 @@ export async function notify(prisma: PrismaClient, input: NotifyInput): Promise<
 }
 
 /**
+ * Règle UNIQUE de l'autorisation d'email, appliquée à un réglage déjà lu.
+ *
+ * Aucune préférence enregistrée ⇒ autorisé : c'est le cas de tous les comptes
+ * qui n'ont jamais ouvert l'écran des réglages, et de tous les destinataires
+ * sans compte du tout.
+ */
+function autoriseParReglage(setting: { enabled: boolean; channel: string } | undefined): boolean {
+  if (!setting) return true;
+  return setting.enabled && (setting.channel === "EMAIL" || setting.channel === "BOTH");
+}
+
+/**
  * Vrai si ce destinataire accepte de recevoir ce type par email.
  *
  * Consultée AVANT d'appeler le mailer. Un client sans compte n'a par construction
@@ -209,6 +221,32 @@ export async function emailAutorise(
     where: { userId_type: { userId, type } },
   });
 
-  if (!setting) return true;
-  return setting.enabled && (setting.channel === "EMAIL" || setting.channel === "BOTH");
+  return autoriseParReglage(setting ?? undefined);
+}
+
+/**
+ * Même règle, en LOT : une seule requête pour N destinataires.
+ *
+ * Existe pour les envois collectifs (l'alerte « nouvelle commande » aux
+ * gestionnaires), où l'appel unitaire faisait une requête Prisma PAR admin — un
+ * N+1 sur le chemin de création de commande. La règle n'est pas réécrite ici :
+ * les deux fonctions partagent `autoriseParReglage`, sans quoi elles finiraient
+ * par ne plus dire la même chose.
+ *
+ * @returns les identifiants AUTORISÉS, dans un ensemble.
+ */
+export async function emailsAutorises(
+  prisma: PrismaClient,
+  userIds: string[],
+  type: NotificationType,
+): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+
+  const settings = await prisma.notificationSetting.findMany({
+    where: { userId: { in: userIds }, type },
+    select: { userId: true, enabled: true, channel: true },
+  });
+
+  const parUtilisateur = new Map(settings.map((s) => [s.userId, s]));
+  return new Set(userIds.filter((id) => autoriseParReglage(parUtilisateur.get(id))));
 }

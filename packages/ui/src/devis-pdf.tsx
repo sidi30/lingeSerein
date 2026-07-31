@@ -12,10 +12,10 @@ import {
   DELIVERY_RULE_TEXT,
   computeDevisTotals,
   printableField,
-  resolveLivraisonLabel,
   urgencyTier,
 } from "@lingengo/shared";
 import type { DevisData } from "@lingengo/shared";
+import { livraisonLabelText, livraisonMontantText } from "./livraison";
 import { LOGO_DATA_URI } from "./logo";
 import { legalMentionsLine, resolvePrestataire } from "./operator";
 import type { OperatorInfo } from "./operator";
@@ -219,7 +219,7 @@ export function DevisDocument({
 
   const isBrouillon = data.numero?.includes("BROUILLON") || data.numero === "";
   const blank = !!data.blankFields;
-  const livraisonLabel = resolveLivraisonLabel(data);
+  const livraisonLabel = livraisonLabelText(data);
   // Niveau de service livraison (jauge d'urgence), affiché sous la ligne livraison.
   const urgency = data.urgency ? urgencyTier(data.urgency) : null;
   // Lignes vierges à compléter au stylo (mode « devis à remplir »).
@@ -359,9 +359,12 @@ export function DevisDocument({
             )}
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>{livraisonLabel}</Text>
-              <Text style={styles.totalValue}>
-                {data.livraisonCents === 0 ? "Offerte" : euros(data.livraisonCents)}
-              </Text>
+              {/* `livraisonMontantText` et non un ternaire sur 0 : une course
+                  encore à chiffrer vaut aussi 0 en base, et l'imprimer
+                  « Offerte » promet par écrit, sur un devis signé, une gratuité
+                  que personne n'a décidée. Le helper distingue les trois cas
+                  (sur devis / offerte / dû). */}
+              <Text style={styles.totalValue}>{livraisonMontantText(data, euros)}</Text>
             </View>
             {!!urgency && (
               <Text style={styles.urgencyNote}>

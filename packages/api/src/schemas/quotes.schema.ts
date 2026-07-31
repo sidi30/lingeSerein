@@ -79,6 +79,16 @@ export const convertQuoteSchema = z.object({
     .min(1, "Le mapping des lignes est obligatoire"),
 });
 
+// ---- Émission depuis une commande ----
+
+/**
+ * `orderId` et non `id` : le paramètre de route désigne une COMMANDE, pas le
+ * devis — `idParamSchema` (partagé) ne conviendrait donc pas ici.
+ */
+export const fromOrderParamsSchema = z.object({
+  orderId: z.string().uuid("ID commande invalide"),
+});
+
 // ---- Types inférés ----
 
 export type CreateQuoteInput = z.infer<typeof createQuoteSchema>;
@@ -86,3 +96,4 @@ export type UpdateQuoteInput = z.infer<typeof updateQuoteSchema>;
 export type UpdateQuoteStatusInput = z.infer<typeof updateQuoteStatusSchema>;
 export type ListQuotesQuery = z.infer<typeof listQuotesQuerySchema>;
 export type ConvertQuoteInput = z.infer<typeof convertQuoteSchema>;
+export type FromOrderParams = z.infer<typeof fromOrderParamsSchema>;

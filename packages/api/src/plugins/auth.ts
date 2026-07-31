@@ -25,6 +25,12 @@ declare module "fastify" {
 }
 
 /**
+ * Seul algorithme émis ET accepté. Le secret est symétrique (chaîne HMAC), donc
+ * HS256 ; toute autre valeur présentée dans l'en-tête d'un jeton est refusée.
+ */
+export const ALGORITHME = "HS256" as const;
+
+/**
  * Plugin Fastify — JWT access token verification.
  * Décore l'instance avec `app.authenticate` utilisable comme preHandler.
  *
@@ -42,7 +48,21 @@ export default fp(async (app: FastifyInstance) => {
   await app.register(fjwt, {
     secret,
     sign: {
+      algorithm: ALGORITHME,
       expiresIn: "15m",
+    },
+    // `algorithms` en LISTE BLANCHE à la vérification. Sans cette ligne, c'est
+    // l'en-tête `alg` du jeton PRÉSENTÉ qui oriente le choix de l'algorithme :
+    // c'est la famille « confusion d'algorithme », et fast-jwt 5.0.6 (embarqué
+    // par @fastify/jwt 9) y est vulnérable (CVE-2026-34950, CVSS 9.1 — son
+    // détecteur de clé PEM est contourné par une simple espace en tête).
+    // Le secret étant ici une chaîne HMAC et non une clé publique, cette
+    // configuration précise n'est pas exploitable aujourd'hui ; l'épingle rend
+    // la propriété vraie par construction plutôt que par circonstance, et elle
+    // survivra au jour où quelqu'un passera à une clé asymétrique ou à un
+    // résolveur JWKS.
+    verify: {
+      algorithms: [ALGORITHME],
     },
   });
 

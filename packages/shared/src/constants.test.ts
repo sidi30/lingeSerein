@@ -19,57 +19,58 @@ import {
 } from "./constants.ts";
 
 describe("computeDeliveryFee — niveau STANDARD", () => {
-  it("facture 12 € à Orange sous les deux seuils de gratuité", () => {
+  it("ne facture jamais la livraison à Orange, quel que soit le montant", () => {
     const fee = computeDeliveryFee({
       zone: "ORANGE",
       montantApresRemiseCents: 5000,
-      nbKits: 3,
       urgency: "STANDARD",
     });
+    assert.equal(fee.cents, 0);
+    assert.equal(fee.surDevis, false);
+    assert.equal(fee.urgencyLevel, "STANDARD");
+    // `offerte` reste FAUX : rien n'a été offert, la course n'est pas facturée
+    // à Orange. Le distinguer évite d'imprimer « offerte dès 120 € » sur une
+    // commande orangeoise de 50 €, promesse que le barème ne tient pas.
+    assert.equal(fee.offerte, false);
+    assert.match(fee.label, /Orange/);
+  });
+
+  it("facture 12 € jusqu'à 15 km d'Orange", () => {
+    const fee = computeDeliveryFee({ zone: "PROCHE", montantApresRemiseCents: 5000 });
+    assert.equal(fee.cents, DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS);
     assert.equal(fee.cents, 1200);
     assert.equal(fee.offerte, false);
-    assert.equal(fee.surDevis, false);
+  });
+
+  it("facture 15 € de 15 à 35 km (Avignon, Carpentras)", () => {
+    const fee = computeDeliveryFee({ zone: "INTERMEDIAIRE", montantApresRemiseCents: 5000 });
+    assert.equal(fee.cents, DELIVERY_DEFAULTS.ZONE_INTERMEDIAIRE_CENTS);
+    assert.equal(fee.cents, 1500);
+  });
+
+  it("facture 25 € au-delà de 35 km (Cavaillon, Apt, Pertuis)", () => {
+    const fee = computeDeliveryFee({ zone: "ELOIGNE", montantApresRemiseCents: 5000 });
+    assert.equal(fee.cents, DELIVERY_DEFAULTS.ZONE_ELOIGNE_CENTS);
+    assert.equal(fee.cents, 2500);
+    // Même montant que le forfait Express 24 h, mais ce n'est PAS une urgence :
+    // c'est ce que `deliveryLabelFromCents` ne peut plus deviner.
+    assert.equal(fee.urgent, false);
     assert.equal(fee.urgencyLevel, "STANDARD");
   });
 
-  it("offre la livraison à Orange dès 4 kits, même sous 120 €", () => {
-    const fee = computeDeliveryFee({
-      zone: "ORANGE",
-      montantApresRemiseCents: 5000,
-      nbKits: DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE,
-    });
-    assert.equal(fee.cents, 0);
-    assert.equal(fee.offerte, true);
-    assert.match(fee.label, /offerte \(Orange/);
+  it("offre la livraison dès 120 € de commande, dans tous les paliers payants", () => {
+    for (const zone of ["PROCHE", "INTERMEDIAIRE", "ELOIGNE"] as const) {
+      const fee = computeDeliveryFee({
+        zone,
+        montantApresRemiseCents: DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS,
+      });
+      assert.equal(fee.cents, 0, `palier ${zone}`);
+      assert.equal(fee.offerte, true, `palier ${zone}`);
+    }
   });
 
-  it("offre la livraison dès 120 € de commande, quel que soit le nombre de kits", () => {
-    const fee = computeDeliveryFee({
-      zone: "PROCHE",
-      montantApresRemiseCents: DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS,
-      nbKits: 1,
-    });
-    assert.equal(fee.cents, 0);
-    assert.equal(fee.offerte, true);
-  });
-
-  it("facture 12 € dans les villes limitrophes, sans gratuité au nombre de kits", () => {
-    const fee = computeDeliveryFee({
-      zone: "PROCHE",
-      montantApresRemiseCents: 5000,
-      nbKits: 8,
-    });
-    assert.equal(fee.cents, DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS);
-    assert.equal(fee.offerte, false);
-    assert.match(fee.label, /villes limitrophes/);
-  });
-
-  it("bascule hors zone sur devis, sans montant public", () => {
-    const fee = computeDeliveryFee({
-      zone: "HORS_ZONE",
-      montantApresRemiseCents: 50000,
-      nbKits: 20,
-    });
+  it("bascule hors Vaucluse sur devis, sans montant public", () => {
+    const fee = computeDeliveryFee({ zone: "HORS_ZONE", montantApresRemiseCents: 50000 });
     assert.equal(fee.cents, 0);
     assert.equal(fee.surDevis, true);
     assert.equal(fee.offerte, false, "hors zone n'est pas une livraison offerte");
@@ -159,37 +160,52 @@ describe("urgencyFromDelaiJours", () => {
 });
 
 describe("concordance des libellés de livraison devis ↔ contrat", () => {
-  it("produit le même libellé pour le forfait Express 24 h", () => {
-    const fee = computeDeliveryFee({
-      zone: "ORANGE",
+  it("NE devine PAS un Express 24 h à partir de 25 €, devenus ambigus", () => {
+    const express = computeDeliveryFee({
+      zone: "PROCHE",
       montantApresRemiseCents: 1000,
-      nbKits: 1,
       urgency: "EXPRESS_24H",
     });
-    assert.equal(deliveryLabelFromCents(fee.cents), fee.label);
+    const eloigne = computeDeliveryFee({ zone: "ELOIGNE", montantApresRemiseCents: 1000 });
+
+    // Deux situations sans rapport, rigoureusement le même montant.
+    assert.equal(express.cents, 2500);
+    assert.equal(eloigne.cents, 2500);
+    assert.equal(express.urgent, true);
+    assert.equal(eloigne.urgent, false);
+
+    // Le repli par montant refuse donc de trancher. S'il annonçait « Express
+    // 24 h », le devis d'une livraison ordinaire à Cavaillon facturerait au
+    // client une urgence qu'il n'a jamais demandée.
+    assert.equal(deliveryLabelFromCents(2500), "Livraison");
+    assert.doesNotMatch(deliveryLabelFromCents(2500), /Express/);
   });
 
-  it("produit le même libellé pour le forfait Jour même", () => {
+  it("produit le même libellé pour le forfait Jour même, resté sans équivoque", () => {
     const fee = computeDeliveryFee({
-      zone: "ORANGE",
+      zone: "PROCHE",
       montantApresRemiseCents: 1000,
-      nbKits: 1,
       urgency: "JOUR_MEME",
     });
+    assert.equal(fee.cents, 3900);
     assert.equal(deliveryLabelFromCents(fee.cents), fee.label);
   });
 
   it("reste cohérent sur une livraison offerte, au préfixe près", () => {
-    // Le repli par montant ne peut pas deviner le MOTIF de la gratuité (seuil ou
-    // nombre de kits) : on vérifie donc la compatibilité, pas l'égalité stricte.
-    const fee = computeDeliveryFee({
-      zone: "ORANGE",
-      montantApresRemiseCents: 50000,
-      nbKits: 10,
-    });
+    const fee = computeDeliveryFee({ zone: "PROCHE", montantApresRemiseCents: 50000 });
     assert.equal(fee.cents, 0);
+    assert.equal(fee.offerte, true);
     assert.equal(deliveryLabelFromCents(0), "Livraison offerte");
     assert.ok(fee.label.startsWith("Livraison offerte"));
+  });
+
+  it("dit « offerte » pour un zéro venu du seuil, mais pas pour Orange", () => {
+    // Les deux valent 0 € et se ressemblent, sauf que l'un est une faveur
+    // conditionnelle et l'autre le tarif permanent de la commune du siège.
+    const orange = computeDeliveryFee({ zone: "ORANGE", montantApresRemiseCents: 1000 });
+    assert.equal(orange.cents, 0);
+    assert.equal(orange.offerte, false);
+    assert.doesNotMatch(orange.label, /offerte/);
   });
 
   it("ne prétend pas connaître un montant de livraison arbitraire", () => {

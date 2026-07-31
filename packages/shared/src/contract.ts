@@ -92,6 +92,13 @@ export interface ContractData {
   /** Libellé exact des frais de livraison, identique à celui du devis. */
   livraisonLabel?: string;
   /**
+   * Course sans tarif public, à chiffrer. Le contrat DOIT le dire à la place du
+   * montant : sans ce drapeau, l'article financier imprime « offerte » à côté
+   * d'un libellé « sur devis », et la phrase se contredit dans le document que
+   * le client signe.
+   */
+  livraisonSurDevis?: boolean;
+  /**
    * Niveau de service livraison retenu sur le devis (jauge d'urgence).
    * Optionnel : les contrats antérieurs à la jauge n'en portent pas.
    */
@@ -153,6 +160,8 @@ export interface QuoteForContract {
   livraisonCents: number;
   /** Libellé exact des frais de livraison tel qu'imprimé sur le devis. */
   livraisonLabel?: string;
+  /** Course sans tarif public — reprise telle quelle, jamais recalculée ici. */
+  livraisonSurDevis?: boolean;
   /** Niveau de service livraison retenu sur le devis (jauge d'urgence). */
   urgency?: UrgencyLevel;
   /**
@@ -336,6 +345,7 @@ export function quoteToContractData(
     remiseCents: fin.remiseCents,
     livraisonCents: fin.livraisonCents,
     livraisonLabel: quote.livraisonLabel,
+    livraisonSurDevis: quote.livraisonSurDevis,
     urgency: quote.urgency,
     tvaCents: fin.tvaCents,
 

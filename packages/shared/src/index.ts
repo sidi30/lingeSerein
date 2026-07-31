@@ -5,6 +5,7 @@
 
 export * from "./bon-livraison";
 export * from "./constants";
+export * from "./vaucluse";
 export * from "./contract";
 export * from "./dates";
 export * from "./devis";

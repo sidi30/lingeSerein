@@ -226,9 +226,14 @@ export const SUBSCRIPTION_DEFAULTS = {
 /** Livraison — seuils par défaut */
 export const DELIVERY_DEFAULTS = {
   FREE_THRESHOLD_CENTS: 12000, // offerte dès 120 €
-  FREE_MIN_KITS_ORANGE: 4, // offerte dès 4 kits à Orange
-  ZONE_ORANGE_CENTS: 1200, // Orange, sous le seuil de gratuité — 12 €
-  ZONE_PROCHE_CENTS: 1200, // villes limitrophes d'Orange — 12 €
+  /** Orange — commune du siège : la livraison n'y est jamais facturée. */
+  ZONE_ORANGE_CENTS: 0,
+  ZONE_PROCHE_CENTS: 1200, // jusqu'à 15 km d'Orange — 12 €
+  ZONE_INTERMEDIAIRE_CENTS: 1500, // de 15 à 35 km (Avignon, Carpentras…) — 15 €
+  ZONE_ELOIGNE_CENTS: 2500, // au-delà de 35 km (Cavaillon, Apt, Pertuis…) — 25 €
+  /** Bornes de distance routière approchée, en km depuis Orange. */
+  PROCHE_MAX_KM: 15,
+  INTERMEDIAIRE_MAX_KM: 35,
   /** Forfait Express 24 h (livraison le lendemain) — fixe, non soumis aux gratuités. */
   EXPRESS_24H_FEE_CENTS: 2500,
   /** Forfait Jour même (sous 8 h, commande avant 12 h) — fixe, non soumis aux gratuités. */
@@ -236,18 +241,44 @@ export const DELIVERY_DEFAULTS = {
 } as const;
 
 /**
- * Zone de livraison.
- * ORANGE et PROCHE (villes limitrophes) ont un tarif public ; au-delà,
- * HORS_ZONE = systématiquement sur devis (aucun barème publié).
+ * Zone de livraison — palier tarifaire d'une commune, calculé depuis Orange.
+ *
+ * Les quatre premiers paliers ont un tarif public et couvrent TOUT le Vaucluse :
+ * l'entreprise ne livre pas au-delà du département. `HORS_ZONE` n'est donc plus
+ * un secteur mais un état d'exception — fiche client antérieure à la liste
+ * fermée, ou commune non reconnue — et vaut toujours « sur devis », jamais un
+ * prix deviné.
+ *
+ * Le palier vient de {@link VAUCLUSE_COMMUNES}, une liste CLOSE. C'est
+ * volontaire : le barème se déduisait auparavant du seul `postalCode`, que le
+ * client écrit lui-même depuis son profil — saisir « 84100 » suffisait à
+ * s'attribuer le tarif d'Orange.
  */
-export type DeliveryZone = "ORANGE" | "PROCHE" | "HORS_ZONE";
+export type DeliveryZone = "ORANGE" | "PROCHE" | "INTERMEDIAIRE" | "ELOIGNE" | "HORS_ZONE";
 
 export const DELIVERY_ZONE_LABELS: Record<DeliveryZone, string> = {
   ORANGE: "Orange",
-  PROCHE:
-    "Villes limitrophes d'Orange (Jonquières, Courthézon, Camaret, Piolenc, Caderousse, Châteauneuf-du-Pape…)",
-  HORS_ZONE: "Hors zone — sur devis",
+  PROCHE: "Jusqu'à 15 km d'Orange (Jonquières, Courthézon, Camaret, Piolenc, Caderousse…)",
+  INTERMEDIAIRE: "De 15 à 35 km d'Orange (Avignon, Carpentras, Vaison-la-Romaine, Sorgues…)",
+  ELOIGNE: "Au-delà de 35 km, dans le Vaucluse (Cavaillon, Apt, Pertuis…)",
+  HORS_ZONE: "Hors Vaucluse — non desservi",
 };
+
+/** Tarif standard de chaque palier, en centimes. */
+export const DELIVERY_ZONE_CENTS: Record<Exclude<DeliveryZone, "HORS_ZONE">, number> = {
+  ORANGE: DELIVERY_DEFAULTS.ZONE_ORANGE_CENTS,
+  PROCHE: DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS,
+  INTERMEDIAIRE: DELIVERY_DEFAULTS.ZONE_INTERMEDIAIRE_CENTS,
+  ELOIGNE: DELIVERY_DEFAULTS.ZONE_ELOIGNE_CENTS,
+};
+
+/** Palier déduit d'une distance routière approchée depuis Orange. */
+export function zoneFromKm(km: number): Exclude<DeliveryZone, "HORS_ZONE"> {
+  if (km <= 0) return "ORANGE";
+  if (km <= DELIVERY_DEFAULTS.PROCHE_MAX_KM) return "PROCHE";
+  if (km <= DELIVERY_DEFAULTS.INTERMEDIAIRE_MAX_KM) return "INTERMEDIAIRE";
+  return "ELOIGNE";
+}
 
 /**
  * Niveau d'urgence de la livraison (la « jauge » du devis).
@@ -324,8 +355,12 @@ export interface DeliveryFeeInput {
   zone: DeliveryZone;
   /** Montant des articles APRÈS remise, en centimes (seuil de gratuité). */
   montantApresRemiseCents: number;
-  /** Nombre de kits commandés (gratuité Orange). */
-  nbKits: number;
+  /**
+   * @deprecated N'entre plus dans le calcul. La gratuité « dès 4 kits à Orange »
+   * a disparu le jour où Orange est devenue gratuite sans condition. Le champ
+   * reste accepté pour ne pas casser les appels existants, et sera retiré.
+   */
+  nbKits?: number;
 }
 
 export interface DeliveryFee {
@@ -359,11 +394,16 @@ export function urgencyFromDelaiJours(delaiJours: number | undefined): UrgencyLe
  *  - urgence FLASH (< 3 h) → toujours sur devis (pas de SLA garanti avec un seul livreur) ;
  *  - urgence JOUR_MEME (< 8 h) → forfait 39 € fixe, ni gratuité ni tarif de zone ;
  *  - urgence EXPRESS_24H (J+1) → forfait 25 € fixe, ni gratuité ni tarif de zone ;
- *  - STANDARD (J+2/J+3) → tarif ordinaire : offerte dès 120 € de commande (après
- *    remise) ou dès 4 kits à Orange, sinon 12 € (Orange / villes limitrophes).
+ *  - STANDARD (J+2/J+3) → tarif du palier de la commune (0 / 12 / 15 / 25 €),
+ *    la livraison étant offerte dès 120 € de commande après remise.
+ *
+ * Orange rend 0 € par son PALIER, pas par une gratuité conditionnelle : c'est la
+ * commune du siège, la course n'y est jamais facturée. D'où `offerte: false` —
+ * rien n'a été « offert », il n'y avait rien à payer. La nuance compte pour le
+ * libellé imprimé sur le devis.
  */
 export function computeDeliveryFee(input: DeliveryFeeInput): DeliveryFee {
-  const { zone, montantApresRemiseCents, nbKits } = input;
+  const { zone, montantApresRemiseCents } = input;
   const level = input.urgency ?? urgencyFromDelaiJours(input.delaiJours);
 
   if (zone === "HORS_ZONE") {
@@ -400,15 +440,24 @@ export function computeDeliveryFee(input: DeliveryFeeInput): DeliveryFee {
     };
   }
 
-  const offerteSeuil = montantApresRemiseCents >= DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS;
-  const offerteOrange = zone === "ORANGE" && nbKits >= DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE;
-
-  if (offerteSeuil || offerteOrange) {
+  // Orange d'abord : sa gratuité tient au palier, pas au montant commandé. La
+  // tester ici évite d'imprimer « offerte dès 120 € » sur une commande orangeoise
+  // de 130 € — le client croirait devoir 12 € au prochain panier plus léger.
+  if (zone === "ORANGE") {
     return {
       cents: 0,
-      label: offerteOrange
-        ? `Livraison offerte (Orange, dès ${DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits)`
-        : `Livraison offerte (dès ${DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande)`,
+      label: "Livraison à Orange — incluse",
+      urgencyLevel: level,
+      urgent: false,
+      offerte: false,
+      surDevis: false,
+    };
+  }
+
+  if (montantApresRemiseCents >= DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS) {
+    return {
+      cents: 0,
+      label: `Livraison offerte (dès ${DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande)`,
       urgencyLevel: level,
       urgent: false,
       offerte: true,
@@ -416,12 +465,9 @@ export function computeDeliveryFee(input: DeliveryFeeInput): DeliveryFee {
     };
   }
 
-  const cents =
-    zone === "ORANGE" ? DELIVERY_DEFAULTS.ZONE_ORANGE_CENTS : DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS;
-
   return {
-    cents,
-    label: `Livraison — ${zone === "ORANGE" ? "Orange" : "villes limitrophes d'Orange"}`,
+    cents: DELIVERY_ZONE_CENTS[zone],
+    label: `Livraison — ${DELIVERY_ZONE_LABELS[zone]}`,
     urgencyLevel: level,
     urgent: false,
     offerte: false,
@@ -434,11 +480,13 @@ export function computeDeliveryFee(input: DeliveryFeeInput): DeliveryFee {
  * impriment strictement la même clause.
  */
 export const DELIVERY_RULE_TEXT =
-  `Frais de livraison : standard (J+2 à J+3) — ` +
-  `${DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS / 100} € à Orange et dans les villes limitrophes, ` +
-  `offerte dès ${DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande ou dès ` +
-  `${DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits à Orange ; au-delà des villes limitrophes, ` +
-  `sur devis. Urgence : Express 24 h (J+1) — forfait de ` +
+  `Frais de livraison : standard (J+2 à J+3), dans le Vaucluse uniquement, ` +
+  `calculés depuis Orange — livraison incluse à Orange, ` +
+  `${DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS / 100} € jusqu'à ${DELIVERY_DEFAULTS.PROCHE_MAX_KM} km, ` +
+  `${DELIVERY_DEFAULTS.ZONE_INTERMEDIAIRE_CENTS / 100} € de ${DELIVERY_DEFAULTS.PROCHE_MAX_KM} à ` +
+  `${DELIVERY_DEFAULTS.INTERMEDIAIRE_MAX_KM} km, ` +
+  `${DELIVERY_DEFAULTS.ZONE_ELOIGNE_CENTS / 100} € au-delà ; offerte dès ` +
+  `${DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande. Urgence : Express 24 h (J+1) — forfait de ` +
   `${DELIVERY_DEFAULTS.EXPRESS_24H_FEE_CENTS / 100} € ; Jour même (sous 8 h, commande avant ` +
   `12 h, selon disponibilité) — forfait de ${DELIVERY_DEFAULTS.JOUR_MEME_FEE_CENTS / 100} € ; ` +
   `moins de 3 h — sur devis, selon disponibilité. Les forfaits d'urgence sont fixes, non ` +
@@ -451,12 +499,15 @@ export const DELIVERY_RULE_TEXT =
  */
 export function deliveryLabelFromCents(cents: number): string {
   if (cents <= 0) return "Livraison offerte";
-  if (cents === DELIVERY_DEFAULTS.EXPRESS_24H_FEE_CENTS) {
-    return "Livraison Express 24 h (livraison le lendemain (J+1)) — forfait";
-  }
   if (cents === DELIVERY_DEFAULTS.JOUR_MEME_FEE_CENTS) {
     return "Livraison Jour même (sous 8 h — commande avant 12 h, selon disponibilité) — forfait";
   }
+  // ⚠️ 25 € N'EST PLUS RECONNAISSABLE : c'est à la fois le forfait Express 24 h et
+  // le palier « au-delà de 35 km » (Cavaillon, Apt, Pertuis). Deviner à partir du
+  // montant imprimerait « Express 24 h » sur une livraison standard de Cavaillon,
+  // et facturerait au client une urgence qu'il n'a pas demandée. Cette fonction
+  // n'est qu'un REPLI : quand le libellé exact compte, il est figé à l'émission
+  // (`quotes.livraisonLabel`, `invoices.metadata.livraisonLabel`) et prime.
   return "Livraison";
 }
 
@@ -467,8 +518,13 @@ export function deliveryLabelFromCents(cents: number): string {
  * FIXE : {@link SUBSCRIPTION_DEFAULTS.KIT_BAIN_QTY} kits bain + {@link SUBSCRIPTION_DEFAULTS.KIT_LIT_QTY}
  * kits lit + {@link SUBSCRIPTION_DEFAULTS.DELIVERIES_PER_MONTH} livraisons/reprises incluses
  * (une par quinzaine). La base de comparaison honnête est donc la valeur à-la-carte de CE
- * panier mensuel fixe — jamais multipliée par le nombre de rotations/mois. Chaque livraison
- * est illustrée au tarif « villes limitrophes » (12 €).
+ * panier mensuel fixe — jamais multipliée par le nombre de rotations/mois.
+ *
+ * Chaque livraison est illustrée au palier PROCHE (12 €), et le prix du Pack ne suit
+ * DÉLIBÉRÉMENT pas la commune du client. Deux raisons : le forfait mensuel est annoncé
+ * partout comme un prix unique, et l'indexer sur la distance ferait varier l'abonnement
+ * d'un client à l'autre — donc changerait le montant prélevé aux abonnés actuels. Le
+ * palier reste un choix d'illustration, pas une règle de facturation.
  *
  * @returns montants en centimes : `alaCarteCents` (panier mensuel à l'unité),
  * `packCents` (prix du pack) et `economieCents` (= alaCarteCents − packCents).

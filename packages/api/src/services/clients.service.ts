@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import type { PrismaClient, Prisma, AccommodationType, ClientSource } from "@prisma/client";
 import { NotFoundError, ConflictError, DuplicateClientError } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
+import { alignementCommune } from "../utils/commune.js";
 
 const BCRYPT_ROUNDS = 12;
 
@@ -35,6 +36,8 @@ export interface CreateClientInput {
   address?: string;
   city?: string;
   postalCode?: string;
+  /** Commune de livraison (code INSEE) — validée contre la liste fermée en amont. */
+  communeInsee?: string;
   accommodationType?: AccommodationType;
   zoneId?: string;
   preferredTimeSlot?: string;
@@ -56,6 +59,8 @@ export interface UpdateClientInput {
   address?: string | null;
   city?: string | null;
   postalCode?: string | null;
+  /** Commune de livraison — se corrige, ne se supprime pas (cf. route). */
+  communeInsee?: string;
   accommodationType?: AccommodationType | null;
   zoneId?: string | null;
   preferredTimeSlot?: string | null;
@@ -184,6 +189,14 @@ export class ClientsService {
       );
     }
 
+    // ---- Adresse : la commune fait autorité sur la ville et le code postal ----
+    // Alignés AVANT la déduction du secteur de tournée, qui se fait sur le code
+    // postal : un code postal contredisant la commune rattachait le client à un
+    // secteur où il n'habite pas.
+    const adresse = alignementCommune(data);
+    const city = adresse?.city ?? data.city ?? null;
+    const postalCode = adresse?.postalCode ?? data.postalCode ?? null;
+
     // ---- Zone : explicite si fournie, sinon déduite du code postal ----
     let zoneId: string | null = null;
     if (data.zoneId) {
@@ -195,8 +208,8 @@ export class ClientsService {
         throw new NotFoundError("Zone", data.zoneId);
       }
       zoneId = zone.id;
-    } else if (data.postalCode) {
-      zoneId = await this.resolveZoneFromPostalCode(data.postalCode, operatorId);
+    } else if (postalCode) {
+      zoneId = await this.resolveZoneFromPostalCode(postalCode, operatorId);
     }
 
     // ---- Mot de passe provisoire (uniquement si accès app demandé) ----
@@ -217,8 +230,9 @@ export class ClientsService {
         passwordHash,
         phone: data.phone ?? null,
         address: data.address ?? null,
-        city: data.city ?? null,
-        postalCode: data.postalCode ?? null,
+        city,
+        postalCode,
+        communeInsee: data.communeInsee ?? null,
         accommodationType: data.accommodationType ?? null,
         zoneId,
         preferredTimeSlot: data.preferredTimeSlot ?? null,
@@ -240,6 +254,7 @@ export class ClientsService {
         address: true,
         city: true,
         postalCode: true,
+        communeInsee: true,
         accommodationType: true,
         rating: true,
         requirements: true,
@@ -320,6 +335,9 @@ export class ClientsService {
           phone: true,
           city: true,
           postalCode: true,
+          // La liste affiche la zone de livraison : elle se déduit de la
+          // commune, pas du code postal (84100 = Orange ET Uchaux).
+          communeInsee: true,
           accommodationType: true,
           rating: true,
           source: true,
@@ -384,6 +402,7 @@ export class ClientsService {
         address: true,
         city: true,
         postalCode: true,
+        communeInsee: true,
         accommodationType: true,
         rating: true,
         requirements: true,
@@ -499,6 +518,11 @@ export class ClientsService {
       }
     }
 
+    // La commune fait autorité sur la ville et le code postal — mêmes règles
+    // qu'à la création, pour que l'admin et le client n'écrivent pas des fiches
+    // de formes différentes.
+    const adresse = alignementCommune(data);
+
     await this.prisma.user.update({
       where: { id },
       data: {
@@ -509,6 +533,8 @@ export class ClientsService {
         ...(data.address !== undefined ? { address: data.address } : {}),
         ...(data.city !== undefined ? { city: data.city } : {}),
         ...(data.postalCode !== undefined ? { postalCode: data.postalCode } : {}),
+        ...(data.communeInsee !== undefined ? { communeInsee: data.communeInsee } : {}),
+        ...(adresse ?? {}),
         ...(data.accommodationType !== undefined
           ? { accommodationType: data.accommodationType }
           : {}),
@@ -533,6 +559,7 @@ export class ClientsService {
         address: true,
         city: true,
         postalCode: true,
+        communeInsee: true,
         accommodationType: true,
         rating: true,
         requirements: true,

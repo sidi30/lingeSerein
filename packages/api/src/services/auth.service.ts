@@ -21,6 +21,11 @@ interface RegisterParams {
   name: string;
   address: string;
   accommodationType: "AIRBNB" | "GITE" | "AUBERGE" | "HOTEL" | "AUTRE";
+  /** Commune de livraison (code INSEE) — déjà validée contre la liste fermée. */
+  communeInsee?: string;
+  /** Ville et code postal DÉDUITS de la commune, jamais saisis à l'inscription. */
+  city?: string;
+  postalCode?: string;
   operatorId: string;
   zoneId?: string;
   ipAddress?: string;
@@ -77,6 +82,13 @@ export class AuthService {
         // livreur affichaient du base64. Le chiffrement ne protégeait rien (clé
         // sur le même serveur que la base) et `phone` n'a jamais été chiffré.
         address: params.address,
+        // La commune fixe le palier de livraison ; `city`/`postalCode` en
+        // découlent (cf. `alignementCommune`). Absente — inscription depuis un
+        // binaire mobile antérieur — la fiche retombe sur le repli par code
+        // postal, comme toutes celles créées avant la liste fermée.
+        ...(params.communeInsee ? { communeInsee: params.communeInsee } : {}),
+        ...(params.city ? { city: params.city } : {}),
+        ...(params.postalCode ? { postalCode: params.postalCode } : {}),
         accommodationType: params.accommodationType,
         role: "ROLE_CLIENT",
         operatorId: params.operatorId,

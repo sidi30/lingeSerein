@@ -3,8 +3,22 @@ import { randomBytes } from "node:crypto";
 import { NotFoundError, AppError, UnprocessableEntityError } from "../utils/errors.js";
 import { createAuditLog } from "../utils/audit.js";
 import { NotificationsService } from "./notifications.service.js";
-import { ORDER_TRANSITIONS } from "@lingengo/shared";
-import type { OrderStatus } from "@lingengo/shared";
+import {
+  ORDER_TRANSITIONS,
+  communeParInsee,
+  computeDeliveryFee,
+  deliveryLabelFromCents,
+  differenceInCalendarDays,
+  zoneParCodePostal,
+} from "@lingengo/shared";
+import type { DeliveryZone, OrderStatus } from "@lingengo/shared";
+import {
+  sendTransactionalMail,
+  toMailDate,
+  type SendMailInput,
+  type SendMailResult,
+} from "../utils/mailer.js";
+import { emailAutorise, emailsAutorises } from "../utils/notify.js";
 import type {
   CreateOrderInput,
   ListOrdersQuery,
@@ -18,8 +32,150 @@ import type {
  */
 const ORDER_DELETABLE: OrderStatus[] = ["PENDING", "CANCELLED"];
 
+/**
+ * Zone TARIFAIRE d'un client (barème de `@lingengo/shared`), déduite de sa fiche.
+ *
+ * Le palier vient de la COMMUNE, et d'elle seule. Il se déduisait auparavant du
+ * `postalCode`, une chaîne que le client écrit lui-même depuis `PATCH /auth/me` :
+ * saisir « 84100 » suffisait à s'attribuer la gratuité d'Orange. Le code INSEE,
+ * lui, est choisi dans une liste FERMÉE et revalidé à l'écriture.
+ *
+ * Trois chemins, dans cet ordre :
+ *   1. `communeInsee` renseigné → le palier de la commune. C'est le cas normal ;
+ *   2. sinon, REPLI par code postal, pour les fiches antérieures à la liste
+ *      fermée. Quand le code postal est à cheval sur deux paliers (84100 =
+ *      Orange + Uchaux), `zoneParCodePostal` retient le MOINS CHER : on ne
+ *      facture pas un client sur une incertitude qui n'est pas la sienne ;
+ *   3. commune inconnue ou hors Vaucluse → `HORS_ZONE`, donc « sur devis ».
+ *      Aucun tarif n'est publié hors du département : le deviner reviendrait à
+ *      inventer un prix.
+ *
+ * `zoneId` (le secteur de TOURNÉE en base, « Vaucluse Nord ») n'entre plus dans
+ * le calcul : c'est une donnée d'organisation logistique, elle ne porte aucun
+ * barème public, et s'en servir donnait le tarif de proximité à toute adresse
+ * qu'un admin avait rattachée à un secteur, fût-elle à 60 km.
+ */
+export function zoneTarifaire(client: {
+  communeInsee?: string | null;
+  postalCode?: string | null;
+}): DeliveryZone {
+  const insee = (client.communeInsee ?? "").trim();
+  if (insee) {
+    return communeParInsee(insee)?.zone ?? "HORS_ZONE";
+  }
+  return zoneParCodePostal(client.postalCode).zone;
+}
+
+/** Frais de livraison tels qu'exposés dans les réponses de l'API. */
+export interface DeliveryFeeResume {
+  cents: number;
+  label: string;
+  /** Aucun tarif public : montant à chiffrer à la main sur le devis. */
+  surDevis: boolean;
+}
+
+/**
+ * Relit les frais figés sur une commande.
+ *
+ * Le libellé se déduit du montant, sauf quand la commande porte le drapeau
+ * « sur devis » : 0 € y signifie « à chiffrer », surtout pas « offerte ».
+ */
+export function resumeFrais(order: {
+  deliveryFeeCents: number;
+  deliveryFeeSurDevis: boolean;
+}): DeliveryFeeResume {
+  return {
+    cents: order.deliveryFeeCents,
+    label: order.deliveryFeeSurDevis
+      ? "Livraison — sur devis"
+      : deliveryLabelFromCents(order.deliveryFeeCents),
+    surDevis: order.deliveryFeeSurDevis,
+  };
+}
+
+/**
+ * Prépare une valeur texte pour le mailer, qui valide en `.strict()` : il refuse
+ * tout caractère de CONTRÔLE et borne la longueur de chaque champ.
+ *
+ * Sans ce passage, deux cas parfaitement ordinaires faisaient échouer l'email
+ * entier en 400 : une adresse saisie sur plusieurs lignes (`User.address` est un
+ * TEXT libre, et une adresse postale tient rarement sur une ligne), et un sujet
+ * dépassant 200 caractères pour un client au nom long. L'échec était silencieux
+ * pour l'utilisateur — la commande passe — mais l'email n'arrivait jamais.
+ *
+ * On replie donc les blancs sur une espace simple plutôt que de laisser le
+ * mailer refuser : mieux vaut une adresse sur une ligne qu'aucun email.
+ *
+ * ⚠️ Replier `\s` ne SUFFIT PAS. `\s` ne couvre que les blancs ; les autres
+ * caractères de contrôle (\u0000-\u0008, \u000e-\u001f, \u007f) traversaient la
+ * normalisation intacts et faisaient refuser l'envoi entier. Or `name`,
+ * `address` et `phone` sont écrits par le CLIENT lui-même depuis
+ * `PATCH /auth/me` : un seul octet de contrôle posé sur sa fiche éteignait à la
+ * fois sa confirmation et l'alerte « nouvelle commande » de l'exploitation, sans
+ * la moindre trace visible. On les retire donc ici, à l'ÉMISSION — le mailer,
+ * lui, continue de les refuser, et c'est très bien ainsi : deux remparts.
+ */
+function pourMail(valeur: string, maxLongueur: number): string {
+  return (
+    valeur
+      // Les blancs deviennent une espace : une adresse sur trois lignes reste lisible.
+      .replace(/\s+/g, " ")
+      // Les autres caractères de contrôle n'ont aucune représentation utile.
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .trim()
+      .slice(0, maxLongueur)
+  );
+}
+
+/** Fiche client, telle que la création de commande a besoin de la lire. */
+interface FicheClient {
+  name: string;
+  companyName: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  postalCode: string | null;
+  /** Commune de livraison (code INSEE) — porte le palier tarifaire. */
+  communeInsee: string | null;
+}
+
+export interface OrdersDeps {
+  /**
+   * Transport d'email — injectable pour les tests, qui ne doivent joindre aucun
+   * mailer. En production, c'est le client HTTP interne de `utils/mailer.ts`.
+   */
+  sendMail?: (input: SendMailInput) => Promise<SendMailResult>;
+}
+
 export class OrdersService {
-  constructor(private readonly prisma: PrismaClient) {}
+  private readonly sendMail: (input: SendMailInput) => Promise<SendMailResult>;
+
+  /**
+   * Envoi d'emails lancé par la dernière `create()`, détaché du fil de la requête.
+   *
+   * Conservé pour une seule raison : donner aux TESTS un point d'attente
+   * (`attendreEmails()`). La production ne le lit jamais — elle n'a rien à
+   * attendre, c'est tout l'intérêt.
+   */
+  private envoiEmailsEnCours: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly prisma: PrismaClient,
+    deps: OrdersDeps = {},
+  ) {
+    this.sendMail = deps.sendMail ?? sendTransactionalMail;
+  }
+
+  /**
+   * Attend la fin des emails détachés par la dernière `create()`.
+   *
+   * **Réservé aux tests.** Aucune route n'a de raison d'appeler ceci : le seul
+   * effet serait de remettre le mailer sur le chemin de la réponse HTTP, c'est-
+   * à-dire de rétablir exactement ce que le détachement corrige.
+   */
+  async attendreEmails(): Promise<void> {
+    await this.envoiEmailsEnCours;
+  }
 
   async list(query: ListOrdersQuery, userId?: string, isAdmin = false) {
     const { page, limit, status, source, from, to, search } = query;
@@ -60,6 +216,13 @@ export class OrdersService {
         include: {
           items: { include: { product: { select: { name: true, range: true, category: true } } } },
           user: { select: { id: true, name: true, email: true } },
+          // Devis DÉJÀ ÉMIS depuis la commande — même relation que `getById`.
+          // Sans elle, la liste proposait « générer un devis » pour une commande
+          // qui en avait déjà un : l'admin cliquait, la route idempotente lui
+          // rendait le devis existant, et l'écran laissait croire à une émission.
+          // `deletedAt` est sélectionné parce qu'un brouillon jeté doit se relire
+          // comme absent — c'est la condition sous laquelle on réémet.
+          quoteFromOrder: { select: { id: true, numero: true, status: true, deletedAt: true } },
         },
       }),
       this.prisma.order.count({ where }),
@@ -70,7 +233,23 @@ export class OrdersService {
     ]);
 
     return {
-      data: orders,
+      // Aplati en `generatedQuote`, exactement comme `getById` : les écrans
+      // lisent la même forme qu'ils viennent de la liste ou de la fiche, et
+      // `deletedAt` ne fuit pas dans la réponse.
+      data: orders.map((order) => {
+        const { quoteFromOrder, ...rest } = order;
+        return {
+          ...rest,
+          generatedQuote:
+            quoteFromOrder && !quoteFromOrder.deletedAt
+              ? {
+                  id: quoteFromOrder.id,
+                  numero: quoteFromOrder.numero,
+                  status: quoteFromOrder.status,
+                }
+              : null,
+        };
+      }),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
       ...(isAdmin ? { meta: { newCount } } : {}),
     };
@@ -111,6 +290,12 @@ export class OrdersService {
         },
         deliveryStop: true,
         quote: { select: { id: true, numero: true } },
+        // Devis ÉMIS depuis cette commande — relation inverse de `quote`, à ne
+        // pas confondre : `quote` dit « commande issue du devis X », celui-ci
+        // « devis X émis depuis cette commande ». `deletedAt` est sélectionné
+        // parce qu'un brouillon jeté doit se relire comme absent : c'est
+        // exactement la condition sous laquelle `createFromOrder` réémet.
+        quoteFromOrder: { select: { id: true, numero: true, status: true, deletedAt: true } },
       },
     });
 
@@ -144,10 +329,23 @@ export class OrdersService {
         };
       });
 
+    // Sorti de l'objet renvoyé : l'écran lit `generatedQuote`, une forme stable
+    // qui ne laisse pas fuir `deletedAt` ni la relation brute.
+    const { quoteFromOrder, ...rest } = order;
+    const devisEmis =
+      quoteFromOrder && !quoteFromOrder.deletedAt
+        ? { id: quoteFromOrder.id, numero: quoteFromOrder.numero, status: quoteFromOrder.status }
+        : null;
+
     return {
-      ...order,
+      ...rest,
       statusHistory,
       convertedFromQuote: order.quote ?? null,
+      /** Devis déjà émis pour cette commande — `null` tant que rien n'a été généré. */
+      generatedQuote: devisEmis,
+      // Même forme que la réponse de création : les écrans lisent le libellé au
+      // même endroit, qu'ils viennent de créer la commande ou de la rouvrir.
+      deliveryFee: resumeFrais(order),
     };
   }
 
@@ -205,6 +403,48 @@ export class OrdersService {
 
     const totalCents = items.reduce((sum, item) => sum + item.totalCents, 0);
 
+    // Une seule lecture de la fiche client : elle sert au barème de livraison
+    // (commune, code postal de repli) ET aux emails de confirmation plus bas.
+    const client = await this.prisma.user.findUnique({
+      where: { id: ownerId },
+      select: {
+        name: true,
+        companyName: true,
+        email: true,
+        phone: true,
+        address: true,
+        postalCode: true,
+        communeInsee: true,
+      },
+    });
+
+    const deliveryDate = new Date(data.deliveryDate);
+
+    // Frais de livraison : le barème vit dans `@lingengo/shared` et NULLE PART
+    // ailleurs — la vitrine, le devis, le contrat et l'API doivent annoncer le
+    // même prix au même client. On ne lui fournit ici que ses trois entrées.
+    //
+    // Le délai se compte en jours de CALENDRIER : la date de livraison désigne
+    // un jour, pas un instant. Une date déjà passée donne un délai négatif, donc
+    // le niveau le plus urgent — c'est la lecture honnête d'une commande à
+    // livrer « pour hier », et le seul autre choix serait d'inventer un tarif.
+    //
+    // Le nombre de kits n'est plus compté : la gratuité « dès 4 kits à Orange »
+    // a disparu le jour où Orange est devenue gratuite sans condition. Le champ
+    // reste accepté par le barème (déprécié), le lui passer ne changerait rien.
+    const fee = computeDeliveryFee({
+      zone: client ? zoneTarifaire(client) : "HORS_ZONE",
+      delaiJours: differenceInCalendarDays(new Date(), deliveryDate),
+      // Aucune remise sur une commande : le sous-total des articles EST le
+      // montant après remise attendu par le barème.
+      montantApresRemiseCents: totalCents,
+    });
+
+    // `surDevis` ⇒ 0 en base et le drapeau qui l'explique. Enregistrer le
+    // `cents` du barème serait ici enregistrer un montant inventé : hors zone et
+    // Flash n'ont AUCUN tarif public, ils se chiffrent à la main sur le devis.
+    const deliveryFeeCents = fee.surDevis ? 0 : fee.cents;
+
     // orderNumber est aléatoire sur 3 octets : la collision est rare mais réelle
     // (contrainte unique → P2002). On retente avec un nouveau tirage.
     const year = new Date().getFullYear();
@@ -216,8 +456,10 @@ export class OrdersService {
           userId: ownerId,
           orderNumber: num,
           totalCents,
+          deliveryFeeCents,
+          deliveryFeeSurDevis: fee.surDevis,
           source,
-          deliveryDate: new Date(data.deliveryDate),
+          deliveryDate,
           timeSlot: data.timeSlot,
           specialNotes: data.specialNotes,
           items: {
@@ -275,6 +517,10 @@ export class OrdersService {
       changes: {
         orderNumber,
         totalCents,
+        deliveryFeeCents,
+        // Tracé : c'est la seule trace qui explique pourquoi une commande hors
+        // zone porte 0 € de livraison sans que personne n'ait fait de cadeau.
+        ...(fee.surDevis ? { deliveryFeeSurDevis: true } : {}),
         itemCount: items.length,
         source,
         ...(actorId !== ownerId ? { onBehalfOf: ownerId } : {}),
@@ -294,7 +540,198 @@ export class OrdersService {
       );
     }
 
-    return order;
+    // ⚠️ PAS de `await` : les emails partent HORS du fil de la requête.
+    //
+    // Attendus ici, ils s'ajoutaient au temps de réponse de `POST /orders` :
+    // un envoi client, puis un par gestionnaire, chacun pouvant courir jusqu'au
+    // timeout de 10 s du mailer. Avec trois administrateurs, la requête pouvait
+    // dépasser les 20 s au bout desquelles le mobile abandonne — le client
+    // voyait « Erreur », repassait sa commande, et la première était pourtant
+    // bien enregistrée. Le numéro de commande étant tiré au hasard, rien ne
+    // dédoublonnait les deux. Même raisonnement que `notify()` pour le push.
+    //
+    // La méthode n'échoue jamais (elle absorbe tout) ; le `.catch` est le filet
+    // qui garantit qu'aucun rejet ne devienne un `unhandledRejection`.
+    this.envoiEmailsEnCours = this.envoyerEmailsCommande({
+      order: {
+        orderNumber,
+        deliveryDate,
+        timeSlot: data.timeSlot ?? null,
+        totalCents,
+        deliveryFeeCents,
+        deliveryFeeSurDevis: fee.surDevis,
+        source,
+      },
+      clientId: ownerId,
+      client,
+      lignes: items.map((item) => ({
+        // `||` : le mailer exige `designation: z.string().min(1)` et refuserait
+        // l'email ENTIER pour un nom de produit vide.
+        designation: productMap.get(item.productId)?.name || "Article",
+        qty: item.quantity,
+      })),
+    }).catch((err: unknown) => {
+      const raison = err instanceof Error ? err.message : String(err);
+      console.error(`[orders] Emails de commande abandonnés (${orderNumber}) : ${raison}`);
+    });
+
+    // `deliveryFee` en plus des colonnes : l'appelant a besoin du LIBELLÉ et du
+    // « sur devis » pour dire au client ce qu'il paie, sans réimplémenter le
+    // barème côté mobile ou admin.
+    return { ...order, deliveryFee: resumeFrais(order) };
+  }
+
+  // ---- Emails de commande (best effort) ---------------------------------------
+
+  /**
+   * Confirme la commande au client et la signale aux gestionnaires.
+   *
+   * **Ne lève JAMAIS.** Une commande enregistrée est un engagement pris : la
+   * perdre parce que le mailer est indisponible serait le pire des échanges.
+   * Chaque envoi est donc isolé, et l'échec ne laisse qu'une ligne de log — la
+   * notification in-app, elle, est déjà partie et fait foi.
+   *
+   * Un client sans email (fiche créée par l'admin, rencontré au téléphone) n'est
+   * pas une erreur : c'est le cas le plus courant, on saute simplement son envoi.
+   *
+   * **Appelée SANS `await`** par `create()` : le temps du mailer n'appartient pas
+   * à la requête du client. Les tests s'y raccrochent par `attendreEmails()`.
+   */
+  private async envoyerEmailsCommande(input: {
+    order: {
+      orderNumber: string;
+      deliveryDate: Date;
+      timeSlot: string | null;
+      totalCents: number;
+      deliveryFeeCents: number;
+      deliveryFeeSurDevis: boolean;
+      source: string;
+    };
+    clientId: string;
+    client: FicheClient | null;
+    lignes: { designation: string; qty: number }[];
+  }): Promise<void> {
+    const { order, client, clientId, lignes } = input;
+
+    try {
+      const montants = {
+        sousTotalCents: order.totalCents,
+        livraisonCents: order.deliveryFeeCents,
+        totalCents: order.totalCents + order.deliveryFeeCents,
+        livraisonSurDevis: order.deliveryFeeSurDevis,
+      };
+      const commande = {
+        orderNumber: order.orderNumber,
+        dateLivraison: toMailDate(order.deliveryDate),
+        ...(order.timeSlot ? { creneau: pourMail(order.timeSlot, 20) } : {}),
+        lignes: lignes.map((l) => ({ designation: pourMail(l.designation, 300), qty: l.qty })),
+        ...montants,
+      };
+
+      // `||` et NON `??` : `??` ne se déclenche que sur null/undefined, et le
+      // schéma serveur accepte un `companyName` VIDE (`z.string().max(200)`,
+      // sans `.min(1)`). Une chaîne vide traversait donc jusqu'au mailer, qui
+      // exige `clientNom: z.string().min(1)` et refuse l'envoi ENTIER en 400 —
+      // silencieusement, puisque l'échec d'email ne remonte jamais. Un seul
+      // champ laissé vide sur une fiche éteignait la confirmation du client ET
+      // l'alerte de l'exploitation.
+      const nomClient = pourMail(client?.companyName || client?.name || "Client", 200) || "Client";
+
+      // 1) Confirmation au client.
+      //
+      // `try/catch` PROPRE, distinct de celui des gestionnaires : les deux
+      // envois n'ont aucune raison de tomber ensemble, et un bloc unique faisait
+      // qu'une adresse client refusée privait aussi l'exploitation de son alerte.
+      try {
+        if (client?.email && (await emailAutorise(this.prisma, clientId, "ORDER_CREATED"))) {
+          const envoi = await this.sendMail({
+            to: client.email,
+            subject: `Votre commande ${order.orderNumber} est enregistrée`,
+            template: "order_confirmation_client",
+            data: {
+              clientNom: nomClient,
+              ...commande,
+            },
+          });
+          if (!envoi.ok) {
+            console.error(`[orders] Email client échoué (${order.orderNumber}) : ${envoi.error}`);
+          }
+        }
+      } catch (err) {
+        const raison = err instanceof Error ? err.message : String(err);
+        console.error(`[orders] Email client abandonné (${order.orderNumber}) : ${raison}`);
+      }
+
+      // 2) Signalement aux gestionnaires — sauf sur MANUAL : l'admin destinataire
+      //    est celui qui vient de saisir la commande, se l'envoyer n'apprend rien.
+      //    Même règle que la notification in-app juste au-dessus.
+      if (order.source === "MANUAL") return;
+
+      const admins = await this.prisma.user.findMany({
+        where: {
+          role: { in: ["ROLE_ADMIN", "ROLE_SUPER_ADMIN"] },
+          isActive: true,
+          deletedAt: null,
+        },
+        select: { id: true, email: true },
+      });
+
+      // UNE requête de préférences pour tous les gestionnaires, et non une par
+      // admin : le `emailAutorise` unitaire dans la boucle était un N+1 sur le
+      // chemin de création de commande.
+      const destinataires = admins.filter((a): a is { id: string; email: string } =>
+        Boolean(a.email),
+      );
+      const autorises = await emailsAutorises(
+        this.prisma,
+        destinataires.map((a) => a.id),
+        "ORDER_CREATED",
+      );
+
+      // `allSettled` et non une boucle séquentielle : les envois sont
+      // indépendants, les enchaîner faisait payer à la commande la somme des
+      // timeouts (jusqu'à 10 s CHACUN) au lieu du plus lent.
+      const envois = await Promise.allSettled(
+        destinataires
+          .filter((admin) => autorises.has(admin.id))
+          .map((admin) =>
+            this.sendMail({
+              to: admin.email,
+              // Sujet borné à 200 : au-delà, le mailer refuse tout l'envoi. Un nom
+              // d'établissement long suffisait à dépasser la limite.
+              subject: pourMail(`Nouvelle commande ${order.orderNumber} — ${nomClient}`, 200),
+              template: "order_notification_owner",
+              data: {
+                ...commande,
+                clientNom: nomClient,
+                ...(client?.email ? { clientEmail: client.email } : {}),
+                ...(client?.phone ? { clientTel: pourMail(client.phone, 20) } : {}),
+                ...(client?.address ? { clientAdresse: pourMail(client.address, 500) } : {}),
+                source: order.source,
+              },
+            }),
+          ),
+      );
+
+      for (const envoi of envois) {
+        const raison =
+          envoi.status === "rejected"
+            ? envoi.reason instanceof Error
+              ? envoi.reason.message
+              : String(envoi.reason)
+            : envoi.value.ok
+              ? null
+              : envoi.value.error;
+        if (raison) {
+          console.error(`[orders] Email gestionnaire échoué (${order.orderNumber}) : ${raison}`);
+        }
+      }
+    } catch (err) {
+      // Filet de dernier recours : même une panne Prisma (lecture des
+      // gestionnaires, des préférences) ne doit pas remonter jusqu'ici.
+      const raison = err instanceof Error ? err.message : String(err);
+      console.error(`[orders] Emails de commande abandonnés (${order.orderNumber}) : ${raison}`);
+    }
   }
 
   async cancel(
