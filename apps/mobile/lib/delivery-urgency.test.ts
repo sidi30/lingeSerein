@@ -38,11 +38,11 @@ describe("deliveryUrgencyNotice", () => {
     const n = deliveryUrgencyNotice("2026-07-29", fmt, TODAY);
     assert.equal(n.level, "EXPRESS_24H");
     assert.equal(n.isSurcharged, true);
-    assert.equal(n.feeCents, 2500, "forfait du barème partagé, pas une valeur recopiée");
+    assert.equal(n.feeCents, 1250, "forfait du barème partagé, pas une valeur recopiée");
     assert.match(n.title, /Express 24 h/);
-    assert.match(n.title, /25\.00 €/);
+    assert.match(n.title, /12\.50 €/);
     assert.match(n.message, /le lendemain/);
-    assert.match(n.message, /25\.00 €/);
+    assert.match(n.message, /12\.50 €/);
   });
 
   it("ne facture aucune urgence à partir de J+2", () => {
@@ -60,7 +60,7 @@ describe("deliveryUrgencyNotice", () => {
     for (const ymd of ["2026-07-28", "2026-07-20"]) {
       const n = deliveryUrgencyNotice(ymd, fmt, TODAY);
       assert.equal(n.level, "JOUR_MEME", ymd);
-      assert.equal(n.feeCents, 3900, ymd);
+      assert.equal(n.feeCents, 1950, ymd);
     }
   });
 

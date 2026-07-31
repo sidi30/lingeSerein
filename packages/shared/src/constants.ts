@@ -223,21 +223,28 @@ export const SUBSCRIPTION_DEFAULTS = {
   NOTICE_PERIOD_DAYS: 30,
 } as const;
 
-/** Livraison — seuils par défaut */
+/**
+ * Livraison — seuils par défaut.
+ *
+ * Barème DIVISÉ PAR DEUX le 2026-07-31 (décision du propriétaire) : paliers de
+ * zone ET forfaits d'urgence. Le seuil de gratuité reste à 120 € — c'est lui qui
+ * pousse à grouper les commandes, et le baisser en même temps que les tarifs
+ * aurait vidé la ligne « livraison » de presque toutes les factures.
+ */
 export const DELIVERY_DEFAULTS = {
-  FREE_THRESHOLD_CENTS: 12000, // offerte dès 120 €
+  FREE_THRESHOLD_CENTS: 12000, // offerte dès 120 € — volontairement inchangé
   /** Orange — commune du siège : la livraison n'y est jamais facturée. */
   ZONE_ORANGE_CENTS: 0,
-  ZONE_PROCHE_CENTS: 1200, // jusqu'à 15 km d'Orange — 12 €
-  ZONE_INTERMEDIAIRE_CENTS: 1500, // de 15 à 35 km (Avignon, Carpentras…) — 15 €
-  ZONE_ELOIGNE_CENTS: 2500, // au-delà de 35 km (Cavaillon, Apt, Pertuis…) — 25 €
+  ZONE_PROCHE_CENTS: 600, // jusqu'à 15 km d'Orange — 6 €
+  ZONE_INTERMEDIAIRE_CENTS: 750, // de 15 à 35 km (Avignon, Carpentras…) — 7,50 €
+  ZONE_ELOIGNE_CENTS: 1250, // au-delà de 35 km (Cavaillon, Apt, Pertuis…) — 12,50 €
   /** Bornes de distance routière approchée, en km depuis Orange. */
   PROCHE_MAX_KM: 15,
   INTERMEDIAIRE_MAX_KM: 35,
   /** Forfait Express 24 h (livraison le lendemain) — fixe, non soumis aux gratuités. */
-  EXPRESS_24H_FEE_CENTS: 2500,
+  EXPRESS_24H_FEE_CENTS: 1250,
   /** Forfait Jour même (sous 8 h, commande avant 12 h) — fixe, non soumis aux gratuités. */
-  JOUR_MEME_FEE_CENTS: 3900,
+  JOUR_MEME_FEE_CENTS: 1950,
 } as const;
 
 /**
@@ -499,15 +506,28 @@ export const DELIVERY_RULE_TEXT =
  */
 export function deliveryLabelFromCents(cents: number): string {
   if (cents <= 0) return "Livraison offerte";
-  if (cents === DELIVERY_DEFAULTS.JOUR_MEME_FEE_CENTS) {
+
+  // ⚠️ Un montant qui vaut À LA FOIS un palier de zone et un forfait d'urgence
+  // n'est PAS reconnaissable : depuis la division par deux du barème, 12,50 €
+  // est le forfait Express 24 h ET le palier « au-delà de 35 km » (Cavaillon,
+  // Apt, Pertuis). Le nommer d'après le montant imprimerait « Express 24 h » sur
+  // une livraison standard, et facturerait au client une urgence qu'il n'a
+  // jamais demandée. La collision est DÉDUITE des constantes, jamais écrite en
+  // dur : elle réapparaîtra au prochain changement de barème, et le code doit
+  // rester muet tout seul ce jour-là.
+  const paliers: number[] = Object.values(DELIVERY_ZONE_CENTS);
+  const ambigu = (montant: number) => paliers.includes(montant);
+
+  if (cents === DELIVERY_DEFAULTS.JOUR_MEME_FEE_CENTS && !ambigu(cents)) {
     return "Livraison Jour même (sous 8 h — commande avant 12 h, selon disponibilité) — forfait";
   }
-  // ⚠️ 25 € N'EST PLUS RECONNAISSABLE : c'est à la fois le forfait Express 24 h et
-  // le palier « au-delà de 35 km » (Cavaillon, Apt, Pertuis). Deviner à partir du
-  // montant imprimerait « Express 24 h » sur une livraison standard de Cavaillon,
-  // et facturerait au client une urgence qu'il n'a pas demandée. Cette fonction
-  // n'est qu'un REPLI : quand le libellé exact compte, il est figé à l'émission
-  // (`quotes.livraisonLabel`, `invoices.metadata.livraisonLabel`) et prime.
+  if (cents === DELIVERY_DEFAULTS.EXPRESS_24H_FEE_CENTS && !ambigu(cents)) {
+    return "Livraison Express 24 h (J+1) — forfait";
+  }
+
+  // Cette fonction n'est qu'un REPLI : quand le libellé exact compte, il est figé
+  // à l'émission (`quotes.livraisonLabel`, `invoices.metadata.livraisonLabel`) et
+  // prime toujours sur cette déduction.
   return "Livraison";
 }
 
