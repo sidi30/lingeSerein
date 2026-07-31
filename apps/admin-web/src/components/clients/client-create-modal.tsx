@@ -19,6 +19,7 @@ import { useToast } from "@/lib/toast";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { RatingStars } from "@/components/clients/rating-stars";
+import { CommuneField } from "@/components/clients/commune-field";
 import {
   CLIENT_SOURCE_LABELS,
   type ClientSource,
@@ -48,6 +49,8 @@ interface FormState {
   address: string;
   city: string;
   postalCode: string;
+  /** Code INSEE de la commune — c'est lui qui fixe le palier de livraison. */
+  communeInsee: string;
   accommodationType: string;
   zoneId: string;
   preferredTimeSlot: string;
@@ -66,6 +69,7 @@ const EMPTY_FORM: FormState = {
   address: "",
   city: "",
   postalCode: "",
+  communeInsee: "",
   accommodationType: "",
   zoneId: "",
   preferredTimeSlot: "",
@@ -159,6 +163,7 @@ export function ClientCreateModal({
       address: trimmed(form.address),
       city: trimmed(form.city),
       postalCode: trimmed(form.postalCode),
+      communeInsee: trimmed(form.communeInsee),
       accommodationType: trimmed(form.accommodationType),
       zoneId: trimmed(form.zoneId),
       preferredTimeSlot: trimmed(form.preferredTimeSlot),
@@ -369,6 +374,17 @@ export function ClientCreateModal({
             />
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="sm:col-span-2">
+              <CommuneField
+                idPrefix="client"
+                value={{
+                  communeInsee: form.communeInsee,
+                  city: form.city,
+                  postalCode: form.postalCode,
+                }}
+                onChange={(next) => setForm((prev) => ({ ...prev, ...next }))}
+              />
+            </div>
             <div>
               <label className={labelCls} htmlFor="client-postal">
                 Code postal
@@ -379,17 +395,6 @@ export function ClientCreateModal({
                 className={inputCls}
                 value={form.postalCode}
                 onChange={(e) => set("postalCode", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className={labelCls} htmlFor="client-city">
-                Ville
-              </label>
-              <input
-                id="client-city"
-                className={inputCls}
-                value={form.city}
-                onChange={(e) => set("city", e.target.value)}
               />
             </div>
             <div>

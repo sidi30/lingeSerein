@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, Alert } from "react-native";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -381,10 +382,25 @@ export default function ProfileScreen() {
 
       {/* Infos compte */}
       <Card style={styles.infoCard}>
+        <InfoRow label="Téléphone" value={user?.phone || "Non renseigné"} />
+        <InfoRow label="Adresse" value={user?.address || "Non renseignée"} />
+        <InfoRow
+          label="Ville"
+          value={[user?.postalCode, user?.city].filter(Boolean).join(" ") || "Non renseignée"}
+        />
         <InfoRow label="Créneau préféré" value={user?.preferredTimeSlot ?? "Non défini"} />
         <InfoRow label="Seuil alerte stock" value={`${user?.stockAlertThreshold ?? 30}%`} />
         <InfoRow label="Membre depuis" value={user?.createdAt ? formatDate(user.createdAt) : "-"} />
       </Card>
+
+      {/* Le client corrige lui-même ses coordonnées : sans ce bouton, la seule
+          voie était d'appeler pour faire changer un numéro ou une adresse. */}
+      <Button
+        title="Modifier mes informations"
+        onPress={() => router.push("/(tabs)/profile-edit")}
+        variant="secondary"
+        accessibilityHint="Nom, téléphone, adresse et créneau préféré"
+      />
 
       {/* Abonnement — clients uniquement */}
       {!isClient ? (

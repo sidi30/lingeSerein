@@ -38,10 +38,14 @@ interface RequestOptions extends Omit<RequestInit, "body"> {
 }
 
 /**
- * L'API Linge Serein renvoie toujours { success, data, error? }.
- * Cette fonction unwrap automatiquement le champ `data`.
+ * Envoie la requête et rend la réponse BRUTE, une fois les cas d'échec traités
+ * (401 → déconnexion, !ok → ApiError portant le message et le code métier).
+ *
+ * Ce socle est partagé par les trois formes de lecture ci-dessous. Il existait
+ * auparavant en deux copies, et la moindre correction devait être appliquée
+ * deux fois — à la troisième forme, la duplication devenait intenable.
  */
-async function request<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+async function rawFetch(endpoint: string, options: RequestOptions = {}): Promise<Response> {
   const { body, params, headers: customHeaders, ...rest } = options;
 
   let url = `${BASE_URL}${endpoint}`;
@@ -95,6 +99,16 @@ async function request<T = unknown>(endpoint: string, options: RequestOptions = 
     throw err;
   }
 
+  return response;
+}
+
+/**
+ * L'API Linge Serein renvoie toujours { success, data, error? }.
+ * Cette fonction unwrap automatiquement le champ `data`.
+ */
+async function request<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  const response = await rawFetch(endpoint, options);
+
   if (response.status === 204) return undefined as T;
 
   const json = (await response.json()) as { success: boolean; data: T };
@@ -107,61 +121,40 @@ async function request<T = unknown>(endpoint: string, options: RequestOptions = 
  * Nécessaire pour les listes paginées (ADR-011) afin de préserver `pagination` et `meta`.
  */
 async function requestRaw<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const { body, params, headers: customHeaders, ...rest } = options;
-
-  let url = `${BASE_URL}${endpoint}`;
-  if (params) {
-    const search = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined) search.set(key, String(value));
-    }
-    const qs = search.toString();
-    if (qs) url += `?${qs}`;
-  }
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(customHeaders as Record<string, string>),
-  };
-
-  const token = getToken();
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(url, {
-    ...rest,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  if (response.status === 401) {
-    setToken(null);
-    if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
-      window.location.href = "/login";
-    }
-    throw new ApiError(401, "Non autorisé");
-  }
-
-  if (!response.ok) {
-    let errorData: { error?: { message?: string; code?: string } } = {};
-    try {
-      errorData = (await response.json()) as typeof errorData;
-    } catch {
-      // ignore
-    }
-    const err = new ApiError(
-      response.status,
-      errorData.error?.message ?? `Erreur ${response.status}`,
-      errorData,
-    );
-    (err as ApiError & { code?: string }).code = errorData.error?.code;
-    throw err;
-  }
+  const response = await rawFetch(endpoint, options);
 
   if (response.status === 204) return undefined as T;
 
   return (await response.json()) as T;
+}
+
+/** Donnée déballée, accompagnée du code HTTP de la réponse. */
+export interface ApiResult<T> {
+  data: T;
+  status: number;
+}
+
+/**
+ * Variante de request qui expose AUSSI le code HTTP.
+ *
+ * Nécessaire aux routes idempotentes, où seul le code distingue deux issues que
+ * le corps ne différencie pas : `POST /quotes/from-order/:id` renvoie 201 quand
+ * il vient de créer le devis et 200 quand il retrouve celui déjà émis. Sans le
+ * code, l'écran annoncerait « devis créé » sur un devis qui existait déjà.
+ */
+async function requestWithStatus<T = unknown>(
+  endpoint: string,
+  options: RequestOptions = {},
+): Promise<ApiResult<T>> {
+  const response = await rawFetch(endpoint, options);
+
+  if (response.status === 204) return { data: undefined as T, status: response.status };
+
+  const json = (await response.json()) as { success: boolean; data: T };
+  return {
+    data: json.data !== undefined ? json.data : (json as unknown as T),
+    status: response.status,
+  };
 }
 
 // Convenience methods — toutes les méthodes sur un objet `api`
@@ -177,6 +170,13 @@ export const api = {
     requestRaw<T>(endpoint, { method: "GET", params }),
 
   post: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, { method: "POST", body }),
+
+  /**
+   * POST qui rend aussi le code HTTP. À réserver aux routes idempotentes, où
+   * 200 (ressource déjà là) et 201 (créée) portent le même corps.
+   */
+  postWithStatus: <T>(endpoint: string, body?: unknown) =>
+    requestWithStatus<T>(endpoint, { method: "POST", body }),
 
   put: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, { method: "PUT", body }),
 

@@ -7,8 +7,10 @@ import {
   SUBSCRIPTION_DEFAULTS,
   DELIVERY_DEFAULTS,
   URGENCY_TIERS,
+  VAUCLUSE_COMMUNES,
   computePackSereniteComparison,
 } from "@lingengo/shared";
+import { ZONES } from "@/lib/devis-catalog";
 
 // NOTE (Option A, ADR-V2-005) : ces valeurs reflètent les constantes de seed
 // (@lingengo/shared). Si les prix sont modifiés via l'admin en production, la
@@ -110,28 +112,9 @@ const unitPrices = [
   },
 ];
 
-const zones = [
-  {
-    price: "Offerte",
-    city: "Orange",
-    sub: `dès ${DELIVERY_DEFAULTS.FREE_MIN_KITS_ORANGE} kits commandés`,
-  },
-  {
-    price: centsToEuroStr(DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS).replace(",00", ""),
-    city: "Orange & villes limitrophes",
-    sub: "Jonquières, Courthézon, Camaret, Piolenc, Caderousse, Châteauneuf-du-Pape…",
-  },
-  {
-    price: "Offerte",
-    city: "Sur les deux zones",
-    sub: `dès ${centsToEuroStr(DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS).replace(",00", "")} de commande`,
-  },
-  {
-    price: "Sur devis",
-    city: "Au-delà",
-    sub: "on étudie chaque demande en bordure de zone",
-  },
-];
+// Les quatre paliers desservis, du plus proche au plus lointain — ils couvrent tout
+// le Vaucluse. Même source que le simulateur de devis : ils ne peuvent pas diverger.
+const zones = ZONES.map((z) => ({ price: z.prix, city: z.name, sub: z.note }));
 
 // Jauge d'urgence : les forfaits remplacent le barème de zone (jamais cumulés, jamais offerts).
 const urgences = URGENCY_TIERS.map((t) => ({
@@ -256,10 +239,14 @@ export function Tarifs() {
 
         {/* ─── Livraison ─── */}
         <Reveal className="mb-4">
-          <h3 className="font-serif text-2xl font-bold text-forest text-center mb-8">
+          <h3 className="font-serif text-2xl font-bold text-forest text-center mb-2">
             <Truck size={20} aria-hidden className="inline mr-2 opacity-60" />
             Livraison
           </h3>
+          <p className="text-gray-500 text-center text-sm mb-8">
+            Les {VAUCLUSE_COMMUNES.length} communes du Vaucluse, au départ d&apos;Orange — Avignon,
+            Carpentras, Cavaillon comprises.
+          </p>
         </Reveal>
 
         <Reveal className="mb-16">
@@ -277,6 +264,11 @@ export function Tarifs() {
               </div>
             ))}
           </div>
+          <p className="mt-4 text-center text-xs text-gray-600">
+            Livraison offerte dès{" "}
+            {centsToEuroStr(DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS).replace(",00", "")} de commande
+            sur les paliers payants. Nous ne livrons pas hors du Vaucluse.
+          </p>
         </Reveal>
 
         {/* ─── Urgence ─── */}

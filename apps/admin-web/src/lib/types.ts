@@ -52,6 +52,14 @@ export interface QuoteDTO {
   lignes: QuoteLineDTO[];
   remisePct: number;
   livraisonCents: number;
+  /**
+   * Aucun tarif public sur cette course : `livraisonCents` vaut 0 SANS être
+   * offerte. Optionnel — une API plus ancienne ne renvoie pas le champ, l'écran
+   * retombe alors sur le libellé déduit du montant (voir `quoteDeliveryLabel`).
+   */
+  livraisonSurDevis?: boolean | null;
+  /** Libellé figé par le serveur, affiché mot pour mot quand il existe. */
+  livraisonLabel?: string | null;
   tvaApplicable: boolean;
   notes: string | null;
   validiteJours: number;
@@ -116,6 +124,13 @@ export interface ClientListDTO extends ClientMetrics {
   phone: string | null;
   city: string | null;
   postalCode: string | null;
+  /**
+   * Code INSEE de la commune, choisi dans la liste fermée du Vaucluse — c'est
+   * lui, et non le code postal, qui détermine le palier de livraison. Optionnel :
+   * les fiches antérieures à la liste fermée n'en portent pas, l'écran retombe
+   * alors sur le code postal en signalant le doute (voir `clientZone`).
+   */
+  communeInsee?: string | null;
   accommodationType: string | null;
   zoneId: string | null;
   isActive: boolean;
@@ -135,15 +150,28 @@ export interface ClientDetailDTO extends ClientListDTO {
   orders: ClientOrderDTO[];
 }
 
+/**
+ * Commande telle que la projette `GET /clients/:id` — une VUE RÉDUITE, pas un
+ * `OrderDetailDTO`. Le `select` côté service ne renvoie aujourd'hui que
+ * `id`, `orderNumber`, `status`, `totalCents`, `deliveryDate` et `createdAt`.
+ *
+ * Les champs que la route ne projette pas sont donc optionnels : les déclarer
+ * obligatoires faisait passer le typage au vert sur une donnée absente, et
+ * `order.items.map(...)` plantait la fiche de tout client ayant une commande.
+ */
 export interface ClientOrderDTO {
   id: string;
   orderNumber: string;
   status: OrderStatus;
+  /** SOUS-TOTAL des articles, comme partout — voir `OrderDetailDTO`. */
   totalCents: number;
+  /** Non projeté à ce jour ⇒ frais INCONNUS, surtout pas « offerte ». */
+  deliveryFeeCents?: number | null;
+  deliveryFeeSurDevis?: boolean | null;
   deliveryDate: string;
-  timeSlot: string | null;
+  timeSlot?: string | null;
   createdAt: string;
-  items: { id: string; quantity: number; product: { name: string } }[];
+  items?: { id: string; quantity: number; product: { name: string } }[];
 }
 
 /** Corps de POST /clients. */
@@ -155,6 +183,8 @@ export interface CreateClientInput {
   address?: string;
   city?: string;
   postalCode?: string;
+  /** Code INSEE de la commune livrée (5 caractères, liste fermée du Vaucluse). */
+  communeInsee?: string;
   accommodationType?: string;
   zoneId?: string;
   preferredTimeSlot?: string;
@@ -195,7 +225,20 @@ export interface OrderDetailDTO {
   orderNumber: string;
   status: OrderStatus;
   source: OrderSource;
+  /** SOUS-TOTAL des articles, pas le total à payer — voir `orderAmounts`. */
   totalCents: number;
+  /**
+   * Frais de livraison. Optionnel côté lecture : l'API peut être plus ancienne
+   * que cet écran, et un champ absent se lit « inconnu », jamais « offerte ».
+   */
+  deliveryFeeCents?: number | null;
+  /** Zone sans tarif public : 0 € y signifie « à chiffrer », pas « offerte ». */
+  deliveryFeeSurDevis?: boolean | null;
+  /**
+   * Résumé calculé par le serveur (`resumeFrais`), présent sur la fiche mais
+   * pas sur la liste. Il fait foi quand il est là — voir `orderAmounts`.
+   */
+  deliveryFee?: { cents: number; label: string; surDevis: boolean } | null;
   deliveryDate: string;
   timeSlot: string | null;
   specialNotes: string | null;
@@ -213,6 +256,12 @@ export interface OrderDetailDTO {
   };
   statusHistory: OrderStatusHistoryEntry[];
   convertedFromQuote: { id: string; numero: string } | null;
+  /**
+   * Devis ÉMIS DEPUIS cette commande (`Quote.fromOrderId`) — relation distincte
+   * de `convertedFromQuote`, et les deux peuvent coexister. `null` aussi quand
+   * le devis a été supprimé : l'API filtre les devis effacés.
+   */
+  generatedQuote?: { id: string; numero: string; status?: QuoteStatus } | null;
 }
 
 export interface OrderListDTO {
@@ -220,7 +269,10 @@ export interface OrderListDTO {
   orderNumber: string;
   status: OrderStatus;
   source: OrderSource;
+  /** SOUS-TOTAL des articles — voir `OrderDetailDTO.totalCents`. */
   totalCents: number;
+  deliveryFeeCents?: number | null;
+  deliveryFeeSurDevis?: boolean | null;
   deliveryDate: string;
   timeSlot: string | null;
   createdAt: string;
@@ -239,6 +291,15 @@ export interface UserDTO {
   name: string;
   phone: string | null;
   role: UserRole;
+  /**
+   * Localisation du client, telle que la projette `GET /users` quand elle est
+   * disponible. Optionnelle : une API plus ancienne ne renvoie pas ces champs, et
+   * un client sans commune confirmée n'en porte pas. Absents, le devis ne
+   * présélectionne aucune zone plutôt que d'en supposer une.
+   */
+  city?: string | null;
+  postalCode?: string | null;
+  communeInsee?: string | null;
   zoneId: string | null;
   zone: { id: string; name: string } | null;
   isActive: boolean;

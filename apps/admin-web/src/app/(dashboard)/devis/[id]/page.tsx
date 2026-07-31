@@ -16,6 +16,7 @@ import { DetailFallback } from "@/components/ui/detail-fallback";
 import { detailState, invalidateAfter } from "@/lib/query";
 import { useToast } from "@/lib/toast";
 import { formatPrice, formatDate } from "@/lib/format";
+import { formatDeliveryFee, quoteDeliveryLabel, quoteDeliveryVisible } from "@/lib/order-quote";
 import { QUOTE_TRANSITIONS, QUOTE_EDITABLE, quoteToDevisData } from "@lingengo/shared";
 import type {
   ClientListDTO,
@@ -203,7 +204,11 @@ export default function DevisDetailPage() {
     if (!quote) return;
     try {
       const { downloadDevisPdf } = await import("@lingengo/ui/devis-pdf");
-      const data = quoteToDevisData(quote);
+      // `quoteToDevisData` déduit encore le libellé du seul montant (shared), ce
+      // qui imprime « Livraison offerte » sur une course à 0 € qui n'est en fait
+      // pas chiffrée. Le document envoyé au client doit dire ce que dit l'écran :
+      // on impose le libellé retenu ici, serveur en premier.
+      const data = { ...quoteToDevisData(quote), livraisonLabel: quoteDeliveryLabel(quote) };
       await downloadDevisPdf(data);
     } catch (err) {
       console.error("Génération du PDF de devis échouée", err);
@@ -450,10 +455,15 @@ export default function DevisDetailPage() {
                   </dd>
                 </div>
               )}
-              {quote.livraisonCents > 0 && (
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Livraison</dt>
-                  <dd className="font-medium tabular-nums">{formatPrice(quote.livraisonCents)}</dd>
+              {/* « Sur devis » vaut 0 € en base : filtrer sur le montant seul
+                  effaçait de l'écran la seule course que le propriétaire doit
+                  encore chiffrer. Le libellé vient du serveur quand il existe. */}
+              {quoteDeliveryVisible(quote) && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500">{quoteDeliveryLabel(quote)}</dt>
+                  <dd className="font-medium tabular-nums">
+                    {formatDeliveryFee(quote.livraisonCents, Boolean(quote.livraisonSurDevis))}
+                  </dd>
                 </div>
               )}
               <div className="flex justify-between border-t pt-2">

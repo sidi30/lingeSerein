@@ -16,11 +16,15 @@ import { ScreenWrapper } from "@/components/ScreenWrapper";
 import { Card } from "@/components/Card";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { ProgressRing } from "@/components/ProgressRing";
-import { EmptyState } from "@/components/EmptyState";
+// `EmptyState` n'est plus utilisé ici : l'absence de tournée du jour se rend
+// dans le flux de l'écran, au-dessus des tournées à venir — un composant en
+// `flex: 1` centré verticalement les aurait poussées hors de vue.
 import { ErrorState } from "@/components/ErrorState";
 import { Button } from "@/components/Button";
-import { useTodayRound, useCompleteRound, errorMessage } from "@/lib/api";
-import type { DeliveryStop } from "@/lib/api";
+import { useTodayRound, useUpcomingRounds, useCompleteRound, errorMessage } from "@/lib/api";
+import type { DeliveryRound, DeliveryStop } from "@/lib/api";
+import { localYmd, roundWhenLabel, roundYmd, upcomingRounds } from "@/lib/rounds";
+import { stopTitle } from "@/lib/navigation-links";
 import { colors, font, spacing, radius, MIN_HIT_TARGET } from "@/lib/theme";
 
 // ─── Geocoding cache ─────────────────────────────────────────────
@@ -146,6 +150,124 @@ const StopCard = memo(function StopCard({
     </Animated.View>
   );
 });
+
+// ─── Tournées à venir ─────────────────────────────────────────────
+
+/** Fenêtre demandée au serveur : au-delà d'un mois, plus rien n'est planifié. */
+const UPCOMING_WINDOW_DAYS = 30;
+
+function formatRoundDate(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!y || !m || !d) return ymd;
+  // Construite en heure LOCALE : `new Date("2026-07-31")` vaut minuit UTC et
+  // recule d'un jour à l'ouest de Greenwich.
+  return new Date(y, m - 1, d).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+}
+
+function UpcomingRoundCard({ round, todayYmd }: { round: DeliveryRound; todayYmd: string }) {
+  const ymd = roundYmd(round);
+  const when = roundWhenLabel(ymd, todayYmd);
+  const stopsCount = round.stopsCount ?? round.stops?.length ?? 0;
+  const zoneName = round.zoneName ?? round.zone?.name ?? null;
+  // Les premiers clients donnent au livreur de quoi reconnaître la tournée sans
+  // avoir à l'ouvrir.
+  const preview = (round.stops ?? [])
+    .slice(0, 3)
+    .map((s) => stopTitle(s.client))
+    .join(" · ");
+
+  return (
+    <Card style={styles.upcomingCard}>
+      <View style={styles.upcomingHeader}>
+        <Text style={styles.upcomingDate}>{formatRoundDate(ymd)}</Text>
+        {when && (
+          <View style={styles.upcomingPill}>
+            <Text style={styles.upcomingPillText}>{when}</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.upcomingMeta}>
+        <Ionicons name="cube-outline" size={14} color={colors.textSecondary} />
+        <Text style={styles.upcomingMetaText}>
+          {stopsCount} arrêt{stopsCount > 1 ? "s" : ""}
+          {zoneName ? ` · ${zoneName}` : ""}
+        </Text>
+      </View>
+      {preview ? (
+        <Text style={styles.upcomingPreview} numberOfLines={2}>
+          {preview}
+          {stopsCount > 3 ? "…" : ""}
+        </Text>
+      ) : null}
+    </Card>
+  );
+}
+
+/**
+ * Ce qui attend le livreur les jours suivants.
+ *
+ * Rendue silencieuse dans deux cas, et c'est voulu : `data === null` (la route
+ * répond 404, elle n'est pas encore déployée partout) et liste vide. L'écran
+ * reste alors exactement celui d'avant — la nouveauté ne peut rien casser.
+ * Une vraie panne, elle, s'affiche : en discret, car la tournée du jour reste
+ * l'information principale et elle, elle a été chargée.
+ */
+function UpcomingRoundsSection({
+  query,
+  todayYmd,
+  excludeId,
+}: {
+  query: ReturnType<typeof useUpcomingRounds>;
+  todayYmd: string;
+  excludeId?: string | null;
+}) {
+  if (query.isLoading) {
+    return (
+      <View style={styles.upcomingSection}>
+        <Text style={styles.upcomingTitle}>Prochaines tournées</Text>
+        <SkeletonBox height={90} />
+      </View>
+    );
+  }
+
+  if (query.isError) {
+    return (
+      <View style={styles.upcomingSection}>
+        <View style={styles.upcomingError}>
+          <Ionicons name="cloud-offline-outline" size={16} color={colors.warning} />
+          <Text style={styles.upcomingErrorText}>
+            Vos prochaines tournées n&apos;ont pas pu être chargées.
+          </Text>
+          <Pressable
+            onPress={() => void query.refetch()}
+            hitSlop={10}
+            style={styles.upcomingRetry}
+            accessibilityRole="button"
+            accessibilityLabel="Réessayer de charger les prochaines tournées"
+          >
+            <Text style={styles.upcomingRetryText}>Réessayer</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  const rounds = upcomingRounds(query.data, todayYmd, excludeId);
+  if (rounds.length === 0) return null;
+
+  return (
+    <View style={styles.upcomingSection}>
+      <Text style={styles.upcomingTitle}>Prochaines tournées ({rounds.length})</Text>
+      {rounds.map((r) => (
+        <UpcomingRoundCard key={r.id} round={r} todayYmd={todayYmd} />
+      ))}
+    </View>
+  );
+}
 
 // ─── Map view ─────────────────────────────────────────────────────
 
@@ -281,6 +403,15 @@ function MapViewSection({
 
 export default function TourneeScreen() {
   const { data: round, isLoading, isError, refetch, isRefetching } = useTodayRound();
+  // Fenêtre demandée : de demain à J+30. Bornée sur des dates CIVILES locales —
+  // `toISOString()` aurait fait basculer la borne d'un jour selon l'heure.
+  const today = new Date();
+  const todayYmd = localYmd(today);
+  const windowEnd = new Date(today);
+  windowEnd.setDate(windowEnd.getDate() + UPCOMING_WINDOW_DAYS);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const upcoming = useUpcomingRounds(localYmd(tomorrow), localYmd(windowEnd));
   const completeRound = useCompleteRound();
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [locationPermission, setLocationPermission] = useState<"granted" | "denied" | "unknown">(
@@ -373,14 +504,31 @@ export default function TourneeScreen() {
     );
   }
 
+  // Pas de tournée AUJOURD'HUI ne veut pas dire pas de tournée : c'est
+  // exactement le cas remonté (« j'ai créé une tournée, le livreur n'a rien
+  // vu » — elle était planifiée pour le lendemain). L'écran vide affiche donc
+  // aussi ce qui vient.
   if (!round) {
     return (
-      <ScreenWrapper>
-        <EmptyState
-          icon="car-outline"
-          title="Aucune tournee aujourd'hui"
-          description="Votre tournée de livraison apparaîtra ici quand elle sera planifiée."
-        />
+      <ScreenWrapper
+        refreshing={isRefetching || upcoming.isRefetching}
+        onRefresh={() => {
+          void refetch();
+          void upcoming.refetch();
+        }}
+      >
+        <View style={styles.emptyToday}>
+          <Ionicons name="car-outline" size={44} color={colors.textTertiary} />
+          <Text style={styles.emptyTodayTitle}>Aucune tournée aujourd&apos;hui</Text>
+          <Text style={styles.emptyTodayText}>
+            {/* Annoncer « rien n'est planifié » au-dessus d'une liste de
+                tournées à venir se contredirait à l'écran. */}
+            {upcomingRounds(upcoming.data, todayYmd).length > 0
+              ? "Rien à livrer aujourd'hui. Vos prochaines tournées sont ci-dessous."
+              : "Votre tournée de livraison apparaîtra ici quand elle sera planifiée."}
+          </Text>
+        </View>
+        <UpcomingRoundsSection query={upcoming} todayYmd={todayYmd} />
       </ScreenWrapper>
     );
   }
@@ -470,19 +618,25 @@ export default function TourneeScreen() {
           keyExtractor={(s) => s.id}
           renderItem={renderStop}
           contentContainerStyle={styles.list}
-          refreshing={isRefetching}
-          onRefresh={refetch}
+          refreshing={isRefetching || upcoming.isRefetching}
+          onRefresh={() => {
+            void refetch();
+            void upcoming.refetch();
+          }}
           ListFooterComponent={
-            allDone ? (
-              <View style={styles.footer}>
-                <Button
-                  title="Terminer la tournée"
-                  onPress={handleCompleteRound}
-                  loading={completeRound.isPending}
-                  style={styles.completeBtn}
-                />
-              </View>
-            ) : null
+            <>
+              {allDone && (
+                <View style={styles.footer}>
+                  <Button
+                    title="Terminer la tournée"
+                    onPress={handleCompleteRound}
+                    loading={completeRound.isPending}
+                    style={styles.completeBtn}
+                  />
+                </View>
+              )}
+              <UpcomingRoundsSection query={upcoming} todayYmd={todayYmd} excludeId={round.id} />
+            </>
           }
           showsVerticalScrollIndicator={false}
         />
@@ -654,6 +808,98 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
   },
   warnText: { fontSize: 10, color: colors.warningText, fontWeight: font.weights.semibold },
+  // Tournées à venir
+  emptyToday: {
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.xxl,
+  },
+  emptyTodayTitle: {
+    fontSize: font.sizes.lg,
+    fontWeight: font.weights.semibold,
+    color: colors.textPrimary,
+    textAlign: "center",
+  },
+  emptyTodayText: {
+    fontSize: font.sizes.sm,
+    color: colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  upcomingSection: {
+    marginTop: spacing.xl,
+    gap: spacing.sm,
+  },
+  upcomingTitle: {
+    fontSize: font.sizes.md,
+    fontWeight: font.weights.bold,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  upcomingCard: {},
+  upcomingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  upcomingDate: {
+    flex: 1,
+    fontSize: font.sizes.md,
+    fontWeight: font.weights.semibold,
+    color: colors.textPrimary,
+    textTransform: "capitalize",
+  },
+  upcomingPill: {
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 3,
+    borderRadius: radius.full,
+  },
+  upcomingPillText: {
+    fontSize: font.sizes.xs,
+    fontWeight: font.weights.bold,
+    color: colors.primary,
+  },
+  upcomingMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  upcomingMetaText: {
+    fontSize: font.sizes.sm,
+    color: colors.textSecondary,
+  },
+  upcomingPreview: {
+    fontSize: font.sizes.xs,
+    color: colors.textTertiary,
+    marginTop: spacing.xs,
+    lineHeight: 17,
+  },
+  upcomingError: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.warningLight,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  upcomingErrorText: {
+    flex: 1,
+    fontSize: font.sizes.xs,
+    color: colors.warningText,
+  },
+  upcomingRetry: {
+    minHeight: MIN_HIT_TARGET,
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+  },
+  upcomingRetryText: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.bold,
+    color: colors.primary,
+  },
   // Map
   mapContainer: { flex: 1 },
   map: { flex: 1 },

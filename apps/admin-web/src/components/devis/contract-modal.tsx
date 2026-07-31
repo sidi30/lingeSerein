@@ -11,12 +11,12 @@ import { formatPrice, eurosToCents } from "@/lib/format";
 import {
   CATALOG_DEFAULTS,
   computeQuoteFinancials,
-  deliveryLabelFromCents,
   detectContractType,
   quoteToContractData,
   SUBSCRIPTION_DEFAULTS,
 } from "@lingengo/shared";
 import type { QuoteForContract, ContractTerms } from "@lingengo/shared";
+import { formatDeliveryFee, quoteDeliveryLabel } from "@/lib/order-quote";
 import type { QuoteDTO, SubscriptionConfigDTO } from "@/lib/types";
 import { FileSignature, Info, PackageCheck } from "lucide-react";
 
@@ -85,7 +85,10 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
       // total sans le détail correspondant (frais de livraison invisibles).
       remisePct: quote.remisePct,
       livraisonCents: quote.livraisonCents,
-      livraisonLabel: deliveryLabelFromCents(quote.livraisonCents),
+      // Libellé du serveur d'abord : le contrat doit dire ce que dit le devis
+      // envoyé au client. Déduit du seul montant, un devis « sur devis » (0 € en
+      // base, course non chiffrée) partirait en contrat « Livraison offerte ».
+      livraisonLabel: quoteDeliveryLabel(quote),
       totalNetCents: quote.totals.totalTTC,
     }),
     [quote],
@@ -264,10 +267,10 @@ export function ContractModal({ quote, open, onClose }: ContractModalProps) {
                   )}
                   <tr>
                     <td className="text-gray-500" colSpan={2}>
-                      {deliveryLabelFromCents(quote.livraisonCents)}
+                      {quoteDeliveryLabel(quote)}
                     </td>
                     <td className="text-right tabular-nums text-gray-900">
-                      {fin.livraisonCents === 0 ? "Offerte" : formatPrice(fin.livraisonCents)}
+                      {formatDeliveryFee(fin.livraisonCents, Boolean(quote.livraisonSurDevis))}
                     </td>
                   </tr>
                   {quote.tvaApplicable && (

@@ -30,6 +30,13 @@ import { SignaturePad, strokesToDataUrl, isMeaningfulSignature } from "@/compone
 import type { SignatureStroke } from "@/components/SignaturePad";
 import { useTodayRound, useCompleteStop, errorMessage } from "@/lib/api";
 import type { DeliveryStop, CompleteStopInput } from "@/lib/api";
+import {
+  addressLines,
+  destinationQuery,
+  navigationTargets,
+  stopSubtitle,
+  stopTitle,
+} from "@/lib/navigation-links";
 import { useAuthStore } from "@/lib/store";
 import { colors, font, spacing, radius, MIN_HIT_TARGET, TAB_BAR_BASE_HEIGHT } from "@/lib/theme";
 
@@ -209,15 +216,29 @@ export default function StopDetailScreen() {
     })();
   };
 
-  const handleNavigate = () => {
-    const address = encodeURIComponent(stop.client.address ?? stop.client.name);
-    const url =
-      Platform.OS === "ios" ? `https://maps.apple.com/?daddr=${address}` : `geo:0,0?q=${address}`;
+  // Destination GPS : rue + code postal + ville réunis (`address` seule est un
+  // champ texte libre SANS commune — cf. lib/navigation-links.ts). `null` quand
+  // la rue manque : aucun bouton n'est alors proposé.
+  const destination = destinationQuery(stop.client);
+  const navTargets = destination ? navigationTargets(destination, Platform.OS) : [];
+
+  const handleNavigate = (url: string, label: string) => {
     void (async () => {
       try {
+        // `canOpenURL` d'abord : sans lui, un appareil incapable d'ouvrir le
+        // lien reste sur un appui sans effet, et le livreur appuie trois fois
+        // avant de comprendre qu'il ne se passera rien.
+        const supported = await Linking.canOpenURL(url);
+        if (!supported) {
+          Alert.alert(
+            `${label} indisponible`,
+            "Cette application n'est pas installée sur cet appareil.",
+          );
+          return;
+        }
         await Linking.openURL(url);
       } catch {
-        Alert.alert("Erreur", "Impossible d'ouvrir l'application Plans.");
+        Alert.alert("Erreur", `Impossible d'ouvrir ${label}.`);
       }
     })();
   };
@@ -339,37 +360,73 @@ Votre signature est conservée.`,
           </Animated.View>
         )}
 
-        {/* Client name — BIG */}
+        {/* Identité de l'arrêt — l'établissement d'abord : c'est l'enseigne que
+            le livreur cherche des yeux en arrivant, pas le nom du gérant. */}
         <Animated.View entering={FadeInDown.delay(50)}>
           <Card style={styles.clientCard}>
             <View style={styles.stopNumBadge}>
               <Text style={styles.stopNumBadgeText}>Arrêt #{stop.stopOrder}</Text>
             </View>
             <Text style={styles.clientNameBig} accessibilityRole="header">
-              {stop.client.name}
+              {stopTitle(stop.client)}
             </Text>
-            {stop.client.address && (
-              <Pressable
-                onPress={handleNavigate}
-                style={styles.addressRow}
-                accessibilityRole="button"
-                accessibilityLabel={`Naviguer vers ${stop.client.address}`}
-                accessibilityHint="Ouvre les plans natifs"
-              >
-                <Ionicons name="location-outline" size={16} color={colors.primary} />
-                <Text style={styles.addressText}>{stop.client.address}</Text>
-                <Ionicons name="navigate-outline" size={14} color={colors.primary} />
-              </Pressable>
+            {stopSubtitle(stop.client) && (
+              <Text style={styles.clientContact}>{stopSubtitle(stop.client)}</Text>
             )}
+
+            {/* Adresse sur ses lignes naturelles : rue, puis code postal + ville */}
+            {addressLines(stop.client).length > 0 && (
+              <View style={styles.addressBlock}>
+                <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
+                <View style={{ flex: 1 }}>
+                  {addressLines(stop.client).map((line) => (
+                    <Text key={line} style={styles.addressText}>
+                      {line}
+                    </Text>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Itinéraire — proposé UNIQUEMENT si la rue est connue. Une
+                destination réduite à une commune ouvrirait un GPS sur un
+                centre-ville : pire qu'un bouton absent, qui invite à appeler. */}
+            {navTargets.length > 0 ? (
+              <View style={styles.navRow}>
+                {navTargets.map((target) => (
+                  <Pressable
+                    key={target.key}
+                    onPress={() => handleNavigate(target.url, target.label)}
+                    style={({ pressed }) => [styles.navBtn, pressed && styles.navBtnPressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Itinéraire avec ${target.label}`}
+                    accessibilityHint={`Vers ${destination ?? ""}`}
+                  >
+                    <Ionicons name="navigate-outline" size={16} color={colors.primary} />
+                    <Text style={styles.navBtnText}>{target.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.noAddressBox}>
+                <Ionicons name="alert-circle-outline" size={16} color={colors.warning} />
+                <Text style={styles.noAddressText}>
+                  Aucune adresse de rue enregistrée : l&apos;itinéraire ne peut pas être calculé.
+                  {stop.client.phone ? " Appelez le client pour vous faire guider." : ""}
+                </Text>
+              </View>
+            )}
+
             {stop.client.phone && (
               <Pressable
                 onPress={handleCall}
                 style={styles.phoneRow}
                 accessibilityRole="button"
-                accessibilityLabel={`Appeler ${stop.client.name}`}
+                accessibilityLabel={`Appeler ${stopTitle(stop.client)} au ${stop.client.phone}`}
               >
-                <Ionicons name="call-outline" size={16} color={colors.textSecondary} />
+                <Ionicons name="call-outline" size={18} color={colors.primary} />
                 <Text style={styles.phoneText}>{stop.client.phone}</Text>
+                <Text style={styles.phoneCta}>Appeler</Text>
               </Pressable>
             )}
           </Card>
@@ -600,31 +657,84 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     lineHeight: 40,
   },
-  addressRow: {
+  clientContact: {
+    fontSize: font.sizes.md,
+    color: colors.textSecondary,
+    marginTop: -spacing.xs,
+  },
+  addressBlock: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: spacing.sm,
-    paddingVertical: spacing.sm,
+    paddingTop: spacing.sm,
     borderTopWidth: 1,
     borderTopColor: colors.borderLight,
   },
   addressText: {
-    flex: 1,
     fontSize: font.sizes.md,
-    color: colors.primary,
+    color: colors.textPrimary,
     fontWeight: font.weights.medium,
+    lineHeight: 22,
+  },
+  // Itinéraire : une cible par application, 44 px de haut, utilisable d'une
+  // main en extérieur.
+  navRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  navBtn: {
+    flexGrow: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    minHeight: MIN_HIT_TARGET,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight,
+  },
+  navBtnPressed: { opacity: 0.7 },
+  navBtnText: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.bold,
+    color: colors.primary,
+  },
+  noAddressBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    backgroundColor: colors.warningLight,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  noAddressText: {
+    flex: 1,
+    fontSize: font.sizes.xs,
+    color: colors.warningText,
+    lineHeight: 17,
   },
   phoneRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
+    minHeight: MIN_HIT_TARGET,
     paddingVertical: spacing.sm,
     borderTopWidth: 1,
     borderTopColor: colors.borderLight,
   },
   phoneText: {
+    flex: 1,
     fontSize: font.sizes.md,
-    color: colors.textSecondary,
+    fontWeight: font.weights.medium,
+    color: colors.textPrimary,
+  },
+  phoneCta: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.bold,
+    color: colors.primary,
   },
   // Warning card
   warningCard: {

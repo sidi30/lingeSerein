@@ -1,5 +1,22 @@
 import type { Metadata } from "next";
+import {
+  CATALOG_DEFAULTS,
+  DELIVERY_DEFAULTS,
+  VAUCLUSE_COMMUNES,
+  urgencyTier,
+} from "@lingengo/shared";
 import { LegalPage } from "@/components/legal-page";
+import { ZONES } from "@/lib/devis-catalog";
+
+/** Montants contractuels : deux décimales, comme sur une facture. */
+function euros(cents: number): string {
+  return (
+    (cents / 100).toLocaleString("fr-FR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }) + " €"
+  );
+}
 
 export const metadata: Metadata = {
   title: "Conditions générales de vente et de location",
@@ -22,7 +39,8 @@ export default function CGV() {
         Téléphone : <a href="tel:+33753569548">07 53 56 95 48</a> | Email :{" "}
         <a href="mailto:lingeserein@gmail.com">lingeserein@gmail.com</a>
         <br />
-        Zone de livraison : Orange et communes limitrophes — au-delà, sur devis
+        Zone de livraison : les {VAUCLUSE_COMMUNES.length} communes du Vaucluse, au départ
+        d&apos;Orange — hors du département, non desservi
       </p>
 
       <h2>Article 1 — Objet</h2>
@@ -90,42 +108,46 @@ export default function CGV() {
         <tbody>
           <tr>
             <td>Set bain</td>
-            <td>7,50 €</td>
+            <td>{euros(CATALOG_DEFAULTS.KIT_BAIN_CENTS)}</td>
           </tr>
           <tr>
             <td>Set lit</td>
-            <td>16,50 €</td>
+            <td>{euros(CATALOG_DEFAULTS.KIT_LIT_CENTS)}</td>
           </tr>
           <tr>
-            <td>Kit Complet (bain + lit + 2 serviettes 50×90)</td>
-            <td>29,00 €</td>
+            <td>
+              Kit Complet (bain + lit + {CATALOG_DEFAULTS.KIT_COMPLET_SERVIETTES_INCLUSES}{" "}
+              serviettes 50×90)
+            </td>
+            <td>{euros(CATALOG_DEFAULTS.KIT_COMPLET_CENTS)}</td>
           </tr>
+          {ZONES.map((z) => (
+            <tr key={z.id}>
+              <td>Livraison standard (J+2 à J+3) — {z.note}</td>
+              <td>{z.prix}</td>
+            </tr>
+          ))}
           <tr>
-            <td>Livraison à Orange (dès 4 kits)</td>
+            <td>
+              Livraison dès {DELIVERY_DEFAULTS.FREE_THRESHOLD_CENTS / 100} € de commande (paliers
+              payants)
+            </td>
             <td>Offerte</td>
           </tr>
           <tr>
-            <td>Livraison dès 120 € de commande</td>
-            <td>Offerte</td>
-          </tr>
-          <tr>
-            <td>Livraison standard (J+2 à J+3) — Orange et communes limitrophes</td>
-            <td>12,00 €</td>
-          </tr>
-          <tr>
-            <td>Livraison au-delà des communes limitrophes</td>
-            <td>Sur devis</td>
+            <td>Livraison hors Vaucluse</td>
+            <td>Non desservi</td>
           </tr>
           <tr>
             <td>Forfait Express 24 h (livraison le lendemain)</td>
-            <td>25,00 €</td>
+            <td>{euros(DELIVERY_DEFAULTS.EXPRESS_24H_FEE_CENTS)}</td>
           </tr>
           <tr>
             <td>Forfait Jour même (sous 8 h, commande avant 12 h, selon disponibilité)</td>
-            <td>39,00 €</td>
+            <td>{euros(DELIVERY_DEFAULTS.JOUR_MEME_FEE_CENTS)}</td>
           </tr>
           <tr>
-            <td>Livraison Flash (moins de 3 h, selon disponibilité)</td>
+            <td>Livraison Flash ({urgencyTier("FLASH").delaiText})</td>
             <td>Sur devis</td>
           </tr>
         </tbody>

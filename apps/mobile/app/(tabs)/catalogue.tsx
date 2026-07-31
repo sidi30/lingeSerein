@@ -1,5 +1,6 @@
 import { useState, useCallback, memo } from "react";
 import { View, Text, FlatList, Pressable, Image, StyleSheet } from "react-native";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { ScreenWrapper } from "@/components/ScreenWrapper";
@@ -7,9 +8,9 @@ import { Card } from "@/components/Card";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
-import { useProducts, formatCents } from "@/lib/api";
+import { useProducts, useIsClient, formatCents } from "@/lib/api";
 import type { Product, ProductKind } from "@/lib/api";
-import { colors, font, spacing, radius } from "@/lib/theme";
+import { colors, font, spacing, radius, MIN_HIT_TARGET } from "@/lib/theme";
 
 // ─── Filtres ──────────────────────────────────────────────────────
 
@@ -59,9 +60,22 @@ function productIcon(product: Product): keyof typeof Ionicons.glyphMap {
 interface ProductTileProps {
   product: Product;
   index: number;
+  /** false pour un admin ou un livreur : le tunnel de commande est client. */
+  canOrder: boolean;
 }
 
-const ProductTile = memo(function ProductTile({ product, index }: ProductTileProps) {
+/**
+ * Ouvre le tunnel de commande EXISTANT avec l'article déjà dans le panier.
+ *
+ * Décision assumée : pas de second sélecteur de produits ici. Une seule logique
+ * de panier — celle du wizard — sinon deux écrans divergent au premier
+ * changement de règle tarifaire.
+ */
+function orderProduct(productId: string) {
+  router.push({ pathname: "/(tabs)/orders/new", params: { productId } });
+}
+
+const ProductTile = memo(function ProductTile({ product, index, canOrder }: ProductTileProps) {
   const kindColor = KIND_COLORS[product.kind];
   const icon = productIcon(product);
   const isKit = product.kind === "KIT";
@@ -114,6 +128,25 @@ const ProductTile = memo(function ProductTile({ product, index }: ProductTilePro
             </Text>
             <Text style={styles.tilePriceUnit}>{isKit ? "/kit" : "/pièce"}</Text>
           </View>
+
+          {/* Le catalogue ne servait qu'à regarder : le client voyait le produit
+              et n'avait aucun moyen de le commander depuis cet écran. */}
+          {canOrder && (
+            <Pressable
+              onPress={() => orderProduct(product.id)}
+              style={({ pressed }) => [
+                styles.orderBtn,
+                { backgroundColor: kindColor },
+                pressed && styles.orderBtnPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`Commander ${product.name}`}
+              accessibilityHint="Ouvre la commande avec cet article déjà sélectionné"
+            >
+              <Ionicons name="cart-outline" size={16} color={colors.textInverse} />
+              <Text style={styles.orderBtnText}>Commander</Text>
+            </Pressable>
+          )}
         </View>
       </Card>
     </Animated.View>
@@ -145,6 +178,7 @@ function CatalogueSkeleton() {
 
 export default function CatalogueScreen() {
   const { data: products, isLoading, isError, refetch, isRefetching } = useProducts();
+  const isClient = useIsClient();
   const [activeFilter, setActiveFilter] = useState<FilterValue>("__all__");
 
   const filteredProducts: Product[] =
@@ -154,9 +188,9 @@ export default function CatalogueScreen() {
 
   const renderProduct = useCallback(
     ({ item, index }: { item: Product; index: number }) => (
-      <ProductTile product={item} index={index} />
+      <ProductTile product={item} index={index} canOrder={isClient} />
     ),
-    [],
+    [isClient],
   );
 
   if (isLoading) return <CatalogueSkeleton />;
@@ -318,5 +352,22 @@ const styles = StyleSheet.create({
   tilePriceUnit: {
     fontSize: font.sizes.xs,
     color: colors.textTertiary,
+  },
+  orderBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    // 44 px : cible tactile minimale, y compris sur les petites tuiles.
+    minHeight: MIN_HIT_TARGET,
+    borderRadius: radius.md,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.sm,
+  },
+  orderBtnPressed: { opacity: 0.85 },
+  orderBtnText: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.bold,
+    color: colors.textInverse,
   },
 });

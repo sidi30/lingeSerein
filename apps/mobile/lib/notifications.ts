@@ -7,9 +7,11 @@
  * perd le push mais ne plante pas — le reste de l'app continue de fonctionner
  * sur le polling REST existant.
  *
- * L'enregistrement du token vise `POST /notifications/device-token`, qui
- * N'EXISTE PAS ENCORE côté API (aucun modèle DeviceToken en base). L'échec est
- * donc attendu et silencieux tant que le backend n'a pas livré la route.
+ * L'enregistrement vise `POST /notifications/device-token` et sa suppression
+ * `DELETE /notifications/device-token`. Les deux échouent SILENCIEUSEMENT : ces
+ * routes n'existent pas sur tous les serveurs déployés, et l'application doit
+ * continuer de fonctionner sur son polling REST là où le push n'est pas encore
+ * branché.
  */
 
 import { useEffect, useRef } from "react";
@@ -20,6 +22,7 @@ import * as Notifications from "expo-notifications";
 import { apiFetch } from "./api";
 import { invalidateAfter } from "./cache";
 import { queryClient } from "./queryClient";
+import { secureStorage } from "./secure-storage";
 import { useAuthStore } from "./store";
 
 // ─── Résolution des liens profonds ───────────────────────────────

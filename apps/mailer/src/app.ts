@@ -11,6 +11,9 @@ import {
   rotationReminderClientEmail,
   rotationReminderOwnerEmail,
   rotationOverdueEmail,
+  roundAssignedDriverEmail,
+  orderConfirmationClientEmail,
+  orderNotificationOwnerEmail,
 } from "./templates.js";
 import { addQuoteRequest, deleteQuoteRequest, listQuoteRequests, setQuoteStatus } from "./store.js";
 import { renderInbox, requireBasicAuth } from "./inbox.js";
@@ -152,6 +155,28 @@ const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date attendue au 
 
 const creneauSchema = z.string().max(20).refine(noControlChars, "Caractères invalides");
 
+/** Ligne d'articles d'une commande — même forme que les lignes de rotation. */
+const orderLigneSchema = z
+  .object({
+    designation: z.string().min(1).max(300).refine(noControlChars, "Caractères invalides"),
+    qty: z.number().int().min(0),
+  })
+  .strict();
+
+/**
+ * Montants d'une commande, partagés par les deux gabarits.
+ *
+ * `livraisonSurDevis` a un défaut `false` mais reste porteur de sens : à `true`,
+ * 0 € de livraison signifie « à chiffrer », jamais « offerte ». Les gabarits
+ * s'appuient dessus pour ne pas annoncer une gratuité que personne n'a accordée.
+ */
+const montantsCommande = {
+  sousTotalCents: z.number().int().min(0),
+  livraisonCents: z.number().int().min(0),
+  totalCents: z.number().int().min(0),
+  livraisonSurDevis: z.boolean().default(false),
+};
+
 // Discriminée sur `template` : chaque template a ses propres données, et un
 // payload destiné à l'un ne peut pas passer pour l'autre.
 const notifySchema = z.discriminatedUnion("template", [
@@ -226,6 +251,67 @@ const notifySchema = z.discriminatedUnion("template", [
         .strict(),
     })
     .strict(),
+  // ─── Affectation de tournée (API → livreur) ───
+  z
+    .object({
+      to: z.string().email().max(320),
+      subject: z.string().min(1).max(200).refine(noControlChars, "Caractères invalides"),
+      template: z.literal("round_assigned_driver"),
+      data: z
+        .object({
+          livreurNom: z.string().min(1).max(200).refine(noControlChars, "Caractères invalides"),
+          datePassage: isoDateSchema,
+          // Borné comme les autres collections : un plafond explicite vaut mieux
+          // qu'un entier libre interpolé dans le HTML.
+          stopsCount: z.number().int().min(0).max(500),
+          zone: z.string().max(200).refine(noControlChars, "Caractères invalides").optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+  // ─── Commandes (API → client / gestionnaires) ───
+  z
+    .object({
+      to: z.string().email().max(320),
+      subject: z.string().min(1).max(200).refine(noControlChars, "Caractères invalides"),
+      template: z.literal("order_confirmation_client"),
+      data: z
+        .object({
+          clientNom: z.string().min(1).max(200).refine(noControlChars, "Caractères invalides"),
+          orderNumber: z.string().min(1).max(30).refine(noControlChars, "Caractères invalides"),
+          dateLivraison: isoDateSchema,
+          creneau: creneauSchema.optional(),
+          lignes: z.array(orderLigneSchema).max(200).default([]),
+          ...montantsCommande,
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      to: z.string().email().max(320),
+      subject: z.string().min(1).max(200).refine(noControlChars, "Caractères invalides"),
+      template: z.literal("order_notification_owner"),
+      data: z
+        .object({
+          clientNom: z.string().min(1).max(200).refine(noControlChars, "Caractères invalides"),
+          clientEmail: z.string().email().max(320).optional(),
+          clientTel: z.string().max(20).refine(noControlChars, "Caractères invalides").optional(),
+          clientAdresse: z
+            .string()
+            .max(500)
+            .refine(noControlChars, "Caractères invalides")
+            .optional(),
+          orderNumber: z.string().min(1).max(30).refine(noControlChars, "Caractères invalides"),
+          dateLivraison: isoDateSchema,
+          creneau: creneauSchema.optional(),
+          lignes: z.array(orderLigneSchema).max(200).default([]),
+          source: z.enum(["MOBILE", "QUOTE_CONVERSION", "MANUAL"]).optional(),
+          ...montantsCommande,
+        })
+        .strict(),
+    })
+    .strict(),
 ]);
 
 type NotifyBody = z.infer<typeof notifySchema>;
@@ -238,6 +324,12 @@ function renderNotify(body: NotifyBody): string {
       return rotationReminderOwnerEmail(body.data);
     case "rotation_overdue":
       return rotationOverdueEmail(body.data);
+    case "round_assigned_driver":
+      return roundAssignedDriverEmail(body.data);
+    case "order_confirmation_client":
+      return orderConfirmationClientEmail(body.data);
+    case "order_notification_owner":
+      return orderNotificationOwnerEmail(body.data);
   }
 }
 

@@ -11,11 +11,11 @@ import {
   countArticlesLivres,
   devisToBonLivraison,
   quoteToDevisData,
-  DELIVERY_ZONE_LABELS,
   URGENCY_TIERS,
 } from "@lingengo/shared";
 import type { DeliveryZone, UrgencyLevel } from "@lingengo/shared";
 import type { QuoteDTO, OperatorDTO } from "@/lib/types";
+import { DELIVERY_ZONE_OPTIONS } from "@/lib/delivery-zones";
 import { Truck, Info, Minus, Plus } from "lucide-react";
 
 interface BonLivraisonModalProps {
@@ -262,9 +262,12 @@ export function BonLivraisonModal({ quote, open, onClose }: BonLivraisonModalPro
                 onChange={(e) => setZone(e.target.value as DeliveryZone | "")}
               >
                 <option value="">Non précisée</option>
-                {(Object.keys(DELIVERY_ZONE_LABELS) as DeliveryZone[]).map((z) => (
-                  <option key={z} value={z}>
-                    {DELIVERY_ZONE_LABELS[z]}
+                {/* Les mêmes paliers que le devis, dans le même ordre, mais SANS
+                    tarif : un bon de livraison constate des quantités remises,
+                    il ne porte aucun prix. */}
+                {DELIVERY_ZONE_OPTIONS.map((option) => (
+                  <option key={option.zone} value={option.zone}>
+                    {option.label}
                   </option>
                 ))}
               </select>

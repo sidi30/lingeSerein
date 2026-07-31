@@ -221,6 +221,15 @@ export default function TabsLayout() {
         }}
       />
 
+      {/* ── Édition du profil — ouverte depuis le profil, jamais dans la tab bar ── */}
+      <Tabs.Screen
+        name="profile-edit"
+        options={{
+          title: "Mes informations",
+          href: null,
+        }}
+      />
+
       {/* ── Profil — tous les rôles ── */}
       <Tabs.Screen
         name="profile"

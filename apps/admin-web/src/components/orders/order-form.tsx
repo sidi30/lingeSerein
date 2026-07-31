@@ -19,6 +19,7 @@ import { useToast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { EmailText } from "@/components/ui/email-text";
 import { formatPrice } from "@/lib/format";
+import { deliveryUrgencyNotice, isoDay } from "@/lib/order-delivery";
 import type { ClientListDTO, PaginatedResponse, ProductV2DTO } from "@/lib/types";
 import { invalidateAfter } from "@/lib/query";
 
@@ -59,6 +60,12 @@ export function OrderForm({ clientId, clientName, onSuccess, onCancel }: OrderFo
   const [specialNotes, setSpecialNotes] = useState("");
 
   const needsClientPicker = !clientId;
+
+  // Figé à l'ouverture du formulaire, comme la date de signature du contrat :
+  // recalculé à chaque rendu, `min` changerait sous les doigts à minuit et le
+  // rendu serveur ne correspondrait pas au rendu client.
+  const [today] = useState(() => isoDay(new Date()));
+  const urgency = deliveryUrgencyNotice(deliveryDate, today);
 
   const { data: productsData, isLoading: productsLoading } = useQuery({
     queryKey: ["products-for-order"],
@@ -290,14 +297,28 @@ export function OrderForm({ clientId, clientName, onSuccess, onCancel }: OrderFo
           <label className={labelCls} htmlFor="order-delivery-date">
             Date de livraison <span className="text-danger-600">*</span>
           </label>
+          {/* `min` : une date du jour ou passée fait basculer le serveur sur le
+              forfait « Jour même » (39 €). Le champ ne peut pas empêcher le
+              choix — il est légitime —, mais il ne doit pas le rendre
+              involontaire, d'où la borne PUIS l'annonce du palier ci-dessous. */}
           <input
             id="order-delivery-date"
             type="date"
             className={inputCls}
             value={deliveryDate}
+            min={today}
             onChange={(e) => setDeliveryDate(e.target.value)}
+            aria-describedby={urgency ? "order-delivery-urgency" : undefined}
             required
           />
+          {urgency && (
+            <p
+              id="order-delivery-urgency"
+              className={`mt-1 text-xs ${urgency.urgent ? "font-medium text-danger-600" : "text-gray-500"}`}
+            >
+              {urgency.message}
+            </p>
+          )}
         </div>
         <div>
           <label className={labelCls} htmlFor="order-time-slot">
@@ -333,8 +354,12 @@ export function OrderForm({ clientId, clientName, onSuccess, onCancel }: OrderFo
         />
       </div>
 
+      {/* « hors livraison » n'est pas un détail : les frais sont calculés par le
+          serveur d'après la zone du client au moment de la création. Sans cette
+          mention, le total annoncé ici et celui de la commande créée juste après
+          diffèrent, et c'est l'écran qui passe pour faux. */}
       <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5">
-        <span className="text-sm text-gray-600">Total estimé</span>
+        <span className="text-sm text-gray-600">Total estimé (hors livraison)</span>
         <span className="text-base font-bold text-gray-900 tabular-nums">
           {formatPrice(totalCents)}
         </span>

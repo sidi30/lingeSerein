@@ -1,4 +1,4 @@
-import { useState, useCallback, memo } from "react";
+import { useState, useCallback, useEffect, useRef, memo } from "react";
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   Platform,
   Image,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Calendar, type DateData, LocaleConfig } from "react-native-calendars";
@@ -20,8 +20,11 @@ import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { SkeletonBox } from "@/components/SkeletonBox";
 import { StepIndicator } from "@/components/StepIndicator";
-import { useProducts, useCreateOrder, formatCents, errorMessage } from "@/lib/api";
+import { useProducts, useCreateOrder, useProfile, formatCents, errorMessage } from "@/lib/api";
 import type { Product, ProductKind } from "@/lib/api";
+import { deliveryFeeLine, orderTotals, DELIVERY_FEE_A_CONFIRMER } from "@/lib/order-total";
+import { deliveryQuote } from "@/lib/delivery-quote";
+import { defaultDeliveryYmd, deliveryUrgencyNotice, minDeliveryYmd } from "@/lib/delivery-urgency";
 import { colors, font, spacing, radius, MIN_HIT_TARGET } from "@/lib/theme";
 
 // ─── French locale ───────────────────────────────────────────────
@@ -98,13 +101,6 @@ interface CartItem {
   quantity: number;
 }
 
-function localYmd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 /**
  * Parse une date civile « YYYY-MM-DD » dans le fuseau LOCAL.
  * `new Date("2026-08-03")` est interprété par la spec comme minuit UTC : à
@@ -114,12 +110,6 @@ function localYmd(d: Date): string {
 function parseYmd(ymd: string): Date {
   const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
   return new Date(y, (m ?? 1) - 1, d ?? 1);
-}
-
-function tomorrowYmd(): string {
-  const t = new Date();
-  t.setDate(t.getDate() + 1);
-  return localYmd(t);
 }
 
 /** Renvoie l'icône Ionicons appropriée pour un produit selon son slug/kind */
@@ -257,12 +247,21 @@ function SectionTitle({
 export default function NewOrderScreen() {
   const { data: products, isLoading } = useProducts();
   const createOrder = useCreateOrder();
+  // La commune du client (`communeInsee`) porte le palier de livraison : sans
+  // elle, les frais restent « à confirmer », avec elle ils sont annoncés ici.
+  const profile = useProfile();
+  // Article choisi depuis le catalogue : on ARRIVE ici avec lui, plutôt que de
+  // dupliquer un sélecteur de produits là-bas.
+  const params = useLocalSearchParams<{ productId?: string | string[] }>();
+  const preselectId = Array.isArray(params.productId) ? params.productId[0] : params.productId;
 
   const [step, setStep] = useState(0);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [timeSlot, setTimeSlot] = useState(DEFAULT_TIME_SLOT);
   const [notes, setNotes] = useState("");
-  const [selectedDate, setSelectedDate] = useState(tomorrowYmd());
+  // J+2 : la première date SANS forfait d'urgence. J+1 reste sélectionnable —
+  // avec son étiquette et son prix (cf. `urgency` plus bas).
+  const [selectedDate, setSelectedDate] = useState(() => defaultDeliveryYmd());
 
   const haptic = useCallback(() => {
     if (Platform.OS !== "web") {
@@ -302,8 +301,50 @@ export default function NewOrderScreen() {
     [haptic],
   );
 
+  /**
+   * Pré-remplissage depuis le catalogue, une seule fois par article.
+   *
+   * Le garde par référence est indispensable : le catalogue peut se
+   * rafraîchir (react-query) et relancer cet effet, qui ajouterait alors une
+   * seconde unité au panier sans que personne n'ait rien touché. On n'appelle
+   * pas `addToCart` non plus — son retour haptique n'a pas de sens pour une
+   * sélection que l'utilisateur a faite sur l'écran précédent.
+   */
+  const preselectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!preselectId || !products) return;
+    if (preselectedRef.current === preselectId) return;
+    const product = products.find((p) => p.id === preselectId);
+    // Produit inconnu (retiré du catalogue, lien périmé) : on ouvre simplement
+    // le tunnel vide plutôt que d'afficher une erreur pour un panier.
+    if (!product) return;
+    preselectedRef.current = preselectId;
+    setCart((prev) =>
+      prev.some((c) => c.product.id === product.id) ? prev : [...prev, { product, quantity: 1 }],
+    );
+  }, [preselectId, products]);
+
   const total = cart.reduce((s, c) => s + c.product.priceCents * c.quantity, 0);
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
+
+  // Ce que la date choisie coûte, AVANT l'envoi : le serveur applique le même
+  // barème (`computeDeliveryFee`) à la création, et jusqu'ici le client
+  // découvrait le forfait Express 24 h dans l'alerte qui suit la commande.
+  const urgency = deliveryUrgencyNotice(selectedDate, formatCents);
+  const expressYmd = minDeliveryYmd();
+  const standardYmd = defaultDeliveryYmd();
+
+  // Ce que la LIVRAISON coûte, avant l'envoi. Le barème est public sur tout le
+  // Vaucluse et la commune du client est choisie dans une liste fermée : il n'y
+  // a plus de raison de renvoyer le montant à « après la commande ».
+  // `deliveryQuote` appelle le même `computeDeliveryFee` que le serveur.
+  const quote = deliveryQuote({
+    client: profile.data,
+    urgency: urgency.level,
+    subtotalCents: total,
+  });
+  /** Total réellement dû ; retombe sur les articles seuls quand il manque les frais. */
+  const dueCents = quote.totalCents ?? total;
 
   const getCartQty = useCallback(
     (id: string) => cart.find((c) => c.product.id === id)?.quantity ?? 0,
@@ -349,9 +390,18 @@ export default function NewOrderScreen() {
           setCart([]);
           setStep(0);
           router.back();
+          // Le serveur vient de calculer les frais : c'est le premier moment où
+          // on peut annoncer le montant réellement dû. On le fait ici, pour que
+          // le client ne le découvre pas sur la facture.
+          const totals = orderTotals(order);
+          // « Offerte » et « à confirmer » valent toutes deux 0 € en base :
+          // `deliveryFeeLine` les sépare, ici comme sur la fiche.
+          const feeLine = deliveryFeeLine(totals, formatCents);
           Alert.alert(
             "Commande envoyée !",
-            `${order.orderNumber} — Livraison le ${parseYmd(selectedDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}`,
+            `${order.orderNumber} — Livraison le ${parseYmd(selectedDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}` +
+              `\n${totals.totalLabel} : ${formatCents(totals.totalCents)}` +
+              (feeLine ? `\n${feeLine}` : ""),
           );
         },
         onError: (e) => {
@@ -363,7 +413,7 @@ export default function NewOrderScreen() {
 
   const handleSubmit = () => {
     if (createOrder.isPending) return;
-    const minAtSubmit = tomorrowYmd();
+    const minAtSubmit = minDeliveryYmd();
     if (selectedDate < minAtSubmit) {
       setSelectedDate(minAtSubmit);
       Alert.alert("Date à confirmer", "La date de livraison doit être au minimum demain.");
@@ -379,10 +429,20 @@ export default function NewOrderScreen() {
     });
     const qty = cart.reduce((s, c) => s + c.quantity, 0);
 
+    // Les frais sont connus dès que la commune l'est : le récapitulatif de
+    // confirmation annonce alors le montant TOTAL, pas un sous-total suivi
+    // d'une surprise. Sans commune, on le dit — on ne l'omet pas.
+    const feeLabel =
+      quote.cents === null
+        ? `Frais de livraison : ${DELIVERY_FEE_A_CONFIRMER.toLowerCase()}`
+        : `Dont ${formatCents(quote.cents)} de frais de livraison`;
+
     Alert.alert(
       "Confirmer la commande",
-      `${qty} article${qty > 1 ? "s" : ""} pour ${formatCents(total)}\n` +
-        `Livraison le ${dateLabel}, créneau ${timeSlot}.`,
+      `${qty} article${qty > 1 ? "s" : ""} — ${formatCents(dueCents)}\n${feeLabel}\n` +
+        `Livraison le ${dateLabel}, créneau ${timeSlot}.` +
+        // Dernier rappel du forfait d'urgence : c'est le bouton qui engage.
+        (urgency.isSurcharged ? `\n\n${urgency.message}` : ""),
       [
         { text: "Modifier", style: "cancel" },
         { text: "Confirmer et envoyer", onPress: sendOrder },
@@ -437,7 +497,7 @@ export default function NewOrderScreen() {
                 {cartCount} article{cartCount > 1 ? "s" : ""} sélectionné
                 {cartCount > 1 ? "s" : ""}
               </Text>
-              <Text style={styles.cartSummaryHint}>Total estimé</Text>
+              <Text style={styles.cartSummaryHint}>Sous-total articles</Text>
             </View>
             <Text
               style={styles.cartSummaryTotal}
@@ -531,13 +591,18 @@ export default function NewOrderScreen() {
           <Card padded={false} style={styles.calendarCard}>
             <Calendar
               current={selectedDate}
-              minDate={tomorrowYmd()}
+              minDate={expressYmd}
               onDayPress={(day: DateData) => setSelectedDate(day.dateString)}
               markedDates={{
+                // J+1 reste offert, mais pastillé : il déclenche le forfait
+                // Express 24 h, que l'encart sous le calendrier chiffre.
+                [expressYmd]: { marked: true, dotColor: colors.warning },
                 [selectedDate]: {
                   selected: true,
                   selectedColor: colors.primary,
                   selectedTextColor: colors.textInverse,
+                  marked: selectedDate === expressYmd,
+                  dotColor: colors.textInverse,
                 },
               }}
               theme={{
@@ -560,6 +625,41 @@ export default function NewOrderScreen() {
               }}
             />
           </Card>
+
+          {/* Le palier d'urgence, annoncé DÈS la sélection de la date : c'est
+              le serveur qui facture, mais c'est ici que le client décide. */}
+          <View style={[styles.urgencyCard, urgency.isSurcharged && styles.urgencyCardWarn]}>
+            <Ionicons
+              name={urgency.isSurcharged ? "flash-outline" : "calendar-outline"}
+              size={20}
+              color={urgency.isSurcharged ? colors.warning : colors.textSecondary}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.urgencyTitle, urgency.isSurcharged && styles.urgencyTitleWarn]}>
+                {urgency.title}
+              </Text>
+              <Text style={styles.urgencyMessage}>{urgency.message}</Text>
+              {urgency.isSurcharged && (
+                <Pressable
+                  onPress={() => setSelectedDate(standardYmd)}
+                  style={styles.urgencySwitch}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Choisir la date sans supplément d'urgence"
+                >
+                  <Text style={styles.urgencySwitchText}>
+                    Livrer le{" "}
+                    {parseYmd(standardYmd).toLocaleDateString("fr-FR", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long",
+                    })}{" "}
+                    sans supplément
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
 
           <Text style={styles.sectionLabel}>Créneau horaire</Text>
           <View style={styles.slotsRow}>
@@ -660,16 +760,68 @@ export default function NewOrderScreen() {
                 </Text>
               </Animated.View>
             ))}
+            {/* Ventilation explicite : `totalCents` est le SOUS-TOTAL des
+                articles, les frais de livraison s'y ajoutent. Le barème est
+                public sur tout le Vaucluse et la commune du client est connue :
+                le montant s'annonce ICI, pas après l'envoi. Il reste « à
+                confirmer » quand la commune manque — un « 0 € » promettrait une
+                gratuité que personne n'a décidée. */}
+            <View style={[styles.recapItem, styles.recapItemBorder]}>
+              <Text style={styles.recapSubLabel}>Sous-total articles</Text>
+              <Text style={styles.recapSubValue}>{formatCents(total)}</Text>
+            </View>
+            <View style={styles.recapItem}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.recapSubLabel}>Frais de livraison</Text>
+                {/* Motif du tarif, repris tel quel du barème partagé : ni
+                    « offerte » ni « Express » ne se déduisent d'un montant —
+                    25 € est à la fois le palier au-delà de 35 km ET le forfait
+                    Express 24 h, et Orange rend 0 € sans rien offrir. */}
+                {quote.label ? <Text style={styles.recapFeeLabel}>{quote.label}</Text> : null}
+                {quote.detail ? <Text style={styles.recapFeeLabel}>{quote.detail}</Text> : null}
+                {quote.manquePourGratuiteCents !== null ? (
+                  <Text style={styles.recapFeeLabel}>
+                    Encore {formatCents(quote.manquePourGratuiteCents)} pour la livraison offerte.
+                  </Text>
+                ) : null}
+              </View>
+              {quote.cents === null ? (
+                <Text style={styles.recapPending}>{DELIVERY_FEE_A_CONFIRMER}</Text>
+              ) : (
+                <Text style={quote.fee.urgent ? styles.recapFeeUrgent : styles.recapSubValue}>
+                  {formatCents(quote.cents)}
+                </Text>
+              )}
+            </View>
             <View style={[styles.recapItem, styles.recapItemBorder, styles.recapTotal]}>
-              <Text style={styles.recapTotalLabel}>Total</Text>
-              <Text style={styles.recapTotalValue}>{formatCents(total)}</Text>
+              <Text style={styles.recapTotalLabel}>
+                {quote.surDevis ? "Total (hors livraison)" : "Total"}
+              </Text>
+              <Text style={styles.recapTotalValue}>{formatCents(dueCents)}</Text>
             </View>
           </Card>
+          {quote.needsCommune ? (
+            <Pressable
+              onPress={() => router.push("/(tabs)/profile-edit")}
+              style={styles.communeLink}
+              accessibilityRole="link"
+              accessibilityLabel="Renseigner ma commune de livraison"
+            >
+              <Ionicons name="location-outline" size={14} color={colors.primary} />
+              <Text style={styles.communeLinkText}>Renseigner ma commune</Text>
+              <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+            </Pressable>
+          ) : null}
+          <Text style={styles.recapFeeHint}>
+            {quote.surDevis
+              ? "Le montant définitif, frais de livraison compris, vous est confirmé dès l'envoi de la commande."
+              : "Ce montant est celui qui vous sera facturé, frais de livraison compris."}
+          </Text>
 
           <View style={styles.navRow}>
             <Button title="Modifier" onPress={handleBack} variant="outline" style={styles.navBtn} />
             <Button
-              title={`Commander · ${formatCents(total)}`}
+              title={`Commander · ${formatCents(dueCents)}`}
               onPress={handleSubmit}
               loading={createOrder.isPending}
               style={styles.navBtnMain}
@@ -844,6 +996,45 @@ const styles = StyleSheet.create({
   },
   // Calendar
   calendarCard: { overflow: "hidden" },
+  // Palier d'urgence
+  urgencyCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    backgroundColor: colors.surface,
+  },
+  urgencyCardWarn: {
+    borderColor: colors.warning,
+    backgroundColor: colors.warningLight,
+  },
+  urgencyTitle: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.bold,
+    color: colors.textSecondary,
+  },
+  urgencyTitleWarn: { color: colors.warningText },
+  urgencyMessage: {
+    fontSize: font.sizes.xs,
+    color: colors.textSecondary,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  urgencySwitch: {
+    marginTop: spacing.sm,
+    minHeight: 32,
+    justifyContent: "center",
+  },
+  urgencySwitchText: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.semibold,
+    color: colors.primary,
+    textDecorationLine: "underline",
+  },
   // Slots
   slotsRow: { flexDirection: "row", gap: spacing.sm },
   slotCard: {
@@ -943,6 +1134,51 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     minWidth: 72,
     textAlign: "right",
+  },
+  recapSubLabel: {
+    flex: 1,
+    fontSize: font.sizes.sm,
+    color: colors.textSecondary,
+  },
+  recapSubValue: {
+    fontSize: font.sizes.md,
+    fontWeight: font.weights.semibold,
+    color: colors.textPrimary,
+  },
+  recapPending: {
+    fontSize: font.sizes.sm,
+    fontStyle: "italic",
+    color: colors.textTertiary,
+  },
+  recapFeeLabel: {
+    fontSize: font.sizes.xs,
+    color: colors.textTertiary,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  communeLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    minHeight: MIN_HIT_TARGET,
+  },
+  communeLinkText: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.semibold,
+    color: colors.primary,
+    textDecorationLine: "underline",
+  },
+  recapFeeUrgent: {
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.bold,
+    color: colors.warningText,
+  },
+  recapFeeHint: {
+    fontSize: font.sizes.xs,
+    color: colors.textTertiary,
+    lineHeight: 17,
+    marginTop: spacing.sm,
   },
   recapTotal: { paddingTop: spacing.md },
   recapTotalLabel: {

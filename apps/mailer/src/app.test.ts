@@ -244,6 +244,106 @@ test("les trois templates de rotation sont acceptés", async () => {
   });
 });
 
+test("les templates de tournée et de commande sont acceptés", async () => {
+  await withApp(SECRET, async ({ app, sent }) => {
+    const bodies = [
+      {
+        to: "livreur@test.fr",
+        subject: "Une tournée vous est affectée",
+        template: "round_assigned_driver",
+        data: {
+          livreurNom: "Karim",
+          datePassage: "2026-08-03",
+          stopsCount: 7,
+          zone: "Vaucluse Nord",
+        },
+      },
+      {
+        to: "client@test.fr",
+        subject: "Votre commande LNG-2026-ABCDEF est enregistrée",
+        template: "order_confirmation_client",
+        data: {
+          clientNom: "Hôtel du Parc",
+          orderNumber: "LNG-2026-ABCDEF",
+          dateLivraison: "2026-08-03",
+          creneau: "08:00-12:00",
+          lignes: [{ designation: "Kit Bain", qty: 2 }],
+          sousTotalCents: 1500,
+          livraisonCents: 1200,
+          totalCents: 2700,
+          livraisonSurDevis: false,
+        },
+      },
+      {
+        to: "gestion@test.fr",
+        subject: "Nouvelle commande LNG-2026-ABCDEF",
+        template: "order_notification_owner",
+        data: {
+          clientNom: "Hôtel du Parc",
+          clientEmail: "contact@hotel.test",
+          clientTel: "0490000000",
+          clientAdresse: "1 rue des Lices",
+          orderNumber: "LNG-2026-ABCDEF",
+          dateLivraison: "2026-08-03",
+          lignes: [{ designation: "Kit Bain", qty: 2 }],
+          sousTotalCents: 1500,
+          livraisonCents: 0,
+          totalCents: 1500,
+          livraisonSurDevis: true,
+          source: "MOBILE",
+        },
+      },
+    ];
+
+    for (const body of bodies) {
+      const res = await notify(app, body, SECRET);
+      assert.equal(res.statusCode, 200, `template ${body.template} refusé`);
+    }
+    assert.equal(sent.length, 3);
+  });
+});
+
+test("le gabarit d'affectation refuse un champ de données inconnu", async () => {
+  // Le contrat est figé des deux côtés : un champ ajouté côté API sans son
+  // pendant ici doit échouer bruyamment plutôt que d'être ignoré en silence.
+  await withApp(SECRET, async ({ app, sent }) => {
+    const res = await notify(
+      app,
+      {
+        to: "livreur@test.fr",
+        subject: "Une tournée vous est affectée",
+        template: "round_assigned_driver",
+        data: {
+          livreurNom: "Karim",
+          datePassage: "2026-08-03",
+          stopsCount: 7,
+          adresses: ["1 rue des Lices"],
+        },
+      },
+      SECRET,
+    );
+    assert.equal(res.statusCode, 400);
+    assert.equal(sent.length, 0);
+  });
+});
+
+test("le gabarit d'affectation refuse une date non calendaire", async () => {
+  await withApp(SECRET, async ({ app }) => {
+    const res = await notify(
+      app,
+      {
+        to: "livreur@test.fr",
+        subject: "Une tournée vous est affectée",
+        template: "round_assigned_driver",
+        // ISO complet : réintroduirait un fuseau, donc un jour potentiellement faux.
+        data: { livreurNom: "Karim", datePassage: "2026-08-03T00:00:00Z", stopsCount: 7 },
+      },
+      SECRET,
+    );
+    assert.equal(res.statusCode, 400);
+  });
+});
+
 test("/health reste public et ne divulgue rien", async () => {
   await withApp(SECRET, async ({ app }) => {
     const res = await app.inject({ method: "GET", url: "/health" });

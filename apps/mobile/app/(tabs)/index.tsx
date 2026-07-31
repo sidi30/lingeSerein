@@ -26,6 +26,8 @@ import {
   formatCents,
 } from "@/lib/api";
 import type { Order, DashboardAlert, DeliveryStop } from "@/lib/api";
+import { buildClientStockView } from "@/lib/stock-summary";
+import { orderTotals } from "@/lib/order-total";
 import { colors, font, spacing, radius } from "@/lib/theme";
 
 /** Date civile locale au format YYYY-MM-DD, sans passer par toISOString() (UTC). */
@@ -123,9 +125,18 @@ function ClientHome() {
         (o.deliveryDate ?? "").slice(0, 10) >= todayYmd,
     )
     .sort((a, b) => a.deliveryDate.localeCompare(b.deliveryDate))[0];
-  const totalClean = stock.data?.stocks.reduce((s, st) => s + st.cleanSets, 0) ?? 0;
-  const totalDirty = stock.data?.stocks.reduce((s, st) => s + st.dirtySets, 0) ?? 0;
-  const totalCirc = stock.data?.stocks.reduce((s, st) => s + st.totalInCirculation, 0) ?? 0;
+  // Même source unifiée que l'écran Stock : sans le repli sur les rotations, la
+  // carte affichait 0 partout pour un client pourtant livré — la table
+  // d'agrégats n'étant alimentée que par un ajustement manuel d'admin.
+  const stockView = buildClientStockView({
+    stocks: stock.data?.stocks,
+    rotations: rotations.data,
+  });
+  const totalCirc = stockView.totals.inCirculation;
+  const hasSplit = stockView.totals.clean !== null;
+  const totalClean = stockView.totals.clean ?? 0;
+  const totalDirty = stockView.totals.dirty ?? 0;
+  const totalTransit = stockView.totals.inTransit ?? 0;
 
   return (
     <ScreenWrapper refreshing={refreshing} onRefresh={refetch}>
@@ -159,14 +170,17 @@ function ClientHome() {
         <Card style={styles.stockCard}>
           <View style={styles.stockRow}>
             <PieChart
-              data={[
-                { value: totalClean || 0.1, color: colors.clean },
-                { value: totalDirty || 0.1, color: colors.dirty },
-                {
-                  value: Math.max(totalCirc - totalClean - totalDirty, 0) || 0.1,
-                  color: colors.circulation,
-                },
-              ]}
+              data={
+                hasSplit
+                  ? [
+                      { value: totalClean || 0.1, color: colors.clean },
+                      { value: totalDirty || 0.1, color: colors.dirty },
+                      { value: totalTransit || 0.1, color: colors.circulation },
+                    ]
+                  : // Ventilation inconnue : un anneau d'une seule couleur, plutôt
+                    // que trois parts inventées à parts égales.
+                    [{ value: totalCirc || 0.1, color: colors.circulation }]
+              }
               donut
               radius={44}
               innerRadius={30}
@@ -175,20 +189,34 @@ function ClientHome() {
             />
             <View style={styles.stockLegend}>
               <Text style={styles.stockTitle}>Mon stock</Text>
-              <View style={styles.stockLegendRow}>
-                <View style={[styles.dot, { backgroundColor: colors.clean }]} />
-                <Text style={styles.stockLegendText}>{totalClean} propres</Text>
-              </View>
-              <View style={styles.stockLegendRow}>
-                <View style={[styles.dot, { backgroundColor: colors.dirty }]} />
-                <Text style={styles.stockLegendText}>{totalDirty} sales</Text>
-              </View>
-              <View style={styles.stockLegendRow}>
-                <View style={[styles.dot, { backgroundColor: colors.circulation }]} />
-                <Text style={styles.stockLegendText}>
-                  {Math.max(totalCirc - totalClean - totalDirty, 0)} en transit
-                </Text>
-              </View>
+              {hasSplit ? (
+                <>
+                  <View style={styles.stockLegendRow}>
+                    <View style={[styles.dot, { backgroundColor: colors.clean }]} />
+                    <Text style={styles.stockLegendText}>{totalClean} propres</Text>
+                  </View>
+                  <View style={styles.stockLegendRow}>
+                    <View style={[styles.dot, { backgroundColor: colors.dirty }]} />
+                    <Text style={styles.stockLegendText}>{totalDirty} sales</Text>
+                  </View>
+                  <View style={styles.stockLegendRow}>
+                    <View style={[styles.dot, { backgroundColor: colors.circulation }]} />
+                    <Text style={styles.stockLegendText}>{totalTransit} en transit</Text>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.stockLegendRow}>
+                    <View style={[styles.dot, { backgroundColor: colors.circulation }]} />
+                    <Text style={styles.stockLegendText}>
+                      {totalCirc} article{totalCirc > 1 ? "s" : ""} chez vous
+                    </Text>
+                  </View>
+                  <Text style={styles.stockLegendHint}>
+                    {totalCirc > 0 ? "Détail dans Mon stock" : "Rien en circulation"}
+                  </Text>
+                </>
+              )}
             </View>
             <Ionicons name="chevron-forward" size={24} color={colors.textTertiary} />
           </View>
@@ -232,7 +260,9 @@ function ClientHome() {
                 </View>
                 <View style={{ alignItems: "flex-end", gap: 4 }}>
                   <StatusBadge type="order" status={nextOrder.status} />
-                  <Text style={styles.deliveryPrice}>{formatCents(nextOrder.totalCents)}</Text>
+                  <Text style={styles.deliveryPrice}>
+                    {formatCents(orderTotals(nextOrder).totalCents)}
+                  </Text>
                 </View>
               </View>
             </Card>
@@ -788,6 +818,11 @@ const styles = StyleSheet.create({
   stockLegendText: {
     fontSize: font.sizes.sm,
     color: colors.textSecondary,
+  },
+  stockLegendHint: {
+    fontSize: font.sizes.xs,
+    color: colors.textTertiary,
+    marginTop: 2,
   },
   dot: { width: 8, height: 8, borderRadius: 4 },
   miniDonutCenter: {
