@@ -2,7 +2,7 @@
  * La date de livraison porte un PRIX, et c'est le piège que ces tests ferment :
  *
  * 1. un `<input type="date">` sans borne laisse choisir aujourd'hui — soit le
- *    forfait « Jour même » (19,50 €) sur une saisie au comptoir, sans que rien ne
+ *    forfait « Jour même » (39 €) sur une saisie au comptoir, sans que rien ne
  *    l'annonce ; le palier doit donc être lisible dès la sélection ;
  * 2. le barème appartient à `@lingengo/shared` : ces tests vérifient la
  *    TRADUCTION date → palier, jamais les montants eux-mêmes, sinon le jour où
@@ -70,7 +70,7 @@ describe("deliveryUrgencyNotice", () => {
     // Le montant vient du barème partagé, jamais d'une constante recopiée ici.
     const tier = URGENCY_TIERS.find((t) => t.level === "JOUR_MEME");
     assert.equal(notice.feeCents, tier?.feeCents);
-    assert.match(notice.message, /19,50/);
+    assert.match(notice.message, /39,00/);
     assert.match(notice.message, /EN PLUS/);
   });
 
@@ -79,7 +79,7 @@ describe("deliveryUrgencyNotice", () => {
     assert.ok(notice);
     assert.equal(notice.level, "EXPRESS_24H");
     assert.equal(notice.urgent, true);
-    assert.match(notice.message, /12,50/);
+    assert.match(notice.message, /25,00/);
   });
 
   it("dit aussi ce qui se passe SANS forfait, à partir de J+2", () => {

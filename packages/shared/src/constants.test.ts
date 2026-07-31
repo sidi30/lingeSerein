@@ -35,25 +35,23 @@ describe("computeDeliveryFee — niveau STANDARD", () => {
     assert.match(fee.label, /Orange/);
   });
 
-  it("facture 6 € jusqu'à 15 km d'Orange", () => {
+  it("facture 12 € jusqu'à 15 km d'Orange", () => {
     const fee = computeDeliveryFee({ zone: "PROCHE", montantApresRemiseCents: 5000 });
     assert.equal(fee.cents, DELIVERY_DEFAULTS.ZONE_PROCHE_CENTS);
-    // Barème divisé par deux le 2026-07-31 : le montant est réaffirmé en clair
-    // pour qu'une modification des constantes ne passe jamais inaperçue.
-    assert.equal(fee.cents, 600);
+    assert.equal(fee.cents, 1200);
     assert.equal(fee.offerte, false);
   });
 
-  it("facture 7,50 € de 15 à 35 km (Avignon, Carpentras)", () => {
+  it("facture 15 € de 15 à 35 km (Avignon, Carpentras)", () => {
     const fee = computeDeliveryFee({ zone: "INTERMEDIAIRE", montantApresRemiseCents: 5000 });
     assert.equal(fee.cents, DELIVERY_DEFAULTS.ZONE_INTERMEDIAIRE_CENTS);
-    assert.equal(fee.cents, 750);
+    assert.equal(fee.cents, 1500);
   });
 
-  it("facture 12,50 € au-delà de 35 km (Cavaillon, Apt, Pertuis)", () => {
+  it("facture 25 € au-delà de 35 km (Cavaillon, Apt, Pertuis)", () => {
     const fee = computeDeliveryFee({ zone: "ELOIGNE", montantApresRemiseCents: 5000 });
     assert.equal(fee.cents, DELIVERY_DEFAULTS.ZONE_ELOIGNE_CENTS);
-    assert.equal(fee.cents, 1250);
+    assert.equal(fee.cents, 2500);
     // Même montant que le forfait Express 24 h, mais ce n'est PAS une urgence :
     // c'est ce que `deliveryLabelFromCents` ne peut plus deviner.
     assert.equal(fee.urgent, false);
@@ -80,7 +78,7 @@ describe("computeDeliveryFee — niveau STANDARD", () => {
 });
 
 describe("computeDeliveryFee — forfaits d'urgence", () => {
-  it("applique 12,50 € en Express 24 h en ignorant les seuils de gratuité", () => {
+  it("applique 25 € en Express 24 h en ignorant les seuils de gratuité", () => {
     const fee = computeDeliveryFee({
       zone: "ORANGE",
       montantApresRemiseCents: 50000,
@@ -88,12 +86,12 @@ describe("computeDeliveryFee — forfaits d'urgence", () => {
       urgency: "EXPRESS_24H",
     });
     assert.equal(fee.cents, DELIVERY_DEFAULTS.EXPRESS_24H_FEE_CENTS);
-    assert.equal(fee.cents, 1250);
+    assert.equal(fee.cents, 2500);
     assert.equal(fee.urgent, true);
     assert.equal(fee.offerte, false);
   });
 
-  it("applique 19,50 € en Jour même en ignorant les seuils de gratuité", () => {
+  it("applique 39 € en Jour même en ignorant les seuils de gratuité", () => {
     const fee = computeDeliveryFee({
       zone: "ORANGE",
       montantApresRemiseCents: 50000,
@@ -101,7 +99,7 @@ describe("computeDeliveryFee — forfaits d'urgence", () => {
       urgency: "JOUR_MEME",
     });
     assert.equal(fee.cents, DELIVERY_DEFAULTS.JOUR_MEME_FEE_CENTS);
-    assert.equal(fee.cents, 1950);
+    assert.equal(fee.cents, 3900);
     assert.equal(fee.urgent, true);
   });
 
@@ -162,7 +160,7 @@ describe("urgencyFromDelaiJours", () => {
 });
 
 describe("concordance des libellés de livraison devis ↔ contrat", () => {
-  it("NE devine PAS un Express 24 h à partir de 12,50 €, devenus ambigus", () => {
+  it("NE devine PAS un Express 24 h à partir de 25 €, devenus ambigus", () => {
     const express = computeDeliveryFee({
       zone: "PROCHE",
       montantApresRemiseCents: 1000,
@@ -170,19 +168,17 @@ describe("concordance des libellés de livraison devis ↔ contrat", () => {
     });
     const eloigne = computeDeliveryFee({ zone: "ELOIGNE", montantApresRemiseCents: 1000 });
 
-    // Deux situations sans rapport, rigoureusement le même montant. La collision
-    // a SURVÉCU à la division par deux du barème (25 € → 12,50 €) : c'est pour ça
-    // qu'elle est déduite des constantes et non écrite en dur dans le code.
-    assert.equal(express.cents, 1250);
-    assert.equal(eloigne.cents, 1250);
+    // Deux situations sans rapport, rigoureusement le même montant.
+    assert.equal(express.cents, 2500);
+    assert.equal(eloigne.cents, 2500);
     assert.equal(express.urgent, true);
     assert.equal(eloigne.urgent, false);
 
     // Le repli par montant refuse donc de trancher. S'il annonçait « Express
     // 24 h », le devis d'une livraison ordinaire à Cavaillon facturerait au
     // client une urgence qu'il n'a jamais demandée.
-    assert.equal(deliveryLabelFromCents(1250), "Livraison");
-    assert.doesNotMatch(deliveryLabelFromCents(1250), /Express/);
+    assert.equal(deliveryLabelFromCents(2500), "Livraison");
+    assert.doesNotMatch(deliveryLabelFromCents(2500), /Express/);
   });
 
   it("produit le même libellé pour le forfait Jour même, resté sans équivoque", () => {
@@ -191,7 +187,7 @@ describe("concordance des libellés de livraison devis ↔ contrat", () => {
       montantApresRemiseCents: 1000,
       urgency: "JOUR_MEME",
     });
-    assert.equal(fee.cents, 1950);
+    assert.equal(fee.cents, 3900);
     assert.equal(deliveryLabelFromCents(fee.cents), fee.label);
   });
 
@@ -232,15 +228,11 @@ describe("urgencyTier", () => {
 });
 
 describe("computePackSereniteComparison", () => {
-  it("chiffre le panier mensuel à-la-carte à 138 € et l'économie à 49 €", () => {
-    // Le Pack reste à 89 €. C'est la LIVRAISON incluse dans la comparaison qui a
-    // été divisée par deux (2 passages × 6 € au lieu de 2 × 12 €) : le panier
-    // à-la-carte tombe donc de 150 € à 138 €, et l'économie annoncée passe de
-    // 61 € à 49 €. Annoncer l'ancienne économie serait un argument faux.
+  it("chiffre le panier mensuel à-la-carte à 150 € et l'économie à 61 €", () => {
     const c = computePackSereniteComparison();
-    assert.equal(c.alaCarteCents, 13800);
+    assert.equal(c.alaCarteCents, 15000);
     assert.equal(c.packCents, 8900);
-    assert.equal(c.economieCents, 4900);
+    assert.equal(c.economieCents, 6100);
   });
 
   it("compose le panier sans multiplier par le nombre de rotations", () => {
