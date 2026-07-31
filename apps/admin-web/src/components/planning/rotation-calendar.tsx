@@ -13,14 +13,36 @@ import {
   shortDayLabel,
   todayKey,
 } from "@/lib/calendar";
-import { groupEventsByDay, type RotationEvent, ROTATION_STATUS_LABELS } from "@/lib/rotations";
+import { clientColor, clientInitials, clientKey } from "@/lib/client-colors";
+import {
+  detentionLanes,
+  repriseUrgence,
+  urgenceLabel,
+  type DetentionBand,
+  type RepriseUrgence,
+} from "@/lib/planning-bands";
+import {
+  groupEventsByDay,
+  type RotationDTO,
+  type RotationEvent,
+  ROTATION_STATUS_LABELS,
+} from "@/lib/rotations";
 
 export type CalendarMode = "mois" | "semaine";
 
+/** Rails affichés dans une case du mois. Au-delà, un compteur « +N ». */
+const MAX_RAILS_VISIBLES = 4;
+
 /**
- * Ton visuel d'un événement. La reprise est ce que le propriétaire surveille :
- * elle porte la couleur d'état (à venir / aujourd'hui / en retard / faite).
- * La livraison reste neutre, c'est un repère de contexte.
+ * Ton visuel d'un événement.
+ *
+ * La couleur de la PUCE dit l'URGENCE, jamais l'identité : rouge quand
+ * l'échéance est passée, orange le jour même, ambre pour les deux jours qui
+ * suivent, lavande dans la semaine, gris au-delà, vert quand c'est rentré.
+ * L'identité du client, elle, vit sur la bande de détention — deux canaux
+ * séparés, sinon un mois chargé ne se lit plus.
+ *
+ * La livraison reste neutre : c'est un repère de contexte, pas une action.
  */
 interface EventTone {
   chip: string;
@@ -28,44 +50,52 @@ interface EventTone {
   label: string;
 }
 
+const URGENCE_TONES: Record<RepriseUrgence, Omit<EventTone, "label">> = {
+  retard: {
+    chip: "border-danger-500/50 bg-danger-50 text-danger-600",
+    dot: "bg-danger-500",
+  },
+  aujourdhui: {
+    chip: "border-warning-600/60 bg-warning-50 text-warning-600",
+    dot: "bg-warning-600",
+  },
+  imminent: {
+    chip: "border-warning-500/40 bg-warning-50/70 text-warning-600",
+    dot: "bg-warning-500",
+  },
+  proche: {
+    chip: "border-accent-500/40 bg-accent-50 text-accent-600",
+    dot: "bg-accent-500",
+  },
+  planifie: {
+    chip: "border-gray-200 bg-white text-gray-500",
+    dot: "bg-gray-300",
+  },
+  faite: {
+    chip: "border-success-500/30 bg-success-50 text-success-600",
+    dot: "bg-success-500",
+  },
+};
+
 export function eventTone(event: RotationEvent, today: string): EventTone {
   if (event.kind === "livraison") {
     return {
       chip: "border-gray-200 bg-gray-50 text-gray-600",
       dot: "bg-gray-400",
-      label: "Livraison",
+      label: event.done ? "Livraison faite" : "Livraison",
     };
   }
-  if (event.done) {
-    return {
-      chip: "border-success-500/30 bg-success-50 text-success-600",
-      dot: "bg-success-500",
-      label: "Reprise faite",
-    };
-  }
-  if (event.late) {
-    return {
-      chip: "border-danger-500/40 bg-danger-50 text-danger-600",
-      dot: "bg-danger-500",
-      label: `En retard de ${event.lateDays} j`,
-    };
-  }
-  if (event.dayKey === today) {
-    return {
-      chip: "border-primary-500/40 bg-primary-50 text-primary-700",
-      dot: "bg-primary-500",
-      label: "Reprise aujourd'hui",
-    };
-  }
-  return {
-    chip: "border-warning-500/30 bg-warning-50 text-warning-600",
-    dot: "bg-warning-500",
-    label: "Reprise à venir",
-  };
+  const info = repriseUrgence(
+    { dayKey: event.dayKey, done: event.done, lateDays: event.lateDays },
+    today,
+  );
+  return { ...URGENCE_TONES[info.urgence], label: urgenceLabel(info) };
 }
 
 interface RotationCalendarProps {
   events: RotationEvent[];
+  /** Rotations affichées — servent à tracer la période de détention. */
+  rotations: RotationDTO[];
   mode: CalendarMode;
   onModeChange: (mode: CalendarMode) => void;
   /** Mois affiché (1er du mois, heure locale). */
@@ -76,6 +106,7 @@ interface RotationCalendarProps {
 
 export function RotationCalendar({
   events,
+  rotations,
   mode,
   onModeChange,
   month,
@@ -86,6 +117,7 @@ export function RotationCalendar({
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const byDay = useMemo(() => groupEventsByDay(events), [events]);
+  const lanes = useMemo(() => detentionLanes(rotations), [rotations]);
   const days = useMemo(
     () => (mode === "mois" ? monthGrid(month.getFullYear(), month.getMonth()) : nextSevenDays()),
     [mode, month],
@@ -161,13 +193,21 @@ export function RotationCalendar({
         <MonthView
           days={days}
           byDay={byDay}
+          bandsByDay={lanes.byDay}
+          laneCount={lanes.laneCount}
           today={today}
           currentMonth={month.getMonth()}
           selectedDay={selectedDay}
           onSelectDay={setSelectedDay}
         />
       ) : (
-        <SevenDayView days={days} byDay={byDay} today={today} onSelectEvent={onSelectEvent} />
+        <SevenDayView
+          days={days}
+          byDay={byDay}
+          bandsByDay={lanes.byDay}
+          today={today}
+          onSelectEvent={onSelectEvent}
+        />
       )}
 
       {/* Détail du jour cliqué — indispensable sur mobile où la case est trop
@@ -183,7 +223,7 @@ export function RotationCalendar({
             </Button>
           </div>
           {dayEvents.length === 0 ? (
-            <p className="text-sm text-gray-400">Aucun mouvement ce jour-là.</p>
+            <DayResidents bands={lanes.byDay.get(selectedDay) ?? []} />
           ) : (
             <ul className="space-y-2">
               {dayEvents.map((event) => (
@@ -201,21 +241,161 @@ export function RotationCalendar({
   );
 }
 
+/**
+ * Ce qui est chez un client ce jour-là, sans mouvement prévu.
+ *
+ * Un jour « vide » ne l'est pas vraiment : du linge y dort peut-être chez trois
+ * clients. Le dire évite de conclure « rien à faire » alors que la détention
+ * court — c'est elle qui porte le seuil des 7 ou 14 jours.
+ */
+function DayResidents({ bands }: { bands: DetentionBand[] }) {
+  if (bands.length === 0) {
+    return <p className="text-sm text-gray-400">Aucun mouvement, aucun linge en circulation.</p>;
+  }
+  return (
+    <div>
+      <p className="mb-2 text-xs text-gray-500">
+        Aucun mouvement ce jour-là. Linge encore chez le client :
+      </p>
+      <ul className="flex flex-wrap gap-1.5">
+        {bands.map((band) => {
+          const color = clientColor(band.clientKey);
+          return (
+            <li
+              key={band.rotationId}
+              className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs"
+              style={{ backgroundColor: color.soft, borderColor: color.border, color: color.text }}
+            >
+              <span
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                style={{ backgroundColor: color.solid }}
+                aria-hidden="true"
+              >
+                {clientInitials(band.clientNom)}
+              </span>
+              {band.clientNom}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 interface ViewProps {
   days: Date[];
   byDay: Map<string, RotationEvent[]>;
+  bandsByDay: Map<string, DetentionBand[]>;
   today: string;
   onSelectEvent: (event: RotationEvent) => void;
+}
+
+/**
+ * Bande de détention d'un jour.
+ *
+ * Les extrémités sont arrondies, le milieu est carré et déborde de la cellule
+ * (`-mx-1.5`) : les cases étant collées, les segments se rejoignent et la bande
+ * se lit comme une seule barre continue à travers la semaine. Le nom du client
+ * n'est écrit que le premier jour, sinon il se répéterait sept fois.
+ */
+function BandSegment({
+  band,
+  compact,
+  showLabel,
+}: {
+  band: DetentionBand;
+  compact?: boolean;
+  /** Nom écrit ici : au départ de la bande, et au retour à la ligne de la grille. */
+  showLabel?: boolean;
+}) {
+  const color = clientColor(band.clientKey);
+  const arrondi = `${band.start ? "rounded-l-full" : ""} ${band.end ? "rounded-r-full" : ""}`;
+
+  return (
+    <span
+      className={`-mx-1.5 flex items-center gap-1 overflow-hidden ${arrondi} ${
+        compact ? "h-1.5" : "h-3.5 px-0.5"
+      } ${band.done ? "opacity-45" : ""}`}
+      style={{
+        backgroundColor: color.soft,
+        // Le départ porte un liseré épais à la couleur pleine du client : c'est
+        // le repère qui dit « ça commence ICI » sans lire une seule ligne.
+        borderLeft: band.start ? `3px solid ${color.solid}` : "none",
+        borderRight: band.end
+          ? `3px solid ${band.late ? "var(--color-danger-500)" : color.solid}`
+          : "none",
+      }}
+      title={`${band.clientNom} — linge chez le client`}
+    >
+      {!compact && showLabel && (
+        <>
+          <span
+            className="ml-0.5 inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center rounded-full text-[7px] font-bold leading-none text-white"
+            style={{ backgroundColor: color.solid }}
+            aria-hidden="true"
+          >
+            {clientInitials(band.clientNom).slice(0, 1)}
+          </span>
+          <span className="truncate text-[9px] font-medium" style={{ color: color.text }}>
+            {band.clientNom}
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
+
+/** Rails d'un jour, y compris les rails vides : sans eux, les bandes se décalent. */
+function DayBands({
+  bands,
+  laneCount,
+  compact,
+  debutDeLigne,
+}: {
+  bands: DetentionBand[];
+  laneCount: number;
+  compact?: boolean;
+  /** Première colonne de la grille : la bande y reprend son nom. */
+  debutDeLigne?: boolean;
+}) {
+  const rails = Math.min(laneCount, MAX_RAILS_VISIBLES);
+  if (rails === 0) return null;
+  const parLane = new Map(bands.map((b) => [b.lane, b]));
+  const caches = bands.filter((b) => b.lane >= MAX_RAILS_VISIBLES).length;
+
+  return (
+    <span className={`mt-1 flex flex-col ${compact ? "gap-0.5" : "gap-[2px]"}`}>
+      {Array.from({ length: rails }, (_, lane) => {
+        const band = parLane.get(lane);
+        return band ? (
+          <BandSegment
+            key={lane}
+            band={band}
+            compact={compact}
+            showLabel={band.start || debutDeLigne}
+          />
+        ) : (
+          <span key={lane} className={compact ? "h-1.5" : "h-3.5"} />
+        );
+      })}
+      {caches > 0 && (
+        <span className="text-[9px] leading-none text-gray-400">+{caches} en cours</span>
+      )}
+    </span>
+  );
 }
 
 function MonthView({
   days,
   byDay,
+  bandsByDay,
+  laneCount,
   today,
   currentMonth,
   selectedDay,
   onSelectDay,
 }: Omit<ViewProps, "onSelectEvent"> & {
+  laneCount: number;
   currentMonth: number;
   selectedDay: string | null;
   onSelectDay: (key: string | null) => void;
@@ -236,18 +416,26 @@ function MonthView({
         {days.map((date) => {
           const key = dayKey(date);
           const dayEvents = byDay.get(key) ?? [];
+          const bands = bandsByDay.get(key) ?? [];
           const isToday = key === today;
           const outside = date.getMonth() !== currentMonth;
           const isSelected = key === selectedDay;
+          const aReprendre = dayEvents.filter((e) => e.kind === "reprise" && !e.done).length;
 
           return (
             <button
               key={key}
               type="button"
               onClick={() => onSelectDay(isSelected ? null : key)}
-              aria-label={`${shortDayLabel(date)} — ${dayEvents.length} mouvement${dayEvents.length > 1 ? "s" : ""}`}
+              aria-label={`${shortDayLabel(date)} — ${dayEvents.length} mouvement${
+                dayEvents.length > 1 ? "s" : ""
+              }${aReprendre > 0 ? `, ${aReprendre} reprise${aReprendre > 1 ? "s" : ""} à faire` : ""}${
+                bands.length > 0
+                  ? `, ${bands.length} contrat${bands.length > 1 ? "s" : ""} en cours`
+                  : ""
+              }`}
               aria-pressed={isSelected}
-              className={`min-h-[68px] border-b border-r border-gray-100 p-1 text-left align-top transition-colors sm:min-h-[110px] sm:p-1.5 ${
+              className={`min-h-[68px] overflow-hidden border-b border-r border-gray-100 p-1 text-left align-top transition-colors sm:min-h-[124px] sm:p-1.5 ${
                 outside ? "bg-gray-50/60" : "bg-white"
               } ${isSelected ? "ring-2 ring-inset ring-primary-500" : "hover:bg-gray-50"}`}
             >
@@ -263,7 +451,15 @@ function MonthView({
                 {date.getDate()}
               </span>
 
-              {/* Mobile : pastilles de couleur, la case est trop étroite pour du texte. */}
+              {/* Période de détention — l'identité du client, en fond. */}
+              <span className="hidden sm:block">
+                <DayBands bands={bands} laneCount={laneCount} debutDeLigne={date.getDay() === 1} />
+              </span>
+              <span className="sm:hidden">
+                <DayBands bands={bands} laneCount={laneCount} compact />
+              </span>
+
+              {/* Mobile : pastilles d'urgence, la case est trop étroite pour du texte. */}
               <span className="mt-1 flex flex-wrap gap-0.5 sm:hidden">
                 {dayEvents.slice(0, 4).map((event) => (
                   <span
@@ -278,7 +474,7 @@ function MonthView({
                   et la sémantique. On sélectionne le jour, le panneau en dessous
                   ouvre la rotation. */}
               <span className="mt-1 hidden flex-col gap-0.5 sm:flex">
-                {dayEvents.slice(0, 3).map((event) => {
+                {dayEvents.slice(0, 2).map((event) => {
                   const tone = eventTone(event, today);
                   return (
                     <span
@@ -291,9 +487,9 @@ function MonthView({
                     </span>
                   );
                 })}
-                {dayEvents.length > 3 && (
+                {dayEvents.length > 2 && (
                   <span className="px-1 text-[10px] text-gray-400">
-                    +{dayEvents.length - 3} autre{dayEvents.length - 3 > 1 ? "s" : ""}
+                    +{dayEvents.length - 2} autre{dayEvents.length - 2 > 1 ? "s" : ""}
                   </span>
                 )}
               </span>
@@ -305,12 +501,13 @@ function MonthView({
   );
 }
 
-function SevenDayView({ days, byDay, today, onSelectEvent }: ViewProps) {
+function SevenDayView({ days, byDay, bandsByDay, today, onSelectEvent }: ViewProps) {
   return (
     <div className="space-y-3">
       {days.map((date) => {
         const key = dayKey(date);
         const dayEvents = byDay.get(key) ?? [];
+        const bands = bandsByDay.get(key) ?? [];
         const isToday = key === today;
         return (
           <div
@@ -319,14 +516,25 @@ function SevenDayView({ days, byDay, today, onSelectEvent }: ViewProps) {
               isToday ? "border-primary-300 bg-primary-50/30" : "border-gray-200 bg-white"
             }`}
           >
-            <p
-              className={`mb-2 text-xs font-semibold capitalize ${isToday ? "text-primary-700" : "text-gray-500"}`}
-            >
-              {isToday ? "Aujourd'hui — " : ""}
-              {shortDayLabel(date)}
-            </p>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p
+                className={`text-xs font-semibold capitalize ${isToday ? "text-primary-700" : "text-gray-500"}`}
+              >
+                {isToday ? "Aujourd'hui — " : ""}
+                {shortDayLabel(date)}
+              </p>
+              {bands.length > 0 && (
+                <p className="text-[11px] text-gray-400">
+                  {bands.length} contrat{bands.length > 1 ? "s" : ""} en cours
+                </p>
+              )}
+            </div>
             {dayEvents.length === 0 ? (
-              <p className="text-xs text-gray-300">Rien de prévu</p>
+              bands.length === 0 ? (
+                <p className="text-xs text-gray-300">Rien de prévu</p>
+              ) : (
+                <DayResidents bands={bands} />
+              )
             ) : (
               <ul className="space-y-2">
                 {dayEvents.map((event) => (
@@ -354,17 +562,35 @@ function EventRow({
 }) {
   const tone = eventTone(event, today);
   const Icon = event.kind === "reprise" ? PackageCheck : Truck;
+  const color = clientColor(clientKey(event.rotation.userId, event.rotation.clientNom));
+  const { dateLivraison, dateReprisePrevue } = event.rotation;
+
   return (
     <button
       type="button"
       onClick={() => onSelect(event)}
       className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-opacity hover:opacity-80 ${tone.chip}`}
     >
+      {/* Pastille d'identité : la couleur du client, doublée de son monogramme
+          pour rester lisible en noir et blanc comme pour un daltonien. */}
+      <span
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+        style={{ backgroundColor: color.solid }}
+        aria-hidden="true"
+      >
+        {clientInitials(event.rotation.clientNom)}
+      </span>
       <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{event.rotation.clientNom}</span>
         <span className="block truncate text-[11px] opacity-80">
           {tone.label} · {ROTATION_STATUS_LABELS[event.rotation.status]}
+        </span>
+        {/* La fenêtre du contrat, sur la ligne même : c'est elle qui dit depuis
+            combien de temps le linge est dehors, donc s'il faut avancer la reprise. */}
+        <span className="block truncate text-[11px] opacity-70">
+          Livré le {frDate(dateLivraison)}
+          {dateReprisePrevue ? ` · à reprendre le ${frDate(dateReprisePrevue)}` : ""}
         </span>
       </span>
       {event.late && (
@@ -376,22 +602,42 @@ function EventRow({
   );
 }
 
+/** `2026-08-05` → `05/08`. Le millésime n'apporte rien dans une vue calendrier. */
+function frDate(iso: string | null): string {
+  if (!iso) return "—";
+  const [, mois, jour] = iso.slice(0, 10).split("-");
+  return jour && mois ? `${jour}/${mois}` : iso;
+}
+
 function Legend() {
-  const items = [
-    { dot: "bg-gray-400", label: "Livraison (linge qui part)" },
-    { dot: "bg-warning-500", label: "Reprise à venir" },
-    { dot: "bg-primary-500", label: "Reprise aujourd'hui" },
-    { dot: "bg-danger-500", label: "Reprise en retard" },
+  const urgences: { dot: string; label: string }[] = [
+    { dot: "bg-danger-500", label: "En retard" },
+    { dot: "bg-warning-600", label: "À reprendre aujourd'hui" },
+    { dot: "bg-warning-500", label: "Sous 48 h" },
+    { dot: "bg-accent-500", label: "Dans la semaine" },
+    { dot: "bg-gray-300", label: "Plus tard" },
     { dot: "bg-success-500", label: "Reprise faite" },
   ];
+
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-gray-500">
-      {items.map((item) => (
-        <span key={item.label} className="inline-flex items-center gap-1.5">
-          <span className={`h-2 w-2 rounded-full ${item.dot}`} aria-hidden="true" />
-          {item.label}
+    <div className="space-y-1.5 rounded-lg bg-gray-50 px-3 py-2.5 text-[11px] text-gray-500">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <span className="font-semibold text-gray-600">Reprise :</span>
+        {urgences.map((item) => (
+          <span key={item.label} className="inline-flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full ${item.dot}`} aria-hidden="true" />
+            {item.label}
+          </span>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <span className="font-semibold text-gray-600">Bandes :</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2 w-6 rounded-full bg-accent-100" aria-hidden="true" />
+          période où le linge est chez le client — une couleur par client, de la livraison (→) à la
+          reprise (↩)
         </span>
-      ))}
+      </div>
     </div>
   );
 }

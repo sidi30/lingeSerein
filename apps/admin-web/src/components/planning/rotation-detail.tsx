@@ -2,13 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, MapPin, PackageCheck, Truck } from "lucide-react";
+import { DETENTION_DAYS } from "@lingengo/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { DeleteAction } from "@/components/ui/delete-action";
 import { useToast } from "@/lib/toast";
 import { ApiError } from "@/lib/api";
-import { dayKey, dayKeyFromISO } from "@/lib/calendar";
+import { dayKey, dayKeyFromISO, daysBetweenKeys, todayKey } from "@/lib/calendar";
+import { clientColor, clientInitials, clientKey } from "@/lib/client-colors";
+import { repriseUrgence, urgenceLabel } from "@/lib/planning-bands";
 import {
   FORMULE_LABELS,
   lateDaysOf,
@@ -112,6 +115,8 @@ export function RotationDetail({ rotation, onClose }: RotationDetailProps) {
             {rotation.clientAdresse}
           </p>
         )}
+
+        <DetentionWindow rotation={rotation} />
 
         {/* Dates */}
         <dl className="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-3">
@@ -271,6 +276,109 @@ export function RotationDetail({ rotation, onClose }: RotationDetailProps) {
       </div>
     </Modal>
   );
+}
+
+/**
+ * Fenêtre de détention : depuis quand le linge est dehors, et combien de temps
+ * il reste avant l'échéance du contrat.
+ *
+ * C'est la lecture qui manque le plus au propriétaire pour s'organiser : trois
+ * dates alignées ne disent pas « il reste deux jours ». La durée maximale n'est
+ * pas décorative — 7 jours en ponctuel (seuil hebdomadaire para-hôtelier) et 14
+ * jours en Pack Sérénité (article 7 du contrat) — et la barre montre où en est
+ * la rotation dans CETTE limite, pas dans un délai inventé.
+ */
+function DetentionWindow({ rotation }: { rotation: RotationDTO }) {
+  const today = todayKey();
+  const debut = dayKeyFromISO(rotation.dateLivraison);
+  const echeance = rotation.dateReprisePrevue ? dayKeyFromISO(rotation.dateReprisePrevue) : null;
+  const rendu = rotation.dateRepriseReelle ? dayKeyFromISO(rotation.dateRepriseReelle) : null;
+
+  const couleur = clientColor(clientKey(rotation.userId, rotation.clientNom));
+  const limite = DETENTION_DAYS[rotation.formule];
+  const joursDehors = daysBetweenKeys(debut, rendu ?? today);
+  const info = echeance
+    ? repriseUrgence(
+        {
+          dayKey: echeance,
+          done: Boolean(rendu) || rotation.status === "REPRISE",
+          lateDays: lateDaysOf(rotation),
+        },
+        today,
+      )
+    : null;
+
+  // La barre sature à 100 % : au-delà de la limite, c'est le libellé de retard
+  // qui porte l'information, pas une barre qui déborderait de son conteneur.
+  const avancement = Math.max(
+    0,
+    Math.min(100, Math.round((joursDehors / Math.max(limite, 1)) * 100)),
+  );
+  const depasse = joursDehors > limite;
+
+  return (
+    <div
+      className="rounded-lg border p-3"
+      style={{ backgroundColor: couleur.soft, borderColor: couleur.border }}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span
+          className="inline-flex items-center gap-2 text-sm font-medium"
+          style={{ color: couleur.text }}
+        >
+          <span
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white"
+            style={{ backgroundColor: couleur.solid }}
+            aria-hidden="true"
+          >
+            {clientInitials(rotation.clientNom)}
+          </span>
+          {rendu ? "Linge rentré" : "Linge chez le client"} depuis {joursDehors} j
+        </span>
+        {info && (
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+              info.urgence === "retard"
+                ? "bg-danger-500 text-white"
+                : info.urgence === "faite"
+                  ? "bg-success-50 text-success-600"
+                  : info.urgence === "aujourdhui" || info.urgence === "imminent"
+                    ? "bg-warning-500 text-white"
+                    : "bg-white text-gray-600"
+            }`}
+          >
+            {urgenceLabel(info)}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/70">
+        <div
+          className={`h-full rounded-full ${depasse ? "bg-danger-500" : ""}`}
+          style={{
+            width: `${avancement}%`,
+            backgroundColor: depasse ? undefined : couleur.solid,
+          }}
+        />
+      </div>
+
+      <p className="mt-1.5 text-[11px]" style={{ color: couleur.text }}>
+        Livré le {frDateLongue(rotation.dateLivraison)}
+        {echeance
+          ? ` · à reprendre au plus tard le ${frDateLongue(rotation.dateReprisePrevue)}`
+          : ""}
+        {" · "}
+        limite de détention : {limite} j
+      </p>
+    </div>
+  );
+}
+
+/** `2026-08-05` → `05/08/2026`, sans dépendre du fuseau du navigateur. */
+function frDateLongue(iso: string | null): string {
+  if (!iso) return "—";
+  const [annee, mois, jour] = iso.slice(0, 10).split("-");
+  return jour && mois && annee ? `${jour}/${mois}/${annee}` : iso;
 }
 
 function DateBlock({

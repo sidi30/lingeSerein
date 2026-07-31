@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { api, setToken, getToken } from "./api";
+import { api, setToken, getToken, ApiError } from "./api";
 
 interface User {
   id: string;
@@ -57,9 +57,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setUser(data);
-    } catch {
-      setToken(null);
-      setUser(null);
+    } catch (err) {
+      // On ne détruit la session QUE si le serveur a dit non (401/403). Une
+      // API injoignable — coupure réseau, serveur qui redémarre, requête
+      // bloquée par la CSP — n'est PAS une preuve que la session est invalide :
+      // effacer le jeton dans ce cas déconnecte l'administrateur en plein
+      // travail et lui fait perdre sa saisie, pour un incident qui dure trois
+      // secondes. Le jeton est conservé, et la prochaine requête retentera.
+      const refus = err instanceof ApiError && (err.status === 401 || err.status === 403);
+      if (refus) {
+        setToken(null);
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }
