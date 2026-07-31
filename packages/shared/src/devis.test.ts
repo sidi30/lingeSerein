@@ -119,13 +119,14 @@ describe("resolveLivraisonLabel", () => {
   });
 
   it("déduit le libellé du montant quand il n'est pas connu", () => {
-    assert.match(resolveLivraisonLabel({ livraisonCents: 3900 }), /Jour même/);
+    assert.match(resolveLivraisonLabel({ livraisonCents: 1950 }), /Jour même/);
   });
 
-  it("reste muet sur 25 €, que le barème ne permet plus d'attribuer", () => {
-    // 25 € vaut désormais aussi bien « forfait Express 24 h » que « palier
-    // au-delà de 35 km ». Sans libellé explicite, le devis n'invente rien.
-    assert.equal(resolveLivraisonLabel({ livraisonCents: 2500 }), "Livraison");
+  it("reste muet sur 12,50 €, que le barème ne permet plus d'attribuer", () => {
+    // 12,50 € vaut aussi bien « forfait Express 24 h » que « palier au-delà de
+    // 35 km » — la collision a survécu à la division par deux du barème. Sans
+    // libellé explicite, le devis n'invente rien.
+    assert.equal(resolveLivraisonLabel({ livraisonCents: 1250 }), "Livraison");
   });
 
   it("ignore un libellé vide ou blanc", () => {

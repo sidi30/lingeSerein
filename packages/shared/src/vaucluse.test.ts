@@ -166,9 +166,9 @@ describe("la table et le barème s'accordent", () => {
   it("facture chaque commune au tarif de son palier", () => {
     const attendus: Record<string, number> = {
       Orange: 0,
-      Caderousse: 1200,
-      Avignon: 1500,
-      Cavaillon: 2500,
+      Caderousse: 600,
+      Avignon: 750,
+      Cavaillon: 1250,
     };
     for (const [nom, cents] of Object.entries(attendus)) {
       const commune = communeParInsee(trouverInsee(nom));

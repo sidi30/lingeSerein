@@ -185,7 +185,7 @@ describe("resumeFrais", () => {
 });
 
 describe("OrdersService.create — frais de livraison", () => {
-  it("facture 12 € en zone proche sous le seuil de gratuité", async () => {
+  it("facture 6 € en zone proche sous le seuil de gratuité", async () => {
     const fake = fakePrisma();
     const mail = collecteur();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -197,11 +197,11 @@ describe("OrdersService.create — frais de livraison", () => {
       CLIENT_ID,
     );
 
-    assert.equal(order.deliveryFeeCents, 1200);
+    assert.equal(order.deliveryFeeCents, 600);
     assert.equal(order.deliveryFeeSurDevis, false);
     // Le sous-total des ARTICLES reste intact : des écrans le lisent comme tel.
     assert.equal(order.totalCents, 1500);
-    assert.equal(fake.commandes[0]?.["deliveryFeeCents"], 1200);
+    assert.equal(fake.commandes[0]?.["deliveryFeeCents"], 600);
   });
 
   it("offre la livraison dès 120 € de commande", async () => {
@@ -258,7 +258,7 @@ describe("OrdersService.create — frais de livraison", () => {
     );
 
     // Forfait fixe, non dégressif : les seuils de gratuité ne s'y appliquent pas.
-    assert.equal(order.deliveryFeeCents, 2500);
+    assert.equal(order.deliveryFeeCents, 1250);
   });
 
   it("n'invente aucun montant hors zone — 0 € et le drapeau qui l'explique", async () => {
@@ -404,9 +404,9 @@ describe("OrdersService.create — emails", () => {
     assert.ok(client, "le client doit recevoir sa confirmation");
     assert.equal(client.to, "contact@hotel.test");
     assert.equal(client.data["sousTotalCents"], 1500);
-    assert.equal(client.data["livraisonCents"], 1200);
+    assert.equal(client.data["livraisonCents"], 600);
     // Le total à payer inclut la livraison — c'est tout l'enjeu de l'email.
-    assert.equal(client.data["totalCents"], 2700);
+    assert.equal(client.data["totalCents"], 2100);
     assert.deepEqual(client.data["lignes"], [{ designation: "Kit Bain", qty: 2 }]);
 
     assert.ok(gestionnaire, "les gestionnaires doivent être prévenus");
@@ -427,7 +427,7 @@ describe("OrdersService.create — emails", () => {
     );
 
     assert.equal(order.id, "order-1");
-    assert.equal(order.deliveryFeeCents, 1200);
+    assert.equal(order.deliveryFeeCents, 600);
   });
 
   it("passe son tour sans erreur quand le client n'a pas d'email", async () => {

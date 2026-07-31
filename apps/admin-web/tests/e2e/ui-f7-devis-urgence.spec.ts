@@ -2,8 +2,8 @@
  * UI tests — F7 Jauge d'urgence & catalogue du formulaire de devis
  *
  * - Les 4 niveaux d'urgence sont proposés (Standard / Express 24 h / Jour même / Flash)
- * - Jour même → forfait 39 € applicable au champ « frais de livraison »
- * - Express 24 h → forfait 25 €
+ * - Jour même → forfait 19,50 € applicable au champ « frais de livraison »
+ * - Express 24 h → forfait 12,50 €
  * - Flash < 3 h → « sur devis », bouton « Appliquer » masqué (aucun tarif public)
  * - Zones : les 4 paliers du barème Vaucluse + hors zone, plus aucune « zone élargie »
  * - Catalogue : le Kit Complet est proposé à 29 € (valeur du catalogue partagé)
@@ -35,7 +35,7 @@ test.describe("UI F7 — Jauge d'urgence (devis)", () => {
     await expect(page.getByText(/J\+1 — urgence/i)).toHaveCount(0);
   });
 
-  test("Jour même → forfait 39 € appliqué au champ livraison", async ({ page }) => {
+  test("Jour même → forfait 19,50 € appliqué au champ livraison", async ({ page }) => {
     await page
       .getByRole("group", { name: /urgence/i })
       .getByRole("button", { name: /jour même/i })
@@ -44,17 +44,17 @@ test.describe("UI F7 — Jauge d'urgence (devis)", () => {
     await expect(page.getByText(/forfait/i).first()).toBeVisible({ timeout: 8_000 });
 
     await page.getByRole("button", { name: /^appliquer$/i }).click();
-    await expect(page.locator("#livraisonEuros")).toHaveValue("39");
+    await expect(page.locator("#livraisonEuros")).toHaveValue("19.5");
   });
 
-  test("Express 24 h → forfait 25 € appliqué au champ livraison", async ({ page }) => {
+  test("Express 24 h → forfait 12,50 € appliqué au champ livraison", async ({ page }) => {
     await page
       .getByRole("group", { name: /urgence/i })
       .getByRole("button", { name: /express 24/i })
       .click();
 
     await page.getByRole("button", { name: /^appliquer$/i }).click();
-    await expect(page.locator("#livraisonEuros")).toHaveValue("25");
+    await expect(page.locator("#livraisonEuros")).toHaveValue("12.5");
   });
 
   test("Flash < 3 h → sur devis, sans bouton Appliquer", async ({ page }) => {
@@ -88,7 +88,7 @@ test.describe("UI F7 — Jauge d'urgence (devis)", () => {
     await expect(zone).not.toContainText(/élargie/i);
   });
 
-  test("Standard : Orange est offerte, le palier PROCHE vaut 12 €", async ({ page }) => {
+  test("Standard : Orange est offerte, le palier PROCHE vaut 6 €", async ({ page }) => {
     const urgence = page.getByRole("group", { name: /urgence/i });
     const appliquer = page.getByRole("button", { name: /^appliquer$/i });
     await urgence.getByRole("button", { name: /standard/i }).click();
@@ -96,7 +96,7 @@ test.describe("UI F7 — Jauge d'urgence (devis)", () => {
     // Premier palier payant : jusqu'à 15 km d'Orange.
     await page.locator("#zoneLivraison").selectOption("PROCHE");
     await appliquer.click();
-    await expect(page.locator("#livraisonEuros")).toHaveValue("12");
+    await expect(page.locator("#livraisonEuros")).toHaveValue("6");
 
     // Orange = commune du siège : la course est incluse. « Appliquer » disparaît
     // dès que le champ porte déjà le tarif du barème — ici 0 — donc on ne clique
