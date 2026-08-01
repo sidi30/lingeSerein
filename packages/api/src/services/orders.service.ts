@@ -7,6 +7,7 @@ import { NotificationsService } from "./notifications.service.js";
 // danger (les deux exports sont résolus au premier appel, pas au chargement).
 import { PassagesService } from "./passages.service.js";
 import { RotationsService } from "./rotations.service.js";
+import { StockItemsService } from "./stock-items.service.js";
 import {
   ORDER_TRANSITIONS,
   communeParInsee,
@@ -929,18 +930,49 @@ export class OrdersService {
     // La rotation d'une commande n'a aucune vie propre : elle décrit le linge
     // sorti POUR cette commande. La laisser derrière ferait subsister au
     // planning une ligne rattachée à une commande qui n'existe plus, et que rien
-    // ne permettrait de rouvrir. Seuls PENDING et CANCELLED arrivent ici — la
-    // garde ci-dessus l'impose — donc la rotation est forcément prévisionnelle
-    // ou déjà annulée : son linge est déjà rendu, aucun mouvement de parc à
-    // rejouer.
-    const { count: rotations } = await this.prisma.rotation.updateMany({
-      where: { orderId: id, deletedAt: null },
-      data: { deletedAt: new Date() },
-    });
+    // ne permettrait de rouvrir.
+    //
+    // On VÉRIFIE que son linge est rendu, on ne le suppose pas. Seuls PENDING et
+    // CANCELLED arrivent ici, et l'annulation est censée avoir rendu le parc —
+    // mais elle passe par `syncFromOrder`, qui avale toutes ses erreurs et rend
+    // la main en silence. Un seul échec laissait une rotation LIVREE, linge
+    // sorti, que cet effacement aurait fait disparaître sans le rendre : très
+    // exactement le bug corrigé dans la cascade client quelques heures plus tôt.
+    const { rotations, rendues } = await this.prisma.$transaction(async (tx) => {
+      const dehors = await tx.rotation.findMany({
+        where: {
+          orderId: id,
+          deletedAt: null,
+          status: { notIn: ["REPRISE", "ANNULEE"] },
+          sortieStockAt: { not: null },
+        },
+        include: { lignes: true },
+      });
 
-    await this.prisma.order.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+      for (const rotation of dehors) {
+        await StockItemsService.recordAnnulation(tx, rotation.operatorId, rotation.lignes);
+      }
+
+      if (dehors.length > 0) {
+        await tx.rotation.updateMany({
+          where: { id: { in: dehors.map((r) => r.id) } },
+          data: { status: "ANNULEE" },
+        });
+      }
+
+      const { count } = await tx.rotation.updateMany({
+        where: { orderId: id, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+
+      // Dans la MÊME transaction que les rotations : une commande effacée sans
+      // ses rotations (ou l'inverse) est un état que rien ne rattrape.
+      await tx.order.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+
+      return { rotations: count, rendues: dehors.length };
     });
 
     await createAuditLog({
@@ -953,6 +985,8 @@ export class OrdersService {
         orderNumber: order.orderNumber,
         previousStatus: order.status,
         ...(rotations > 0 ? { rotationsSupprimees: rotations } : {}),
+        // Tracé à part : c'est un mouvement de parc, pas une simple suppression.
+        ...(rendues > 0 ? { rotationsRenduesAuStock: rendues } : {}),
       },
       ipAddress,
       userAgent,

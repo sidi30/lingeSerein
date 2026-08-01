@@ -603,21 +603,58 @@ export class RotationsService {
       // une reprise réclamée à l'ancienne date — le client recevait un rappel
       // pour du linge qu'il n'avait pas encore reçu.
       //
-      // Uniquement tant que la rotation est PLANIFIEE : une fois le linge parti,
-      // c'est la date RÉELLE de départ qui fait foi et la commande n'a plus voix
-      // au chapitre. Une reprise déjà enregistrée, elle, ne se rouvre jamais.
-      if (rotation.status === "PLANIFIEE" && order.status !== "DELIVERED") {
+      // La garde porte sur le FAIT PHYSIQUE (`sortieStockAt`), pas sur le statut.
+      // Écrite sur `status === "PLANIFIEE"`, elle laissait échapper précisément
+      // les rotations qui en avaient besoin : une livraison qui glisse fait
+      // passer la rotation EN_RETARD à son échéance théorique, et elle sortait
+      // alors DÉFINITIVEMENT du recalage comme du balayage nocturne — figée dans
+      // un état faux, avec une relance partie chez le client. Tant que le linge
+      // n'a pas quitté la réserve, rien n'est engagé et tout doit suivre.
+      const rienNEstParti = rotation.sortieStockAt === null;
+
+      if (rienNEstParti && order.status !== "DELIVERED") {
         const attendue = jourCalendaire(order.deliveryDate);
         const formuleAChange = rotation.formule !== formule;
+        const dateAChange = attendue.getTime() !== rotation.dateLivraison.getTime();
 
-        if (attendue.getTime() !== rotation.dateLivraison.getTime() || formuleAChange) {
+        if (dateAChange || formuleAChange || rotation.status !== "PLANIFIEE") {
           const dateReprisePrevue = jourCalendaire(
             computeDateReprise({ dateLivraison: attendue, formule }),
           );
 
+          // Rendre son état sain à une rotation qui n'aurait jamais dû basculer :
+          // sans la remise à null des deux horodatages, les gardes d'idempotence
+          // du worker (`reminderSentAt`, `overdueNotifiedAt`) feraient taire À
+          // JAMAIS le rappel J-1 de la NOUVELLE échéance.
+          const echeanceFuture =
+            dateReprisePrevue.getTime() >= jourCalendaire(new Date()).getTime();
+          const reparation =
+            rotation.status !== "PLANIFIEE" && echeanceFuture
+              ? {
+                  status: "PLANIFIEE" as const,
+                  facturableRemplacement: false,
+                  reminderSentAt: null,
+                  overdueNotifiedAt: null,
+                }
+              : {};
+
           rotation = await this.prisma.rotation.update({
             where: { id: rotation.id },
-            data: { dateLivraison: attendue, dateReprisePrevue, formule },
+            data: {
+              dateLivraison: attendue,
+              dateReprisePrevue,
+              formule,
+              // Le snapshot client suit lui aussi tant que rien n'est parti : il
+              // est posé à la CONFIRMATION, souvent des jours avant le départ, et
+              // c'est LUI que lisent le rappel J-1 et le récap gestionnaire. Une
+              // adresse corrigée entre-temps n'atteignait ni le client ni le
+              // livreur. Une fois le linge dehors, il se fige — on ne réécrit pas
+              // la destination d'une livraison déjà faite.
+              clientNom: order.user.companyName ?? order.user.name,
+              clientEmail: order.user.email,
+              clientAdresse: order.user.address,
+              ...reparation,
+            },
             include: { lignes: true },
           });
 
@@ -632,13 +669,19 @@ export class RotationsService {
               dateLivraison: toDateOnly(attendue),
               dateReprisePrevue: toDateOnly(dateReprisePrevue),
               ...(formuleAChange ? { formule } : {}),
+              ...(Object.keys(reparation).length > 0 ? { retourAPlanifiee: true } : {}),
             },
           });
         }
       }
 
       // ---- Livraison réelle : le linge sort du parc ----
-      if (order.status === "DELIVERED" && rotation.status === "PLANIFIEE") {
+      //
+      // Garde sur `sortieStockAt` là aussi : une rotation à tort passée EN_RETARD
+      // avant sa livraison doit pouvoir être livrée normalement. `updateStatus`
+      // accepte EN_RETARD → LIVREE ? Non — d'où le retour à PLANIFIEE opéré
+      // au-dessus, qui remet la rotation sur ses rails avant d'arriver ici.
+      if (order.status === "DELIVERED" && rienNEstParti && rotation.status === "PLANIFIEE") {
         // Date RÉELLE quand l'arrêt de tournée en donne une : c'est elle qui
         // fait courir le délai de détention. Sans arrêt (commande passée en
         // livrée à la main), la date prévue reste la meilleure approximation.
@@ -646,18 +689,26 @@ export class RotationsService {
           ? jourCalendaire(order.deliveryStop.completedAt)
           : null;
 
-        if (reel && reel.getTime() !== rotation.dateLivraison.getTime()) {
-          await this.prisma.rotation.update({
-            where: { id: rotation.id },
-            data: {
-              dateLivraison: reel,
-              dateReprisePrevue: jourCalendaire(
-                computeDateReprise({ dateLivraison: reel, formule }),
-              ),
-              ...(order.deliveryStop ? { deliveryStopId: order.deliveryStop.id } : {}),
-            },
-          });
-        }
+        // `formule` et `deliveryStopId` sont écrits INCONDITIONNELLEMENT, plus
+        // seulement quand la date réelle diffère : livrer le jour prévu — le cas
+        // nominal — laissait la colonne `formule` sur sa valeur d'origine (un
+        // client passé au Pack entre-temps affichait « limite 7 j » à côté d'une
+        // échéance à 14 j) et ne posait jamais le lien vers l'arrêt.
+        await this.prisma.rotation.update({
+          where: { id: rotation.id },
+          data: {
+            formule,
+            ...(reel && reel.getTime() !== rotation.dateLivraison.getTime()
+              ? {
+                  dateLivraison: reel,
+                  dateReprisePrevue: jourCalendaire(
+                    computeDateReprise({ dateLivraison: reel, formule }),
+                  ),
+                }
+              : {}),
+            ...(order.deliveryStop ? { deliveryStopId: order.deliveryStop.id } : {}),
+          },
+        });
 
         await this.updateStatus(
           rotation.id,
@@ -700,12 +751,15 @@ export class RotationsService {
         // Livrée mais rotation encore prévisionnelle : la sortie de stock et le
         // décompte de détention n'ont pas encore démarré.
         { status: "DELIVERED", rotation: { is: { status: "PLANIFIEE" } } },
-        // Rotation encore prévisionnelle : on la repasse à `syncFromOrder`, qui
-        // la recale si la date de livraison de la commande a bougé depuis. Le
-        // comparateur ne peut pas vivre ici — Prisma ne compare pas deux
-        // colonnes de tables différentes dans un `where` — et l'appel ne coûte
-        // rien quand tout concorde, il ne réécrit alors aucune ligne.
-        { rotation: { is: { status: "PLANIFIEE" } } },
+        // Rotation dont le linge n'est PAS parti : on la repasse à
+        // `syncFromOrder`, qui la recale si la date de livraison de la commande
+        // a bougé depuis. Le critère est `sortieStockAt`, pas le statut : une
+        // rotation à tort basculée EN_RETARD avant sa livraison sortait sinon
+        // de ce filet et restait figée dans un état faux pour toujours. Le
+        // comparateur de dates ne peut pas vivre ici — Prisma ne compare pas
+        // deux colonnes de tables différentes dans un `where` — et l'appel ne
+        // coûte rien quand tout concorde, il ne réécrit alors aucune ligne.
+        { rotation: { is: { sortieStockAt: null } } },
       ],
     };
 
@@ -850,6 +904,24 @@ export class RotationsService {
       throw new UnprocessableEntityError(
         "Une rotation annulée ne peut pas être reprise",
         "ROTATION_CANCELLED",
+      );
+    }
+
+    // On ne reprend pas un linge qui n'est jamais parti.
+    //
+    // C'était la SEULE des trois écritures de stock sans cette garde — `softDelete`
+    // et `updateStatus` l'ont toutes deux. Or une rotation née d'une commande
+    // reste PLANIFIEE, `sortieStockAt` à null, sans avoir incrémenté
+    // `inCirculation` ; `recordReprise` décrémentait quand même. Deux issues,
+    // aussi mauvaises l'une que l'autre : le CHECK en base rejette la
+    // transaction et l'admin lit un message sans rapport (« note hors 1-5 »),
+    // ou bien le compteur est suffisant grâce au linge D'AUTRES clients et on
+    // ponctionne le leur en créditant du sale qui n'a jamais bougé.
+    if (!rotation.sortieStockAt) {
+      throw new UnprocessableEntityError(
+        "Cette rotation n'a pas encore été livrée : son linge n'est pas sorti du parc. " +
+          "Marquez-la livrée avant d'enregistrer une reprise.",
+        "ROTATION_NOT_DELIVERED",
       );
     }
 
@@ -1070,6 +1142,14 @@ export class RotationsService {
         dateRepriseReelle: null,
         status: { in: ["PLANIFIEE", "LIVREE", "EN_RETARD"] },
         dateReprisePrevue: { lt: aujourdhui },
+        // Le linge doit être RÉELLEMENT parti. Sans cette garde, une rotation
+        // créée d'avance depuis une commande dont la livraison a glissé basculait
+        // EN_RETARD à son échéance théorique, puis devenait « remplacement
+        // facturable » à J+3 — pour du linge encore en réserve, et avec une
+        // relance envoyée au client (« votre linge n'a pas été repris »).
+        // Pire, ce basculement la faisait sortir du recalage automatique, qui ne
+        // reprend que les PLANIFIEE : elle restait figée dans un état faux.
+        sortieStockAt: { not: null },
       },
       select: { id: true, status: true, dateReprisePrevue: true, facturableRemplacement: true },
     });

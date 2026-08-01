@@ -312,26 +312,36 @@ export class StockItemsService {
 
     const corrections: { productSlug: string; avant: number; apres: number }[] = [];
 
-    for (const item of items) {
-      const cible = attendu.get(item.productSlug) ?? 0;
-      if (cible === item.inCirculation) continue;
-      corrections.push({ productSlug: item.productSlug, avant: item.inCirculation, apres: cible });
-      await this.prisma.stockItem.update({
-        where: { operatorId_productSlug: { operatorId, productSlug: item.productSlug } },
-        data: { inCirculation: cible },
-      });
-    }
+    // Une seule transaction : un parc à moitié recalé par une coupure serait
+    // pire que le parc faux d'origine — la moitié corrigée deviendrait
+    // indiscernable de la moitié restée fausse, et le retour de la fonction
+    // annoncerait des corrections qui n'ont pas été commises.
+    await this.prisma.$transaction(async (tx) => {
+      for (const item of items) {
+        const cible = attendu.get(item.productSlug) ?? 0;
+        if (cible === item.inCirculation) continue;
+        corrections.push({
+          productSlug: item.productSlug,
+          avant: item.inCirculation,
+          apres: cible,
+        });
+        await tx.stockItem.update({
+          where: { operatorId_productSlug: { operatorId, productSlug: item.productSlug } },
+          data: { inCirculation: cible },
+        });
+      }
 
-    // Un slug attendu sans ligne de stock : la rotation existe, l'inventaire non.
-    for (const [productSlug, cible] of attendu) {
-      if (cible === 0 || items.some((i) => i.productSlug === productSlug)) continue;
-      corrections.push({ productSlug, avant: 0, apres: cible });
-      await this.prisma.stockItem.upsert({
-        where: { operatorId_productSlug: { operatorId, productSlug } },
-        create: { operatorId, productSlug, inCirculation: cible },
-        update: { inCirculation: cible },
-      });
-    }
+      // Un slug attendu sans ligne de stock : la rotation existe, l'inventaire non.
+      for (const [productSlug, cible] of attendu) {
+        if (cible === 0 || items.some((i) => i.productSlug === productSlug)) continue;
+        corrections.push({ productSlug, avant: 0, apres: cible });
+        await tx.stockItem.upsert({
+          where: { operatorId_productSlug: { operatorId, productSlug } },
+          create: { operatorId, productSlug, inCirculation: cible },
+          update: { inCirculation: cible },
+        });
+      }
+    });
 
     return corrections;
   }
