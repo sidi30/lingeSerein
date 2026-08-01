@@ -163,6 +163,117 @@ export class DeliveriesService {
     };
   }
 
+  /**
+   * Retrouve, pour chaque client d'une tournée, la commande que l'arrêt honore.
+   *
+   * Rapprochement volontairement STRICT : même client, livraison prévue ce
+   * jour-là, commande vivante et pas encore rattachée à un arrêt. Deux
+   * candidates pour un même client ⇒ on n'en choisit AUCUNE. Deviner mènerait à
+   * clôturer la mauvaise commande, à sortir le mauvais linge du parc et à faire
+   * courir la mauvaise échéance de reprise — trois erreurs qu'aucun écran ne
+   * signalerait. Mieux vaut un arrêt sans commande, exactement comme aujourd'hui.
+   *
+   * `delivery_stops.order_id` est UNIQUE : une commande déjà servie par un arrêt
+   * ne peut pas être reprise par un second, la base le refuserait.
+   */
+  private async resoudreCommandes(
+    stops: CreateRoundInput["stops"],
+    dateTournee: Date | null | undefined,
+  ): Promise<Map<string, string>> {
+    const clientsSansCommande = stops.filter((s) => !s.orderId).map((s) => s.clientId);
+    if (clientsSansCommande.length === 0) return new Map();
+
+    // Ce rapprochement est un CONFORT ; enregistrer la tournée est le métier.
+    // Sans ce filet, une date absente ou une base momentanément indisponible
+    // faisait échouer la création de la tournée elle-même, ou pire, la
+    // validation d'un arrêt par le livreur — qui se retrouverait bloqué sur le
+    // terrain, linge déjà déposé. On renonce au rattachement, jamais à l'acte.
+    try {
+      if (!(dateTournee instanceof Date) || Number.isNaN(dateTournee.getTime())) {
+        return new Map();
+      }
+
+      // Journée canonique : `Order.deliveryDate` est une DATE nue (minuit UTC),
+      // `DeliveryRound.date` un instant. Comparer sans normaliser ne
+      // rapprocherait jamais rien dès qu'une tournée est créée en cours de
+      // journée.
+      const jour = new Date(
+        Date.UTC(dateTournee.getUTCFullYear(), dateTournee.getUTCMonth(), dateTournee.getUTCDate()),
+      );
+      const lendemain = new Date(jour.getTime() + 86_400_000);
+
+      const candidates = await this.prisma.order.findMany({
+        where: {
+          userId: { in: clientsSansCommande },
+          deletedAt: null,
+          status: { in: ["CONFIRMED", "IN_DELIVERY"] },
+          deliveryDate: { gte: jour, lt: lendemain },
+          deliveryStop: { is: null },
+        },
+        select: { id: true, userId: true },
+      });
+
+      const parClient = new Map<string, string>();
+      const ambigus = new Set<string>();
+
+      for (const commande of candidates) {
+        if (parClient.has(commande.userId)) {
+          ambigus.add(commande.userId);
+          continue;
+        }
+        parClient.set(commande.userId, commande.id);
+      }
+
+      for (const clientId of ambigus) {
+        parClient.delete(clientId);
+        console.warn(
+          `[deliveries] ${clientId} a plusieurs commandes le ${jour.toISOString().slice(0, 10)} : ` +
+            `aucune rattachée automatiquement à son arrêt.`,
+        );
+      }
+
+      return parClient;
+    } catch (err) {
+      const raison = err instanceof Error ? err.message : String(err);
+      console.error(`[deliveries] Rapprochement arrêt ↔ commande abandonné : ${raison}`);
+      return new Map();
+    }
+  }
+
+  /**
+   * Rattache la rotation d'une commande à l'arrêt qui va la livrer.
+   *
+   * `Rotation.deliveryStopId` avait quatre écrivains théoriques et aucun qui
+   * s'exécutait : la rotation naît à la CONFIRMATION de la commande, donc bien
+   * avant que la tournée existe, et le seul autre chemin ne posait le lien que
+   * si la date réelle différait de la date prévue — c'est-à-dire jamais dans le
+   * cas nominal. Résultat : `syncStockItemsFromStop` ne trouvait aucune rotation
+   * et le linge sale rapporté n'entrait jamais dans `dirtyPending`.
+   *
+   * **Ne lève jamais** : la tournée est déjà enregistrée quand on arrive ici.
+   */
+  private async lierRotationsAuxArrets(
+    stops: { id: string; orderId: string | null }[],
+  ): Promise<void> {
+    const avecCommande = stops.filter((s) => s.orderId);
+    if (avecCommande.length === 0) return;
+
+    try {
+      for (const stop of avecCommande) {
+        await this.prisma.rotation.updateMany({
+          // `deliveryStopId: null` : on ne réécrit jamais un lien déjà posé —
+          // une rotation livrée par un premier arrêt garde SA trace, même si la
+          // commande était par erreur reprise dans une seconde tournée.
+          where: { orderId: stop.orderId, deletedAt: null, deliveryStopId: null },
+          data: { deliveryStopId: stop.id },
+        });
+      }
+    } catch (err) {
+      const raison = err instanceof Error ? err.message : String(err);
+      console.error(`[deliveries] Rattachement rotation ↔ arrêt échoué : ${raison}`);
+    }
+  }
+
   async createRound(
     data: CreateRoundInput,
     operatorId: string,
@@ -170,6 +281,15 @@ export class DeliveriesService {
     ipAddress?: string,
     userAgent?: string,
   ) {
+    // L'arrêt DOIT porter la commande qu'il honore. L'écran, lui, monte la
+    // tournée à partir d'une liste de CLIENTS et n'envoie jamais `orderId` :
+    // `delivery_stops.order_id` est donc resté null en production, et toute la
+    // chaîne d'après tombait en silence — la commande ne passait jamais LIVRÉE
+    // quand le livreur validait son arrêt, la rotation restait prévisionnelle,
+    // le linge sorti n'était jamais décompté du parc, le sale repris jamais
+    // crédité. On le résout donc ici, à défaut de le recevoir.
+    const resolus = await this.resoudreCommandes(data.stops, new Date(data.date));
+
     const round = await this.prisma.deliveryRound.create({
       data: {
         operatorId,
@@ -179,7 +299,7 @@ export class DeliveriesService {
         notes: data.notes,
         stops: {
           create: data.stops.map((stop) => ({
-            orderId: stop.orderId,
+            orderId: stop.orderId ?? resolus.get(stop.clientId) ?? null,
             clientId: stop.clientId,
             driverId: data.driverId,
             stopOrder: stop.stopOrder,
@@ -199,13 +319,27 @@ export class DeliveriesService {
       },
     });
 
+    // Rotation ↔ arrêt : le lien manquait, et c'est lui que cherche
+    // `syncStockItemsFromStop` pour créditer le linge sale rapporté. Il n'était
+    // posé nulle part en pratique — le sale ne rentrait donc jamais au parc.
+    // Best effort : une tournée correctement enregistrée ne doit pas échouer
+    // pour un lien de confort, et le cron de rattrapage repasse derrière.
+    await this.lierRotationsAuxArrets(round.stops);
+
     await createAuditLog({
       prisma: this.prisma,
       userId: adminId,
       action: "CREATE",
       entity: "DeliveryRound",
       entityId: round.id,
-      changes: { date: data.date, stopsCount: data.stops.length, driverId: data.driverId },
+      changes: {
+        date: data.date,
+        stopsCount: data.stops.length,
+        driverId: data.driverId,
+        // Tracé : c'est la seule façon de savoir, après coup, quels arrêts ont
+        // été rapprochés d'une commande automatiquement.
+        commandesRattachees: round.stops.filter((s) => s.orderId).length,
+      },
       ipAddress,
       userAgent,
     });
@@ -651,7 +785,33 @@ export class DeliveriesService {
 
     // Un arrêt validé EST la livraison : la commande la reflète, et sa rotation
     // sort alors le linge du parc avec la bonne date de départ.
-    await this.cloturerCommandeLivree(stop.orderId, driverId);
+    //
+    // Filet pour les tournées montées AVANT que le rapprochement existe : leurs
+    // arrêts n'ont pas de commande, et sans cette résolution de dernière minute
+    // la validation du livreur resterait sans effet sur la commande, la rotation
+    // et le parc. Même rapprochement strict qu'à la création.
+    let orderId = stop.orderId;
+    if (!orderId) {
+      const resolus = await this.resoudreCommandes(
+        [{ clientId: stop.clientId, stopOrder: 0, setsToDeliver: 0 }],
+        stop.round?.date,
+      );
+      orderId = resolus.get(stop.clientId) ?? null;
+
+      if (orderId) {
+        try {
+          await this.prisma.deliveryStop.update({ where: { id: stopId }, data: { orderId } });
+          await this.lierRotationsAuxArrets([{ id: stopId, orderId }]);
+        } catch (err) {
+          // L'arrêt est déjà validé en base : on garde la commande trouvée pour
+          // la clôturer juste après, même si le lien n'a pas pu être écrit.
+          const raison = err instanceof Error ? err.message : String(err);
+          console.error(`[deliveries] Rattachement tardif de ${orderId} échoué : ${raison}`);
+        }
+      }
+    }
+
+    await this.cloturerCommandeLivree(orderId, driverId);
 
     return updated;
   }
