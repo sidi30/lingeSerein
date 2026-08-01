@@ -72,6 +72,17 @@ export const KEY = {
   operatorBl: "operator-bl",
   deliveries: "deliveries",
   rotations: "rotations",
+  /**
+   * Propositions de passage groupé, panneau du Planning.
+   *
+   * La seule famille du projet qui était utilisée SANS être déclarée ici : elle
+   * n'appartenait donc à aucun domaine et n'était jamais invalidée. Annuler une
+   * tournée supprime bien les propositions côté serveur, mais le panneau —
+   * affiché sur le MÊME écran, juste au-dessus du calendrier — continuait de
+   * lister les clients intéressés. L'exploitant rappelait un client pour une
+   * offre qui n'existait plus.
+   */
+  passages: "passages",
   dashboard: "dashboard",
   notifications: "notifications",
   deletionPreview: "deletion-preview",
@@ -138,6 +149,7 @@ export const AFFECTED: Record<MutationScope, readonly string[]> = {
     KEY.client,
     KEY.deliveries,
     KEY.rotations,
+    KEY.passages,
     KEY.stock,
     KEY.dashboard,
     KEY.notifications,
@@ -216,6 +228,7 @@ export const AFFECTED: Record<MutationScope, readonly string[]> = {
   delivery: [
     KEY.deliveries,
     KEY.rotations,
+    KEY.passages,
     KEY.orders,
     KEY.order,
     KEY.ordersBadge,

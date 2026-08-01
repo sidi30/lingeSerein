@@ -164,6 +164,7 @@ function StockByArticle() {
   }
 
   const alertes = items.filter(isLowStock).length;
+  const surEngagement = items.some((i) => i.disponible < 0);
 
   return (
     <div className="space-y-4">
@@ -172,11 +173,91 @@ function StockByArticle() {
           {alertes} référence{alertes > 1 ? "s" : ""} sous le seuil d&apos;alerte.
         </div>
       )}
+      {/* Le parc sur-engagé était signalé sans aucun moyen d'agir : l'écran
+          conseillait de « vérifier les reprises non enregistrées » et le seul
+          champ modifiable était le total possédé. Or `inCirculation` est un
+          compteur incrémental qu'un mouvement manqué fausse définitivement —
+          c'est arrivé en production. Le recalage se lit dans les rotations
+          elles-mêmes, il n'y a donc aucune raison de le laisser au curl. */}
+      <ReconcileStock surEngagement={surEngagement} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((item) => (
           <ArticleStockCard key={item.productSlug} item={item} />
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Écart corrigé par la réconciliation, tel que l'API le renvoie. */
+interface CorrectionStock {
+  productSlug: string;
+  avant: number;
+  apres: number;
+}
+
+/**
+ * Recale « en circulation » sur ce que disent les rotations.
+ *
+ * Discret tant que le parc est cohérent — c'est un outil de réparation, pas une
+ * action courante : on ne pousse pas l'exploitant à recalculer son stock tous
+ * les matins. Il devient visible dès qu'une référence est sur-engagée, c'est-à-
+ * dire au moment précis où il sert.
+ */
+function ReconcileStock({ surEngagement }: { surEngagement: boolean }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [corrections, setCorrections] = useState<CorrectionStock[] | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: () => api.post<{ corrections: CorrectionStock[] }>("/stock/reconcile", {}),
+    onSuccess: (data) => {
+      const liste = data?.corrections ?? [];
+      setCorrections(liste);
+      toast(
+        liste.length === 0
+          ? "Parc déjà cohérent — aucun écart"
+          : `${liste.length} référence(s) recalée(s)`,
+      );
+      void invalidateAfter(queryClient, "stock", "rotation");
+    },
+    // Le message du serveur porte la règle exacte, on ne le remplace pas.
+    onError: (err: unknown) =>
+      toast(err instanceof Error ? err.message : "Recalage impossible", "error"),
+  });
+
+  return (
+    <div
+      className={`rounded-xl border px-4 py-3 ${
+        surEngagement ? "border-danger-500/30 bg-danger-50" : "border-gray-200 bg-white"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className={`text-sm ${surEngagement ? "text-danger-700" : "text-gray-500"}`}>
+          {surEngagement
+            ? "Une référence au moins est sur-engagée : plus de linge dehors que de linge possédé."
+            : "Le linge en circulation se recalcule depuis les rotations en cours."}
+        </p>
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={mutation.isPending}
+          onClick={() => mutation.mutate()}
+        >
+          Recaler le linge en circulation
+        </Button>
+      </div>
+
+      {corrections !== null && corrections.length > 0 && (
+        <ul className="mt-3 space-y-1 text-xs text-gray-600">
+          {corrections.map((c) => (
+            <li key={c.productSlug} className="tabular-nums">
+              <span className="font-medium text-gray-800">{c.productSlug}</span> : {c.avant} →{" "}
+              {c.apres} en circulation
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

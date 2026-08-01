@@ -460,12 +460,51 @@ export class QuotesService {
       );
     }
 
+    // Déjà converti : on RENVOIE la commande existante au lieu d'en créer une
+    // seconde. Sans cette garde, un double-clic sur « Convertir » — ou une
+    // reconversion après un timeout réseau — produisait deux commandes, et
+    // l'écriture du lien écrasait la première, qui devenait orpheline de son
+    // devis. La contrainte unique sur `converted_to_order_id` ne protège de
+    // rien ici : la seconde commande a un identifiant différent.
+    if (quote.convertedToOrderId) {
+      const existante = await this.prisma.order.findFirst({
+        where: { id: quote.convertedToOrderId, deletedAt: null },
+      });
+      if (existante) {
+        // MÊME forme de retour que la conversion réelle : l'appelant lit
+        // `orderId` pour naviguer vers la commande, et un second clic doit
+        // l'emmener exactement au même endroit que le premier.
+        return {
+          orderId: existante.id,
+          orderNumber: existante.orderNumber,
+          dejaConverti: true,
+        };
+      }
+      // Commande supprimée depuis : la conversion peut légitimement recommencer.
+    }
+
     if (!quote.userId) {
       throw new UnprocessableEntityError(
         "Ce devis doit être lié à un compte client avant conversion",
         "CLIENT_REQUIRED",
       );
     }
+
+    // Le client doit être VIVANT : rien ne le vérifiait, et une commande pouvait
+    // naître au nom d'un compte supprimé ou désactivé — le chemin admin de
+    // création de commande, lui, fait ce contrôle depuis toujours.
+    const client = await this.prisma.user.findFirst({
+      where: { id: quote.userId, operatorId, deletedAt: null, isActive: true },
+      select: { id: true },
+    });
+
+    if (!client) {
+      throw new UnprocessableEntityError(
+        "Le client de ce devis n'existe plus ou son compte est désactivé",
+        "CLIENT_UNAVAILABLE",
+      );
+    }
+
     // Capturé ici : le rétrécissement de type se perd dans la transaction plus
     // bas, et c'est ce qui avait justifié un `!` à la création de la commande.
     const clientUserId = quote.userId;
@@ -549,10 +588,21 @@ export class QuotesService {
         },
       });
 
-      await tx.quote.update({
-        where: { id },
+      // `updateMany` avec `convertedToOrderId: null` dans le `where` : c'est la
+      // BASE qui tranche la course entre deux conversions simultanées. Un
+      // `update` inconditionnel écrasait le lien posé par l'autre, et la
+      // première commande devenait orpheline de son devis sans que rien ne le
+      // signale. `count === 0` ⇒ course perdue, on annule tout.
+      const { count } = await tx.quote.updateMany({
+        where: { id, convertedToOrderId: null },
         data: { convertedToOrderId: createdOrder.id },
       });
+
+      if (count === 0) {
+        throw new ConflictError(
+          "Ce devis vient d'être converti par une autre requête — rechargez la fiche.",
+        );
+      }
 
       return { order: createdOrder };
     });

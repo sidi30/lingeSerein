@@ -281,7 +281,10 @@ function fakePrismaConversion(devis: Record<string, unknown>) {
         return Promise.resolve({ id: "order-neuf", ...args.data });
       },
     },
-    quote: { update: () => Promise.resolve({}) },
+    // `updateMany` et non `update` : la conversion écrit le lien sous condition
+    // `convertedToOrderId: null`, pour que la BASE tranche une course entre
+    // deux conversions simultanées. `count: 1` = course gagnée.
+    quote: { updateMany: () => Promise.resolve({ count: 1 }) },
   };
 
   return {
@@ -293,10 +296,15 @@ function fakePrismaConversion(devis: Record<string, unknown>) {
             id: QUOTE_ID,
             status: "ACCEPTE",
             userId: "client-1",
+            convertedToOrderId: null,
             lignes: [{ id: LINE_ID, designation: "Kit Bain", qty: 2, unitCents: 750 }],
             ...devis,
           }),
       },
+      // Le client doit être vivant : la conversion le vérifie désormais avant de
+      // créer une commande à son nom.
+      user: { findFirst: () => Promise.resolve({ id: "client-1" }) },
+      order: { findFirst: () => Promise.resolve(null) },
       product: {
         findMany: () => Promise.resolve([{ id: PRODUCT_ID, priceCents: 750 }]),
       },

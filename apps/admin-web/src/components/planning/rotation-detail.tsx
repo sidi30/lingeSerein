@@ -285,12 +285,33 @@ export function RotationDetail({ rotation, onClose }: RotationDetailProps) {
               />
             </div>
 
+            {/* Une reprise à ZÉRO est un constat parfaitement légitime : le
+                client a tout perdu, ou est injoignable. Le serveur sait le
+                traiter — il porte l'écart en perte — et le modèle le documente.
+                Le bouton était pourtant désactivé, ce qui ne laissait qu'un
+                mauvais choix : déclarer revenu ce qui ne l'est pas, ou annuler
+                la rotation, ce qui REND le linge à la réserve comme s'il n'était
+                jamais sorti — l'inverse exact d'une perte. */}
+            {saisieTotale === 0 && (
+              <p className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800">
+                Aucune pièce reprise : les {articlesDehors} article
+                {articlesDehors > 1 ? "s" : ""} encore dus seront portés en <strong>perte</strong>{" "}
+                et sortiront définitivement du parc. Si le linge est simplement en retard, fermez
+                plutôt cette fiche.
+              </p>
+            )}
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="secondary" type="button" onClick={() => setRepriseOpen(false)}>
                 Annuler
               </Button>
-              <Button type="submit" loading={saveReprise.isPending} disabled={saisieTotale === 0}>
-                Valider la reprise ({saisieTotale} pièce{saisieTotale > 1 ? "s" : ""})
+              <Button
+                type="submit"
+                loading={saveReprise.isPending}
+                variant={saisieTotale === 0 ? "danger" : "primary"}
+              >
+                {saisieTotale === 0
+                  ? `Constater la perte (${articlesDehors} article${articlesDehors > 1 ? "s" : ""})`
+                  : `Valider la reprise (${saisieTotale} pièce${saisieTotale > 1 ? "s" : ""})`}
               </Button>
             </div>
           </form>
