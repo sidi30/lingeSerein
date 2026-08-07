@@ -40,6 +40,10 @@ jobs:
         run: npm run build --workspace=packages/ui
 
       - name: Build vitrine
+        env:
+          # ID de mesure GA4 — public par nature (inliné dans le HTML servi).
+          # Ici et pas dans layout.tsx : les builds locaux restent sans GA.
+          NEXT_PUBLIC_GA_ID: G-5BQM909P9Y
         run: npm run build --workspace=apps/vitrine
 
       # rsync explicite (l'action ssh-deploy avalait les erreurs : run "success"
